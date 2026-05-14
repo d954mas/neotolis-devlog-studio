@@ -95,13 +95,19 @@ def cmd_compose(args):
     if args.beat_id not in edit.beats:
         raise SystemExit(f"Beat {args.beat_id!r} not in edit {edit.name!r}. "
                          f"Available: {list(edit.beats)}")
-    from devlog.render import compose
     design = _resize_design(edit.design, args.width)
     beat = edit.beats[args.beat_id]
     suffix = _render_suffix(args)
     out_path = f"data/finalize/{args.beat_id}{suffix}.mp4"
-    print(f"[devlog] resolution {design.resolution}  fps {design.fps}{' DRAFT' if args.draft else ''}{' GPU' if args.gpu else ''}")
-    compose(beat, design, out_path, draft=args.draft, gpu=args.gpu, no_cache=args.no_cache)
+    engine = getattr(args, "engine", "ffmpeg")
+    print(f"[devlog] resolution {design.resolution}  fps {design.fps}"
+          f"{' DRAFT' if args.draft else ''}{' GPU' if args.gpu else ''}  engine={engine}")
+    if engine == "moviepy":
+        from devlog.render import compose
+        compose(beat, design, out_path, draft=args.draft, gpu=args.gpu, no_cache=args.no_cache)
+    else:
+        from devlog.render.compose_ffmpeg import compose_ffmpeg
+        compose_ffmpeg(beat, design, out_path, draft=args.draft, gpu=args.gpu, no_cache=args.no_cache)
 
 
 def cmd_render(args):
@@ -109,24 +115,28 @@ def cmd_render(args):
 
     --parallel N renders N beats concurrently via multiprocessing.
     --draft uses ultrafast x264 preset (4-6x faster, slightly larger files).
+    --engine selects ffmpeg (default, fast) or moviepy (legacy fallback).
     """
     edit, root = _load_edit(args.edit)
     _project_chdir(root)
     design = _resize_design(edit.design, args.width)
     suffix = _render_suffix(args)
+    engine = getattr(args, "engine", "ffmpeg")
     print(f"[devlog] resolution {design.resolution}  fps {design.fps}"
           f"{' DRAFT' if args.draft else ''}"
-          f"{' parallel=' + str(args.parallel) if args.parallel > 1 else ''}")
+          f"{' parallel=' + str(args.parallel) if args.parallel > 1 else ''}"
+          f"  engine={engine}")
     targets = [args.beat] if args.beat else edit.order
 
     if args.parallel > 1 and len(targets) > 1:
-        _render_parallel(edit, design, targets, suffix, args.draft, args.gpu, args.no_cache, args.parallel)
+        _render_parallel(edit, design, targets, suffix, args.draft, args.gpu,
+                         args.no_cache, args.parallel, engine)
     else:
-        from devlog.render import compose
         for bid in targets:
             out_path = f"data/finalize/{bid}{suffix}.mp4"
             print(f"\n[devlog] rendering {bid} -> {out_path}")
-            compose(edit.beats[bid], design, out_path, draft=args.draft, gpu=args.gpu, no_cache=args.no_cache)
+            _render_one(edit.beats[bid], design, out_path, args.draft, args.gpu,
+                        args.no_cache, engine)
 
     if not args.no_concat and not args.beat:
         _concat(edit, root, suffix=suffix)
@@ -144,26 +154,30 @@ def _render_suffix(args) -> str:
     return "".join(parts)
 
 
-def _render_one(beat, design, out_path: str, draft: bool, gpu: bool, no_cache: bool):
-    """Worker for ProcessPoolExecutor — single beat render in subprocess.
-
-    Top-level function (not closure) so it's picklable on Windows spawn().
-    """
-    from devlog.render import compose
-    compose(beat, design, out_path, draft=draft, gpu=gpu, no_cache=no_cache)
+def _render_one(beat, design, out_path: str, draft: bool, gpu: bool,
+                no_cache: bool, engine: str = "ffmpeg"):
+    """Single beat render — engine-aware. Top-level (picklable for Windows spawn)."""
+    if engine == "moviepy":
+        from devlog.render import compose
+        compose(beat, design, out_path, draft=draft, gpu=gpu, no_cache=no_cache)
+    else:
+        from devlog.render.compose_ffmpeg import compose_ffmpeg
+        compose_ffmpeg(beat, design, out_path, draft=draft, gpu=gpu, no_cache=no_cache)
     return out_path
 
 
 def _render_parallel(edit, design, targets: list[str], suffix: str,
-                     draft: bool, gpu: bool, no_cache: bool, n_workers: int):
+                     draft: bool, gpu: bool, no_cache: bool, n_workers: int,
+                     engine: str = "ffmpeg"):
     """Run beat renders concurrently. Each worker is its own Python process."""
     from concurrent.futures import ProcessPoolExecutor, as_completed
-    print(f"[devlog] launching {n_workers} workers for {len(targets)} beats")
+    print(f"[devlog] launching {n_workers} workers for {len(targets)} beats (engine={engine})")
     with ProcessPoolExecutor(max_workers=n_workers) as pool:
         futures = {}
         for bid in targets:
             out_path = f"data/finalize/{bid}{suffix}.mp4"
-            fut = pool.submit(_render_one, edit.beats[bid], design, out_path, draft, gpu, no_cache)
+            fut = pool.submit(_render_one, edit.beats[bid], design, out_path,
+                              draft, gpu, no_cache, engine)
             futures[fut] = bid
         for fut in as_completed(futures):
             bid = futures[fut]
@@ -314,6 +328,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_compose.add_argument("--draft", action="store_true", help=draft_help)
     p_compose.add_argument("--gpu", action="store_true", help=gpu_help)
     p_compose.add_argument("--no-cache", action="store_true", help=nocache_help)
+    p_compose.add_argument("--engine", choices=["ffmpeg", "moviepy"], default="ffmpeg",
+                            help="Render engine: ffmpeg (default, fast) or moviepy (legacy)")
     p_compose.set_defaults(func=cmd_compose)
 
     p_render = sub.add_parser("render", help="Render all beats and concat")
@@ -325,6 +341,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_render.add_argument("--gpu", action="store_true", help=gpu_help)
     p_render.add_argument("--no-cache", action="store_true", help=nocache_help)
     p_render.add_argument("--parallel", "-j", type=int, default=1, help=parallel_help)
+    p_render.add_argument("--engine", choices=["ffmpeg", "moviepy"], default="ffmpeg",
+                           help="Render engine: ffmpeg (default, fast) or moviepy (legacy)")
     p_render.set_defaults(func=cmd_render)
 
     p_concat = sub.add_parser("concat", help="Concat existing rendered beats into edit.output")
