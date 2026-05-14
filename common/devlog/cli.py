@@ -219,11 +219,28 @@ def _concat(edit, root: Path, suffix: str = "_video_1080p"):
     if suffix != "_video_1080p":
         out_path = Path(out)
         out = str(out_path.with_stem(out_path.stem + suffix))
-    print(f"[devlog] concat manifest: {manifest} ({len(lines)} beats)")
+    # Demuxer concat duplicates the audio stream timestamps when our
+    # ffmpeg-engine-rendered beats have non-monotonic DTS. Use filter-graph
+    # concat which decodes + remuxes cleanly. Re-encodes both streams,
+    # but at CRF 18 it's ~30s extra for a 4-min video.
+    n = len(lines)
+    print(f"[devlog] concat manifest: {manifest} ({n} beats, filter-graph concat)")
     print(f"[devlog] writing {out}...")
+    inputs: list[str] = []
+    for line in lines:
+        # line is `file 'absolute_path'` — extract the path
+        src = line[5:].strip("'\"")
+        inputs += ["-i", src]
+    concat_pairs = "".join(f"[{i}:v:0][{i}:a:0]" for i in range(n))
+    filter_complex = f"{concat_pairs}concat=n={n}:v=1:a=1[v][a]"
     subprocess.run([
-        "ffmpeg", "-y", "-f", "concat", "-safe", "0",
-        "-i", str(manifest), "-c", "copy", out,
+        "ffmpeg", "-y",
+        *inputs,
+        "-filter_complex", filter_complex,
+        "-map", "[v]", "-map", "[a]",
+        "-c:v", "libx264", "-crf", "18", "-preset", "medium", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "192k",
+        out,
     ], check=True)
     print(f"[devlog] done -> {out}")
 
