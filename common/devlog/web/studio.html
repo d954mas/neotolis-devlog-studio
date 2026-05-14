@@ -1,0 +1,693 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Devlog Studio</title>
+<style>
+  :root {
+    --paper: #f2ede0;
+    --ink: #2a2520;
+    --ink-dim: #5a5046;
+    --accent: #c0392b;
+    --yellow: #e8b647;
+    --green: #6b8e4e;
+    --blue: #4a7ba8;
+    --purple: #8e4e8a;
+    --line: #d8d0bd;
+    --bg-panel: #faf6ec;
+    --bg-vo: #fffaef;
+    --highlight: rgba(232,182,71,0.65);
+    --highlight-past: rgba(180,170,150,0.35);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--paper); color: var(--ink);
+    font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; line-height: 1.5;
+    height: 100vh; overflow: hidden; }
+  body { display: grid; grid-template-rows: auto 1fr; }
+
+  /* HEADER */
+  header.top { padding: 10px 20px; border-bottom: 1px solid var(--line);
+    display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; font-weight: 700; }
+  header h1 .accent { color: var(--accent); }
+  header .stat { font-size: 12px; color: var(--ink-dim); }
+  header .stat b { color: var(--ink); }
+  header .tabs { display: flex; gap: 0; margin-left: auto; }
+  header .tab { padding: 6px 14px; cursor: pointer; font-size: 13px;
+    border: 1px solid var(--line); border-radius: 4px; background: var(--bg-panel);
+    color: var(--ink-dim); }
+  header .tab.active { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  header .api { font-size: 11px; color: var(--ink-dim); }
+  header .api.ok b { color: var(--green); }
+  header .api.bad b { color: var(--accent); }
+
+  /* MAIN GRID */
+  main { display: grid; grid-template-columns: 220px 1fr; overflow: hidden; }
+
+  /* SIDEBAR — beat list */
+  aside.beats { background: var(--bg-panel); border-right: 1px solid var(--line);
+    overflow-y: auto; padding: 8px; font-size: 12px; }
+  .beat-item { padding: 7px 9px; border-radius: 4px; cursor: pointer; margin-bottom: 3px;
+    display: flex; gap: 6px; align-items: center; border: 1px solid transparent; }
+  .beat-item:hover { background: var(--paper); }
+  .beat-item.active { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  .beat-item .mark { width: 12px; height: 12px; border-radius: 50%;
+    border: 2px solid var(--line); flex-shrink: 0; }
+  .beat-item[data-recorded="true"] .mark { background: var(--green); border-color: var(--green); }
+  .beat-item[data-rendered="true"] .mark::after { content: ""; display: block;
+    width: 4px; height: 4px; background: var(--yellow); border-radius: 50%;
+    margin: 2px auto; }
+  .beat-item .id { color: var(--ink-dim); font-size: 11px; min-width: 32px; }
+  .beat-item.active .id { color: rgba(255,255,255,0.5); }
+  .beat-item .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .beat-item .face { font-size: 9px; padding: 1px 5px; border-radius: 3px;
+    background: var(--paper); color: var(--ink-dim); }
+  .beat-item.active .face { background: rgba(255,255,255,0.15); color: rgba(255,255,255,0.7); }
+  .beats h3 { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--ink-dim); padding: 8px 6px 4px; margin: 0; }
+
+  /* CONTENT pane */
+  section.pane { overflow-y: auto; padding: 16px 24px; }
+  .panel-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px;
+    padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+  .panel-head .title { font-size: 22px; font-weight: 700; flex: 1; }
+  .panel-head .face { font-size: 11px; padding: 2px 10px; border-radius: 10px;
+    background: var(--yellow); color: var(--ink); font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.04em; }
+
+  /* TAB CONTENT — script */
+  .vo-text { font-size: 24px; line-height: 1.55; font-weight: 500; max-width: 800px;
+    color: var(--ink); margin-bottom: 24px; }
+  .vo-text .word.upcoming { color: var(--ink-dim); }
+  .vo-text .word.active { background: var(--highlight); color: var(--ink);
+    font-weight: 700; padding: 2px 0; border-radius: 3px;
+    box-shadow: 0 2px 0 var(--yellow); }
+  .vo-text .word.past { color: var(--ink-dim); }
+  .stage-note { max-width: 800px; margin: 0 0 16px; font-size: 14px;
+    padding: 12px 18px; background: #fff8e0; border: 2px solid var(--yellow);
+    border-radius: 8px; }
+  .stage-note::before { content: "🎙 "; color: var(--accent); font-weight: 700; }
+
+  /* TAB CONTENT — structure */
+  .structure { max-width: 1000px; }
+  .chunk-row { display: grid; grid-template-columns: 32px 60px 80px 1fr 1fr 100px;
+    gap: 8px; align-items: center; padding: 6px 8px; border-radius: 4px;
+    font-size: 13px; border: 1px solid transparent; }
+  .chunk-row.head { background: var(--bg-panel); font-size: 11px;
+    text-transform: uppercase; color: var(--ink-dim); letter-spacing: 0.05em; }
+  .chunk-row:not(.head):hover { background: var(--paper); }
+  .chunk-row .kind { font-size: 10px; padding: 1px 6px; border-radius: 3px;
+    background: var(--bg-panel); color: var(--ink-dim); display: inline-block; }
+  .chunk-row .kind.plate { background: rgba(232,182,71,0.2); color: #8a6a1a; }
+  .chunk-row .kind.overlay { background: rgba(74,123,168,0.2); color: #2a5a8a; }
+  .chunk-row .kind.image { background: rgba(107,142,78,0.2); color: #4a6e2e; }
+  .chunk-row .kind.video { background: rgba(192,57,43,0.2); color: #8a2a1a; }
+  .chunk-row .text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+  .chunk-row .scene { color: var(--ink-dim); font-size: 11px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .chunk-row .timing { font-variant-numeric: tabular-nums; color: var(--ink-dim); font-size: 11px; }
+
+  /* TAB CONTENT — record */
+  .record-area { display: grid; grid-template-columns: 1fr 320px; gap: 24px; }
+  .record-main { }
+  .controls { padding: 16px 0; display: flex; gap: 16px; align-items: center;
+    border-top: 1px solid var(--line); margin-top: 16px; }
+  .btn { padding: 10px 20px; border-radius: 6px; border: 1px solid var(--ink);
+    background: var(--ink); color: var(--paper); font-size: 14px; font-weight: 700;
+    cursor: pointer; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn.record { background: var(--accent); border-color: var(--accent); }
+  .btn.record.recording { background: var(--green); border-color: var(--green); }
+  .btn.secondary { background: var(--paper); color: var(--ink); }
+  .timer { font-variant-numeric: tabular-nums; font-size: 20px; font-weight: 700;
+    color: var(--ink); }
+  .meter { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ink-dim); }
+  .meter-bar { width: 80px; height: 6px; background: var(--paper); border-radius: 3px;
+    overflow: hidden; }
+  .meter-bar .fill { height: 100%; background: var(--green); width: 0;
+    transition: width 0.06s linear; }
+  .meter-bar .fill.peak { background: var(--accent); }
+
+  .takes { padding: 0; }
+  .takes h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--ink-dim); margin: 0 0 8px; }
+  .take { padding: 8px 10px; border-radius: 4px; background: var(--paper);
+    margin-bottom: 6px; font-size: 12px; border: 1px solid var(--line); }
+  .take .name { font-weight: 700; word-break: break-all; font-size: 11px; }
+  .take .meta { color: var(--ink-dim); font-size: 10px; margin-top: 2px; }
+  .take audio { width: 100%; margin-top: 6px; height: 30px; }
+  .empty { color: var(--ink-dim); font-style: italic; font-size: 13px;
+    text-align: center; padding: 16px; }
+
+  /* TAB CONTENT — review feedback */
+  .review { max-width: 900px; }
+  .review .verdict { padding: 14px 18px; border-radius: 6px; margin-bottom: 12px;
+    font-size: 14px; }
+  .review .verdict.ship { background: rgba(107,142,78,0.15); border-left: 4px solid var(--green); }
+  .review .verdict.rerecord { background: rgba(192,57,43,0.1); border-left: 4px solid var(--accent); }
+  .review .verdict.rerender { background: rgba(232,182,71,0.15); border-left: 4px solid var(--yellow); }
+  .review h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--ink-dim); margin: 18px 0 8px; }
+  .review .source { font-size: 11px; color: var(--ink-dim); }
+  .suggestion { padding: 10px 14px; border-radius: 4px; background: var(--bg-panel);
+    margin-bottom: 6px; font-size: 13px; }
+  .suggestion .tag { font-size: 10px; padding: 1px 6px; border-radius: 3px;
+    text-transform: uppercase; letter-spacing: 0.04em; margin-right: 6px; }
+  .suggestion .tag.crit { background: var(--accent); color: white; }
+  .suggestion .tag.high { background: var(--yellow); color: var(--ink); }
+  .suggestion .tag.med { background: var(--blue); color: white; }
+  .suggestion .tag.low { background: var(--paper); color: var(--ink-dim); }
+  .suggestion .tag.mech { background: var(--green); color: white; }
+  .suggestion .tag.rerecord { background: var(--purple); color: white; }
+  .suggestion .tag.redesign { background: var(--ink); color: white; }
+  .suggestion .how { color: var(--ink-dim); margin-top: 4px; font-size: 12px; }
+  .review pre { background: var(--bg-panel); padding: 12px; border-radius: 4px;
+    overflow-x: auto; font-size: 12px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <h1><span class="accent">·</span> Devlog Studio <span id="edit-name" class="stat">…</span></h1>
+  <span class="stat"><b id="beat-count">0</b> beats</span>
+  <span class="stat" id="design-info"></span>
+  <div class="tabs">
+    <div class="tab active" data-tab="script">Script</div>
+    <div class="tab" data-tab="structure">Structure</div>
+    <div class="tab" data-tab="record">Record</div>
+    <div class="tab" data-tab="review">Review</div>
+  </div>
+  <span class="api" id="api-status">API: <b>checking…</b></span>
+</header>
+
+<main>
+
+  <aside class="beats" id="beat-list"></aside>
+
+  <section class="pane">
+    <div class="panel-head">
+      <span class="title" id="beat-title">Select a beat</span>
+      <span class="face" id="beat-face"></span>
+    </div>
+
+    <!-- TAB: Script -->
+    <div class="tab-content" data-tab="script" style="display: block">
+      <div class="stage-note" id="stage-note" style="display: none"></div>
+      <div class="vo-text" id="vo-text">Pick a beat from the left.</div>
+    </div>
+
+    <!-- TAB: Structure -->
+    <div class="tab-content" data-tab="structure" style="display: none">
+      <div class="structure">
+        <div class="chunk-row head">
+          <span>#</span>
+          <span>Words</span>
+          <span>Kind</span>
+          <span>Text</span>
+          <span>Scene</span>
+          <span>Timing</span>
+        </div>
+        <div id="chunk-list"></div>
+      </div>
+    </div>
+
+    <!-- TAB: Record -->
+    <div class="tab-content" data-tab="record" style="display: none">
+      <div class="record-area">
+        <div class="record-main">
+          <div class="stage-note" id="stage-note-rec" style="display: none"></div>
+          <div class="vo-text" id="vo-karaoke">…</div>
+          <div class="controls">
+            <button class="btn record" id="record-btn" disabled>● Record</button>
+            <button class="btn secondary" id="play-last-btn" disabled>▶ Play last</button>
+            <span class="timer" id="timer">00:00</span>
+            <span style="flex:1"></span>
+            <div class="meter">
+              RMS <div class="meter-bar"><div class="fill" id="meter-rms"></div></div>
+              <span id="meter-rms-val">—</span>
+            </div>
+            <div class="meter">
+              Peak <div class="meter-bar"><div class="fill" id="meter-peak"></div></div>
+              <span id="meter-peak-val">—</span>
+            </div>
+            <span class="stat" id="mic-status">no mic</span>
+          </div>
+        </div>
+        <div class="takes" id="takes-panel">
+          <h3>Takes for this beat</h3>
+          <div id="takes-list">
+            <div class="empty">No beat selected</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: Review -->
+    <div class="tab-content" data-tab="review" style="display: none">
+      <div class="review" id="review-content">
+        <div class="empty">No feedback yet for this beat. Run <code>video-reviewer</code> or <code>vo-reviewer</code> to populate.</div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+// ───────────────────────────────────────────────────────────────
+// State
+// ───────────────────────────────────────────────────────────────
+let PROJECT = null;
+let RECORDINGS = [];
+let FEEDBACK = {};
+let RENDERED = new Set();        // beat ids with rendered MP4 (best-effort detect)
+let ACTIVE = null;
+let ACTIVE_TAB = 'script';
+
+let recorder = null;
+let recStream = null;
+let recChunks = [];
+let recStart = 0;
+let timerInt = null;
+let audioCtx = null;
+let meterNode = null;
+let karaokeAudio = null;
+let wordSpans = [];
+
+// ───────────────────────────────────────────────────────────────
+// Loading
+// ───────────────────────────────────────────────────────────────
+async function loadProject() {
+  try {
+    const r = await fetch('/api/project');
+    PROJECT = await r.json();
+    document.getElementById('edit-name').textContent = ' · ' + PROJECT.name;
+    document.getElementById('beat-count').textContent = PROJECT.order.length;
+    const d = PROJECT.design;
+    document.getElementById('design-info').textContent = `${d.resolution[0]}×${d.resolution[1]} @ ${d.fps}fps`;
+    const status = document.getElementById('api-status');
+    status.innerHTML = 'API: <b>ok</b>';
+    status.className = 'api ok';
+    renderBeatList();
+  } catch (e) {
+    const status = document.getElementById('api-status');
+    status.innerHTML = 'API: <b>offline</b> — run <code>dl serve &lt;edit&gt;</code>';
+    status.className = 'api bad';
+  }
+}
+
+async function loadRecordings() {
+  try {
+    const r = await fetch('/api/list');
+    RECORDINGS = await r.json();
+    renderBeatList();
+    if (ACTIVE) renderTakes();
+  } catch (e) { console.error('list:', e); }
+}
+
+async function loadFeedback() {
+  try {
+    const r = await fetch('/api/feedback');
+    FEEDBACK = await r.json();
+    if (ACTIVE) renderReview();
+  } catch (e) { console.error('feedback:', e); }
+}
+
+// ───────────────────────────────────────────────────────────────
+// Beat list
+// ───────────────────────────────────────────────────────────────
+function renderBeatList() {
+  if (!PROJECT) return;
+  const el = document.getElementById('beat-list');
+  el.innerHTML = '<h3>In concat order</h3>';
+  for (const bid of PROJECT.order) {
+    const beat = PROJECT.beats[bid];
+    const hasRec = RECORDINGS.some(r => r.name.includes(`_${bid}_`));
+    const item = document.createElement('div');
+    item.className = 'beat-item' + (bid === ACTIVE ? ' active' : '');
+    item.dataset.beatId = bid;
+    item.dataset.recorded = hasRec ? 'true' : 'false';
+    item.dataset.rendered = RENDERED.has(bid) ? 'true' : 'false';
+    item.innerHTML = `
+      <span class="mark"></span>
+      <span class="id">${bid}</span>
+      <span class="title">${escapeHtml(beat.title || bid)}</span>
+      <span class="face">${beat.face}</span>
+    `;
+    item.addEventListener('click', () => selectBeat(bid));
+    el.appendChild(item);
+  }
+  // Show extras (not in concat order)
+  const extras = Object.keys(PROJECT.beats).filter(b => !PROJECT.order.includes(b));
+  if (extras.length) {
+    const h = document.createElement('h3');
+    h.textContent = 'Other';
+    el.appendChild(h);
+    for (const bid of extras) {
+      const beat = PROJECT.beats[bid];
+      const hasRec = RECORDINGS.some(r => r.name.includes(`_${bid}_`));
+      const item = document.createElement('div');
+      item.className = 'beat-item' + (bid === ACTIVE ? ' active' : '');
+      item.dataset.beatId = bid;
+      item.dataset.recorded = hasRec ? 'true' : 'false';
+      item.innerHTML = `
+        <span class="mark"></span>
+        <span class="id">${bid}</span>
+        <span class="title">${escapeHtml(beat.title || bid)}</span>
+        <span class="face">${beat.face}</span>
+      `;
+      item.addEventListener('click', () => selectBeat(bid));
+      el.appendChild(item);
+    }
+  }
+}
+
+function selectBeat(bid) {
+  ACTIVE = bid;
+  const beat = PROJECT.beats[bid];
+  document.getElementById('beat-title').textContent = beat.title || bid;
+  document.getElementById('beat-face').textContent = beat.face;
+
+  // Script tab
+  renderScript(beat);
+  // Structure tab
+  renderStructure(beat);
+  // Record tab
+  renderRecord(beat);
+  // Review tab
+  renderReview();
+
+  renderBeatList();
+}
+
+// ───────────────────────────────────────────────────────────────
+// Script tab
+// ───────────────────────────────────────────────────────────────
+function renderScript(beat) {
+  const stage = document.getElementById('stage-note');
+  if (beat.stage) { stage.textContent = beat.stage; stage.style.display = 'block'; }
+  else { stage.style.display = 'none'; }
+  document.getElementById('vo-text').textContent = beat.vo || '(no VO text)';
+}
+
+// ───────────────────────────────────────────────────────────────
+// Structure tab
+// ───────────────────────────────────────────────────────────────
+function renderStructure(beat) {
+  const list = document.getElementById('chunk-list');
+  list.innerHTML = '';
+  beat.chunks.forEach((c, i) => {
+    const row = document.createElement('div');
+    row.className = 'chunk-row';
+    const sceneStr = c.scene ? `${c.scene.kind} ${c.scene.src}` : (c.src ? `${c.kind} ${c.src}` : (beat.scene ? `(beat) ${beat.scene.kind} ${beat.scene.src}` : '—'));
+    const text = c.text || (c.label ? `[${c.label}]` : '(no text)');
+    row.innerHTML = `
+      <span>${i}</span>
+      <span class="timing">${c.words[0]}–${c.words[1]}</span>
+      <span><span class="kind ${c.kind}">${c.kind}</span></span>
+      <span class="text">${escapeHtml(text)}</span>
+      <span class="scene">${escapeHtml(sceneStr)}</span>
+      <span class="timing" id="chunk-${i}-time">—</span>
+    `;
+    list.appendChild(row);
+  });
+  // Try to compute chunk times from words.json
+  fetch(`/${beat.words}`).then(r => r.json()).then(words => {
+    beat.chunks.forEach((c, i) => {
+      const w = words.words;
+      if (!w || !w[c.words[0]]) return;
+      const tStart = w[c.words[0]].start;
+      const nextStart = i + 1 < beat.chunks.length && w[beat.chunks[i+1].words[0]] ?
+                       w[beat.chunks[i+1].words[0]].start : words.duration;
+      const dur = nextStart - tStart;
+      const el = document.getElementById(`chunk-${i}-time`);
+      if (el) el.textContent = `${tStart.toFixed(2)}s · ${dur.toFixed(2)}s`;
+    });
+  }).catch(() => {});
+}
+
+// ───────────────────────────────────────────────────────────────
+// Record tab + karaoke playback
+// ───────────────────────────────────────────────────────────────
+function renderRecord(beat) {
+  const stage = document.getElementById('stage-note-rec');
+  if (beat.stage) { stage.textContent = beat.stage; stage.style.display = 'block'; }
+  else { stage.style.display = 'none'; }
+
+  // Build word spans for karaoke
+  const k = document.getElementById('vo-karaoke');
+  k.innerHTML = '';
+  wordSpans = [];
+  const text = beat.vo || '';
+  const tokens = text.split(/(\s+)/);
+  tokens.forEach(tok => {
+    if (/^\s+$/.test(tok)) {
+      k.appendChild(document.createTextNode(tok));
+    } else {
+      const span = document.createElement('span');
+      span.className = 'word upcoming';
+      span.textContent = tok;
+      k.appendChild(span);
+      wordSpans.push(span);
+    }
+  });
+  renderTakes();
+}
+
+function renderTakes() {
+  const el = document.getElementById('takes-list');
+  if (!ACTIVE) { el.innerHTML = '<div class="empty">No beat selected</div>'; return; }
+  const takes = RECORDINGS.filter(r => r.name.includes(`_${ACTIVE}_`)).sort((a, b) => b.mtime - a.mtime);
+  if (takes.length === 0) {
+    el.innerHTML = '<div class="empty">No takes yet — hit Record</div>';
+    document.getElementById('play-last-btn').disabled = true;
+    return;
+  }
+  document.getElementById('play-last-btn').disabled = false;
+  el.innerHTML = '';
+  takes.forEach((t, i) => {
+    const card = document.createElement('div');
+    card.className = 'take';
+    const date = new Date(t.mtime).toLocaleString('ru-RU');
+    card.innerHTML = `
+      <div class="name">${escapeHtml(t.name)}</div>
+      <div class="meta">${(t.size/1024).toFixed(0)} KB · ${date}</div>
+      <audio controls preload="none" data-name="${escapeHtml(t.name)}"
+             src="/api/file/${encodeURIComponent(t.name)}"></audio>
+    `;
+    el.appendChild(card);
+  });
+  // Hook audio elements to karaoke sync
+  el.querySelectorAll('audio').forEach(audio => {
+    audio.addEventListener('play', () => attachKaraoke(audio));
+  });
+}
+
+async function attachKaraoke(audio) {
+  if (!ACTIVE) return;
+  karaokeAudio = audio;
+  // Try to fetch words.json for this beat to sync
+  const beat = PROJECT.beats[ACTIVE];
+  try {
+    const r = await fetch(`/${beat.words}`);
+    const data = await r.json();
+    audio._words = data.words;
+  } catch (e) { audio._words = null; }
+  audio.addEventListener('timeupdate', () => {
+    if (audio !== karaokeAudio) return;
+    if (!audio._words) return;
+    const t = audio.currentTime;
+    audio._words.forEach((w, i) => {
+      const span = wordSpans[i];
+      if (!span) return;
+      if (t >= w.start && t < w.end) {
+        span.className = 'word active';
+      } else if (t >= w.end) {
+        span.className = 'word past';
+      } else {
+        span.className = 'word upcoming';
+      }
+    });
+  });
+}
+
+// ───────────────────────────────────────────────────────────────
+// Audio recording with meter
+// ───────────────────────────────────────────────────────────────
+async function setupMic() {
+  try {
+    recStream = await navigator.mediaDevices.getUserMedia({audio: true});
+    recorder = new MediaRecorder(recStream, {mimeType: 'audio/webm'});
+    recorder.ondataavailable = e => { if (e.data.size > 0) recChunks.push(e.data); };
+    recorder.onstop = saveTake;
+    document.getElementById('record-btn').disabled = false;
+    document.getElementById('mic-status').textContent = 'mic ready';
+    document.getElementById('mic-status').style.color = 'var(--green)';
+    // Meter
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const src = audioCtx.createMediaStreamSource(recStream);
+    const analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 1024;
+    src.connect(analyser);
+    const data = new Float32Array(analyser.fftSize);
+    let peak = 0;
+    function tick() {
+      analyser.getFloatTimeDomainData(data);
+      let sum = 0, lpeak = 0;
+      for (let i = 0; i < data.length; i++) {
+        const v = Math.abs(data[i]);
+        sum += v*v;
+        if (v > lpeak) lpeak = v;
+      }
+      const rms = Math.sqrt(sum / data.length);
+      peak = Math.max(peak * 0.95, lpeak);
+      const rmsDb = 20 * Math.log10(Math.max(rms, 1e-6));
+      const peakDb = 20 * Math.log10(Math.max(peak, 1e-6));
+      document.getElementById('meter-rms').style.width = Math.min(100, (rmsDb + 60) * 1.5) + '%';
+      document.getElementById('meter-peak').style.width = Math.min(100, (peakDb + 60) * 1.5) + '%';
+      document.getElementById('meter-rms-val').textContent = rmsDb.toFixed(1);
+      document.getElementById('meter-peak-val').textContent = peakDb.toFixed(1);
+      const peakBar = document.getElementById('meter-peak');
+      peakBar.classList.toggle('peak', peakDb > -3);
+      requestAnimationFrame(tick);
+    }
+    tick();
+  } catch (e) {
+    document.getElementById('mic-status').textContent = 'mic denied';
+    document.getElementById('mic-status').style.color = 'var(--accent)';
+  }
+}
+
+function toggleRecord() {
+  if (!ACTIVE) { alert('Select a beat first'); return; }
+  if (recorder.state === 'recording') {
+    recorder.stop();
+    clearInterval(timerInt);
+    document.getElementById('record-btn').classList.remove('recording');
+    document.getElementById('record-btn').textContent = '● Record';
+  } else {
+    recChunks = [];
+    recorder.start();
+    recStart = Date.now();
+    timerInt = setInterval(updateTimer, 100);
+    document.getElementById('record-btn').classList.add('recording');
+    document.getElementById('record-btn').textContent = '■ Stop';
+  }
+}
+
+function updateTimer() {
+  const sec = (Date.now() - recStart) / 1000;
+  const m = String(Math.floor(sec / 60)).padStart(2, '0');
+  const s = (sec % 60).toFixed(1).padStart(4, '0');
+  document.getElementById('timer').textContent = `${m}:${s}`;
+}
+
+async function saveTake() {
+  const blob = new Blob(recChunks, {type: 'audio/webm'});
+  const existing = RECORDINGS.filter(r => r.name.includes(`_${ACTIVE}_`)).length;
+  const slug = (PROJECT.beats[ACTIVE].title || ACTIVE)
+    .toLowerCase().replace(/[^a-z0-9а-я]+/gi, '-').slice(0, 40);
+  const stamp = Math.floor(Date.now() / 1000);
+  const name = `${stamp}_${ACTIVE}_${slug}_take${existing + 1}.webm`;
+  try {
+    const r = await fetch(`/api/save/${encodeURIComponent(name)}`, {
+      method: 'POST', body: blob, headers: {'Content-Type': 'application/octet-stream'},
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    document.getElementById('timer').textContent = '00:00';
+    await loadRecordings();
+  } catch (e) { alert('Save failed: ' + e.message); }
+}
+
+function playLast() {
+  const el = document.querySelector('#takes-list audio');
+  if (el) { el.play(); }
+}
+
+// ───────────────────────────────────────────────────────────────
+// Review tab
+// ───────────────────────────────────────────────────────────────
+function renderReview() {
+  const el = document.getElementById('review-content');
+  if (!ACTIVE) { el.innerHTML = '<div class="empty">No beat selected</div>'; return; }
+  const fb = FEEDBACK[ACTIVE];
+  if (!fb) {
+    el.innerHTML = `<div class="empty">No feedback yet for <code>${ACTIVE}</code>.<br><br>
+      Run <code>vo-reviewer</code> after recording, or <code>video-reviewer</code> after rendering.<br>
+      Agents write feedback to <code>data/review/feedback.json</code> which appears here.</div>`;
+    return;
+  }
+  let html = '';
+  for (const [section, data] of Object.entries(fb)) {
+    html += `<h3>${section.toUpperCase()} review`;
+    if (data.timestamp) html += ` <span class="source">${data.timestamp}</span>`;
+    html += `</h3>`;
+    if (data.verdict) {
+      const cls = data.verdict.toLowerCase().includes('ship') || data.verdict.toLowerCase().includes('final') ? 'ship'
+                : data.verdict.toLowerCase().includes('re-record') || data.verdict.toLowerCase().includes('rerecord') ? 'rerecord'
+                : 'rerender';
+      html += `<div class="verdict ${cls}"><b>TL;DR:</b> ${escapeHtml(data.verdict)}</div>`;
+    }
+    if (data.main_fix) {
+      html += `<div><b>Main fix:</b> ${escapeHtml(data.main_fix)}</div>`;
+    }
+    if (data.suggestions && data.suggestions.length) {
+      html += `<h3>Suggestions</h3>`;
+      for (const s of data.suggestions) {
+        const sev = (s.severity || 'med').toLowerCase();
+        const cat = (s.category || 'mech').toLowerCase().replace('-', '');
+        html += `<div class="suggestion">
+          <span class="tag ${sev}">${sev}</span>
+          <span class="tag ${cat}">${s.category || cat}</span>
+          ${s.effort ? `<span class="source">· ${escapeHtml(s.effort)}</span>` : ''}
+          <div><b>${escapeHtml(s.what || '')}</b></div>
+          ${s.how ? `<div class="how">${escapeHtml(s.how)}</div>` : ''}
+        </div>`;
+      }
+    }
+    if (data.notes) {
+      html += `<h3>Notes</h3><pre>${escapeHtml(data.notes)}</pre>`;
+    }
+    if (data.raw) {
+      html += `<h3>Raw output</h3><pre>${escapeHtml(data.raw)}</pre>`;
+    }
+  }
+  el.innerHTML = html;
+}
+
+// ───────────────────────────────────────────────────────────────
+// Tabs
+// ───────────────────────────────────────────────────────────────
+function switchTab(name) {
+  ACTIVE_TAB = name;
+  document.querySelectorAll('header .tab').forEach(t =>
+    t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('.tab-content').forEach(c =>
+    c.style.display = c.dataset.tab === name ? 'block' : 'none');
+}
+
+document.querySelectorAll('header .tab').forEach(t => {
+  t.addEventListener('click', () => switchTab(t.dataset.tab));
+});
+
+// ───────────────────────────────────────────────────────────────
+// Init
+// ───────────────────────────────────────────────────────────────
+document.getElementById('record-btn').addEventListener('click', toggleRecord);
+document.getElementById('play-last-btn').addEventListener('click', playLast);
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, ch => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[ch]));
+}
+
+loadProject();
+loadRecordings();
+loadFeedback();
+setupMic();
+
+// Refresh feedback periodically — agents write asynchronously
+setInterval(loadFeedback, 5000);
+</script>
+
+</body>
+</html>

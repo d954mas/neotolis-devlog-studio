@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Trolley Devlog — Code Visualization</title>
+<style>
+  :root {
+    --paper: #f2ede0;
+    --ink: #2a2520;
+    --ink-dim: #5a5046;
+    --accent: #c0392b;
+    --yellow: #e8b647;
+    --blue: #4a7ba8;
+    --green: #6b8e4e;
+    --purple: #8e4e8a;
+    --orange: #d35400;
+    --line: #d8d0bd;
+    --bg-panel: #faf6ec;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; background: var(--paper); color: var(--ink);
+    font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; line-height: 1.5; }
+  body { padding: 24px 32px 80px; max-width: 1400px; margin: 0 auto; }
+  h1 { margin: 0 0 4px; font-size: 28px; }
+  h1 .accent { color: var(--accent); }
+  .subtitle { color: var(--ink-dim); font-size: 14px; margin-bottom: 28px; }
+  .back { display: inline-block; margin-bottom: 16px; font-size: 13px;
+    color: var(--blue); text-decoration: none; }
+  .back:hover { text-decoration: underline; }
+
+  /* Big stats banner */
+  .big-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px; margin-bottom: 28px; }
+  .big-stats .s { background: var(--bg-panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 18px 16px; text-align: center; }
+  .big-stats .s .v { font-size: 32px; font-weight: 800; line-height: 1;
+    font-variant-numeric: tabular-nums; }
+  .big-stats .s .l { font-size: 11px; color: var(--ink-dim);
+    text-transform: uppercase; letter-spacing: 0.08em; margin-top: 4px; }
+  .big-stats .s.hi { background: #fff8e0; border-color: var(--yellow); }
+
+  section { margin-bottom: 40px; }
+  section h2 { font-size: 20px; margin: 0 0 12px;
+    border-bottom: 2px solid var(--ink); padding-bottom: 4px; display: inline-block; }
+  section .lede { color: var(--ink-dim); font-size: 14px; margin-bottom: 16px; }
+
+  /* TREEMAP — folder breakdown */
+  .treemap { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px;
+    background: #1a1612; border-radius: 8px; height: 280px; }
+  .tm-cell { position: relative; border-radius: 4px; padding: 10px 12px;
+    color: #fff; cursor: pointer; transition: transform .15s, filter .15s;
+    overflow: hidden; }
+  .tm-cell:hover { transform: scale(1.02); filter: brightness(1.15); z-index: 2; }
+  .tm-cell .tm-name { font-weight: 700; font-size: 14px; line-height: 1.1; }
+  .tm-cell .tm-meta { font-size: 11px; opacity: 0.85; margin-top: 4px;
+    font-variant-numeric: tabular-nums; }
+  .tm-cell .tm-pct { position: absolute; right: 8px; bottom: 6px;
+    font-size: 20px; font-weight: 800; opacity: 0.35; line-height: 1;
+    font-variant-numeric: tabular-nums; }
+
+  /* Bar chart for top files */
+  .bars { background: var(--bg-panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 16px 20px; }
+  .bar-row { display: grid; grid-template-columns: 50px 1fr 80px;
+    gap: 8px; align-items: center; margin-bottom: 6px;
+    font-size: 13px; }
+  .bar-row .rank { color: var(--ink-dim); text-align: right;
+    font-variant-numeric: tabular-nums; font-weight: 700; }
+  .bar-row .bar { background: var(--line); height: 22px; border-radius: 3px;
+    overflow: hidden; position: relative; }
+  .bar-row .bar .fill { height: 100%; display: flex; align-items: center;
+    padding: 0 8px; color: #fff; font-size: 12px; font-weight: 600;
+    white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+  .bar-row .lines { text-align: right; font-weight: 700;
+    font-variant-numeric: tabular-nums; }
+  .bar-row .desc { grid-column: 2 / 3; font-size: 11px;
+    color: var(--ink-dim); margin-top: 2px; padding-left: 10px;
+    border-left: 2px solid var(--line); }
+
+  /* Architecture diagram */
+  .arch { background: var(--bg-panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 24px; }
+  .arch .layer { margin-bottom: 12px; }
+  .arch .layer-label { font-size: 11px; color: var(--ink-dim);
+    text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;
+    font-weight: 700; }
+  .arch .layer-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .arch .node { padding: 8px 12px; border-radius: 4px;
+    font-size: 12px; font-weight: 600; color: #fff;
+    display: flex; flex-direction: column; gap: 2px;
+    cursor: default; transition: filter .15s; }
+  .arch .node:hover { filter: brightness(1.1); }
+  .arch .node small { font-size: 10px; opacity: 0.85; font-weight: 400; }
+  .arch .arrow { text-align: center; color: var(--ink-dim);
+    margin: 4px 0; font-size: 14px; }
+
+  /* AI vs human */
+  .vs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .vs .col { background: var(--bg-panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 16px 18px; }
+  .vs .col h3 { margin: 0 0 8px; font-size: 14px;
+    text-transform: uppercase; letter-spacing: 0.04em; }
+  .vs .col.ai h3 { color: var(--purple); }
+  .vs .col.human h3 { color: var(--green); }
+  .vs .col ul { margin: 0; padding-left: 18px; font-size: 13px; }
+  .vs .col li { margin-bottom: 4px; }
+
+  /* Systems list */
+  .sys-grid { display: grid; gap: 8px;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+  .sys-card { background: var(--bg-panel); border: 1px solid var(--line);
+    border-radius: 6px; padding: 10px 12px; }
+  .sys-card .sn { font-weight: 700; font-size: 13px; }
+  .sys-card .sl { font-size: 11px; color: var(--ink-dim);
+    font-variant-numeric: tabular-nums; margin-bottom: 4px; }
+  .sys-card .sd { font-size: 12px; color: var(--ink); }
+
+  /* Footnotes */
+  .note { font-size: 12px; color: var(--ink-dim); font-style: italic;
+    margin-top: 8px; }
+
+  /* Color legend */
+  .legend { font-size: 12px; color: var(--ink-dim);
+    display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  .legend .sw { display: inline-block; width: 10px; height: 10px;
+    border-radius: 2px; vertical-align: middle; margin-right: 4px; }
+</style>
+</head>
+<body>
+
+<nav class="trolley-nav" style="position:sticky;top:0;z-index:1000;background:#2a2520;color:#f2ede0;padding:8px 18px;display:flex;gap:6px;align-items:center;font-size:13px;font-family:system-ui;box-shadow:0 2px 8px rgba(0,0,0,0.15);flex-wrap:wrap;margin:-24px -32px 24px">
+  <span style="font-weight:700;color:#e8b647;margin-right:12px">🚋 Trolley Devlog</span>
+  <a href="structure.html" data-page="structure" style="color:#f2ede0;text-decoration:none;padding:5px 12px;border-radius:4px">📋 Структура</a>
+  <a href="script.html" data-page="script" style="color:#f2ede0;text-decoration:none;padding:5px 12px;border-radius:4px">📝 Сценарий</a>
+  <a href="recorder.html" data-page="recorder" style="color:#f2ede0;text-decoration:none;padding:5px 12px;border-radius:4px">🎙 Запись</a>
+  <a href="preview.html" data-page="preview" style="color:#f2ede0;text-decoration:none;padding:5px 12px;border-radius:4px">▶ Preview</a>
+  <a href="code-viz.html" data-page="code-viz" style="color:#f2ede0;text-decoration:none;padding:5px 12px;border-radius:4px">📊 Code-viz</a>
+  <script>(function(){var p=location.pathname.split('/').pop().replace('.html','');document.querySelectorAll('.trolley-nav a').forEach(function(a){if(a.dataset.page===p){a.style.background='#c0392b';a.style.fontWeight='600'}else{a.onmouseenter=function(){a.style.background='rgba(255,255,255,0.1)'};a.onmouseleave=function(){a.style.background='transparent'}}});})();</script>
+</nav>
+
+<h1>Что внутри кода <span class="accent">Not a Trolley Problem</span></h1>
+<div class="subtitle">
+  Визуализация для Акта 3 девлога — реальные цифры из <code>src/</code> на момент submission. Можно использовать как B-roll, или как отдельный встроенный блок 30-40 секунд.
+</div>
+
+<!-- BIG STATS -->
+<div class="big-stats">
+  <div class="s"><div class="v">30 778</div><div class="l">строк JS</div></div>
+  <div class="s"><div class="v">102</div><div class="l">JS-файла</div></div>
+  <div class="s"><div class="v">273</div><div class="l">коммита</div></div>
+  <div class="s hi"><div class="v">80</div><div class="l">коммитов день 2</div></div>
+  <div class="s"><div class="v">13</div><div class="l">дней</div></div>
+  <div class="s hi"><div class="v">0</div><div class="l">строк руками</div></div>
+</div>
+
+<!-- REAL VS BALLAST -->
+<section>
+  <h2>⚡ Сколько из этого реально играет (важный момент честности)</h2>
+  <div class="lede">Из 30 778 строк <b>~22 000 действительно играют в проде</b>. Остальные ~6 800 — это балласт от шаблона, эксперименты, legacy и pluggable platforms. Это <b>не дыра в коде</b> — это нормальная структура переиспользуемого шаблона.</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;background:var(--bg-panel);border:1px solid var(--line);border-radius:8px;padding:20px;">
+    <div>
+      <h3 style="margin:0 0 8px;font-size:14px;color:var(--green);text-transform:uppercase;letter-spacing:.04em">✅ В игре (~22 000)</h3>
+      <ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.7">
+        <li>Все системы (boss, finger, collision, hand-grab)</li>
+        <li>Вся UI (choice modal, upgrades panel, journal, lever)</li>
+        <li>Весь рендер (Pixi-graphics, текстур-кеши)</li>
+        <li>Engine core utils (audio, save, input, layout, loc)</li>
+        <li>Data (balance, choices, locations, upgrade tree)</li>
+        <li>1 из 4 pluggable platforms (для конкретного деплоя)</li>
+      </ul>
+    </div>
+    <div>
+      <h3 style="margin:0 0 8px;font-size:14px;color:var(--accent);text-transform:uppercase;letter-spacing:.04em">⚪ Балласт (~6 800)</h3>
+      <ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.7">
+        <li><b>character_world_test/</b> — 2 066 строк · 3D-эксперимент с персонажами, отдельная сцена</li>
+        <li><b>trailer/</b> — 1 015 строк · подгружается только с <code>?trailer=1</code></li>
+        <li><b>core/ резерв</b> — ~2 200 строк · CameraController, FpsOverlay, ParticlePool, TutorialOverlay — шаблон для будущих игр</li>
+        <li><b>4 platforms</b> — 935 строк · нужна 1, остальные 3 спят</li>
+        <li><b>*.legacy.js</b> — 315 строк · старые версии upgrade tree/balance</li>
+        <li><b>Возможно мёртвое</b> — ~250 строк · LocationsPanel экспортируется, но не импортируется</li>
+      </ul>
+    </div>
+  </div>
+  <div class="note">
+    <b>Почему это важно:</b> когда я говорю "30 тысяч строк за 13 дней" — это правда, но эффективная цифра ~22k.
+    Шаблон <code>core/</code> и платформы <code>platform-*</code> переедут в следующую игру. Это и есть преимущество AI-стека:
+    <em>пишешь шаблон один раз, переиспользуешь много раз</em>. Test sandbox тоже останется — для следующих экспериментов с персонажами.
+  </div>
+</section>
+
+<!-- TREEMAP -->
+<section>
+  <h2>Где живёт код (все 30k строк)</h2>
+  <div class="lede">Размер блока = количество строк. 30k строк размазаны по 7 областям, но <b>UI и engine-core съели половину</b>.</div>
+  <div class="legend">
+    <span><span class="sw" style="background:#e8b647"></span>UI</span>
+    <span><span class="sw" style="background:#4a7ba8"></span>Core (engine)</span>
+    <span><span class="sw" style="background:#8e4e8a"></span>Game logic</span>
+    <span><span class="sw" style="background:#6b8e4e"></span>Render</span>
+    <span><span class="sw" style="background:#d35400"></span>Data</span>
+    <span><span class="sw" style="background:#5a5046"></span>Systems / Entities</span>
+  </div>
+  <div class="treemap" id="treemap">
+    <!-- Filled by JS -->
+  </div>
+  <div class="note">
+    Кликни на блок — увидишь подробности. * "Game logic" = `game.js` + `effects.js` + `save.js` + сцены вне `feature/trolley/ui` (~8000 строк).
+  </div>
+</section>
+
+<!-- TOP FILES -->
+<section>
+  <h2>Top-10 самых жирных файлов</h2>
+  <div class="lede">Сюда ушло больше всего AI-токенов. <b>TrolleyChoiceModal — 2 347 строк</b> на выбор-карточки. Это и есть тематический хребет игры.</div>
+  <div class="bars" id="bars">
+    <!-- Filled by JS -->
+  </div>
+</section>
+
+<!-- ARCHITECTURE -->
+<section>
+  <h2>Архитектура — как это всё связано</h2>
+  <div class="lede">Игра построена на ECS (Entity-Component-System). Слои сверху вниз: <b>entry → engine → scene → systems → render</b>. Данные лежат сбоку и читаются из всех слоёв.</div>
+  <div class="arch">
+    <div class="layer">
+      <div class="layer-label">L1 · Entry</div>
+      <div class="layer-row">
+        <div class="node" style="background:#2a2520">
+          <span>game.js</span><small>524 строк · boot</small>
+        </div>
+      </div>
+    </div>
+    <div class="arrow">↓</div>
+    <div class="layer">
+      <div class="layer-label">L2 · Engine (core/)</div>
+      <div class="layer-row">
+        <div class="node" style="background:#4a7ba8">Engine<small>autoresize, ticker</small></div>
+        <div class="node" style="background:#4a7ba8">ECS World<small>173 строк</small></div>
+        <div class="node" style="background:#4a7ba8">Audio<small>505 строк WebAudio</small></div>
+        <div class="node" style="background:#4a7ba8">Save<small>versioned</small></div>
+        <div class="node" style="background:#4a7ba8">Input<small>touch+mouse</small></div>
+        <div class="node" style="background:#4a7ba8">Loc RU/EN<small>164</small></div>
+        <div class="node" style="background:#4a7ba8">Layout<small>portrait/landscape</small></div>
+        <div class="node" style="background:#4a7ba8">Platform<small>itch/poki/wavedash</small></div>
+      </div>
+    </div>
+    <div class="arrow">↓</div>
+    <div class="layer">
+      <div class="layer-label">L3 · Scene (главный оркестратор)</div>
+      <div class="layer-row">
+        <div class="node" style="background:#8e4e8a">
+          GameScene.js<small>2 872 строк — оркестрирует всё</small>
+        </div>
+      </div>
+    </div>
+    <div class="arrow">↓ (создаёт + крутит)</div>
+    <div class="layer">
+      <div class="layer-label">L4 · Systems (16 ECS-систем)</div>
+      <div class="layer-row">
+        <div class="node" style="background:#6b8e4e">HandGrab<small>267</small></div>
+        <div class="node" style="background:#6b8e4e">Boss<small>251</small></div>
+        <div class="node" style="background:#6b8e4e">Finger<small>217</small></div>
+        <div class="node" style="background:#6b8e4e">Collision<small>203</small></div>
+        <div class="node" style="background:#6b8e4e">Spawner<small>150</small></div>
+        <div class="node" style="background:#6b8e4e">Wander<small>124</small></div>
+        <div class="node" style="background:#6b8e4e">TrolleyMotion<small>98</small></div>
+        <div class="node" style="background:#6b8e4e">Stick<small>71</small></div>
+        <div class="node" style="background:#6b8e4e">+8 более мелких</div>
+      </div>
+    </div>
+    <div class="arrow">↓ (читают данные из)</div>
+    <div class="layer">
+      <div class="layer-label">L5 · Data (статика, читается всеми)</div>
+      <div class="layer-row">
+        <div class="node" style="background:#d35400">upgradeBalance<small>510 — коэф-ты</small></div>
+        <div class="node" style="background:#d35400">upgradeTree<small>388 — структура веток</small></div>
+        <div class="node" style="background:#d35400">trolleyChoices<small>364 — 10 дилемм</small></div>
+        <div class="node" style="background:#d35400">balance<small>257 — общий баланс</small></div>
+        <div class="node" style="background:#d35400">locations<small>178 — 5 миров</small></div>
+        <div class="node" style="background:#d35400">npcTiers<small>76</small></div>
+        <div class="node" style="background:#d35400">ranks<small>47</small></div>
+        <div class="node" style="background:#d35400">+5</div>
+      </div>
+    </div>
+    <div class="arrow">↓ + ↑ (визуализируют состояние + принимают input)</div>
+    <div class="layer">
+      <div class="layer-label">L6 · UI + Render (что видит игрок)</div>
+      <div class="layer-row">
+        <div class="node" style="background:#e8b647;color:#2a2520">TrolleyChoiceModal<small>2 347 — выбор-карточки</small></div>
+        <div class="node" style="background:#e8b647;color:#2a2520">UpgradesPanel<small>1 217 — дерево</small></div>
+        <div class="node" style="background:#e8b647;color:#2a2520">TrolleyJournal<small>1 040 — журнал</small></div>
+        <div class="node" style="background:#e8b647;color:#2a2520">Onboarding<small>775</small></div>
+        <div class="node" style="background:#e8b647;color:#2a2520">LeverControl<small>488</small></div>
+        <div class="node" style="background:#e8b647;color:#2a2520">+13 UI</div>
+        <div class="node" style="background:#6b8e4e">PersonRenderer<small>334</small></div>
+        <div class="node" style="background:#6b8e4e">RailTrack<small>296</small></div>
+        <div class="node" style="background:#6b8e4e">+17 render</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- AI vs HUMAN -->
+<section>
+  <h2>Что AI делал, что — я</h2>
+  <div class="lede">Главный посыл: <b>AI пишет код. Я принимаю решения.</b></div>
+  <div class="vs">
+    <div class="col ai">
+      <h3>🤖 AI (Claude Code)</h3>
+      <ul>
+        <li>100% JS-кода — engine, systems, UI, render, save</li>
+        <li>Балансные таблицы (`upgradeBalance.js`)</li>
+        <li>Локализация EN ⇄ RU (`loc/trolley.json`)</li>
+        <li>10 диалогов выбор-карточек (текст + бэйк иконок)</li>
+        <li>Графика — NPC, бэкграунды, обложка, capsules</li>
+        <li>Trailer-режиссёр (`TrailerDirector.js`) — 469 строк</li>
+        <li>Балансные тесты (genuine playtest scripts в `tmp/`)</li>
+      </ul>
+    </div>
+    <div class="col human">
+      <h3>👤 Я</h3>
+      <ul>
+        <li>Идея: sticky finger, скармливаем людей машине</li>
+        <li>Pillars: idle-first, без prestige, finite & finishable</li>
+        <li>Дизайн 10 trolley-дилемм (Шрёдингер, Truck-kun, тёща)</li>
+        <li>Решение переписать boss на skull-cycle после playtest'а</li>
+        <li>"Do NOT implement"-список — что НЕ делать</li>
+        <li>Выбор финального арта из десятков AI-вариантов</li>
+        <li>Stop-команды и ревью — "AI, это говно, переделай"</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- SYSTEMS -->
+<section>
+  <h2>Топ-5 ECS-систем — где живёт геймплей</h2>
+  <div class="lede">Системы — это "что происходит каждый кадр". Все 16 систем — 1 806 строк. Топ-5:</div>
+  <div class="sys-grid">
+    <div class="sys-card">
+      <div class="sn">HandGrabSystem</div>
+      <div class="sl">267 строк · ядро</div>
+      <div class="sd">Sticky finger + auto-grab руки. Захватывает NPC, тащит к пальцу, отпускает на рельсы.</div>
+    </div>
+    <div class="sys-card">
+      <div class="sn">BossSystem</div>
+      <div class="sl">251 строк · skull-cycle</div>
+      <div class="sd">Один босс на мир. 5 убийств. HP ×1.5 за цикл. Финал — анлок следующего мира.</div>
+    </div>
+    <div class="sys-card">
+      <div class="sn">FingerSystem</div>
+      <div class="sl">217 строк · input</div>
+      <div class="sd">Курсор/палец игрока. Радиус, capacity, рубберинг tail.</div>
+    </div>
+    <div class="sys-card">
+      <div class="sn">CollisionSystem</div>
+      <div class="sl">203 строк · урон</div>
+      <div class="sd">Trolley × NPC столкновения. Blade-удары. Coin reward по тиру × multiplier.</div>
+    </div>
+    <div class="sys-card">
+      <div class="sn">SpawnerSystem</div>
+      <div class="sl">150 строк · респавн</div>
+      <div class="sd">Респавнит NPC по тирам (regular / rich / rare / vip), плотность зависит от мира.</div>
+    </div>
+  </div>
+</section>
+
+<a class="back" href="structure.html">← Назад к структуре видео</a>
+
+<script>
+  // ----- TREEMAP -----
+  // Each cell: name, lines, area, color, hint
+  const areas = [
+    { name:'UI',       lines: 8630, color:'#e8b647', hint:'18 файлов: модалки, панели, HUD' },
+    { name:'Прочее*',  lines: 8000, color:'#5a5046', hint:'game.js, effects.js, save.js, сцены' },
+    { name:'Core',     lines: 6719, color:'#4a7ba8', hint:'47 файлов: Engine, ECS, audio, save, platform' },
+    { name:'Data',     lines: 2674, color:'#d35400', hint:'13 файлов: balance, choices, locations, tree' },
+    { name:'Render',   lines: 2632, color:'#6b8e4e', hint:'19 файлов: Pixi-рендеры, texture cache' },
+    { name:'Systems',  lines: 1806, color:'#8e4e8a', hint:'16 ECS-систем' },
+    { name:'Entities', lines: 392,  color:'#8e6e4e', hint:'6 файлов: NPC, boss spawn helpers' },
+  ];
+  const total = areas.reduce((a,b)=>a+b.lines, 0);
+  const tm = document.getElementById('treemap');
+  areas.forEach(a => {
+    const cell = document.createElement('div');
+    cell.className = 'tm-cell';
+    const pct = Math.round(a.lines/total*100);
+    // flex-basis percentage of total, with min width
+    cell.style.flexBasis = (pct*4) + 'px';
+    cell.style.flexGrow = '1';
+    cell.style.background = a.color;
+    cell.style.minHeight = Math.max(60, pct*5) + 'px';
+    cell.innerHTML = `
+      <div class="tm-name">${a.name}</div>
+      <div class="tm-meta">${a.lines.toLocaleString()} строк · ${a.hint}</div>
+      <div class="tm-pct">${pct}%</div>
+    `;
+    tm.appendChild(cell);
+  });
+
+  // ----- TOP FILES BARS -----
+  const topFiles = [
+    { name:'scenes/GameScene.js', lines:2872, color:'#8e4e8a', desc:'Главная игровая сцена — оркестратор всех систем' },
+    { name:'ui/TrolleyChoiceModal.js', lines:2347, color:'#e8b647', desc:'Выбор-карточки (Шрёдингер, Truck-kun, тёща) — тематический хребет' },
+    { name:'ui/UpgradesPanel.js', lines:1217, color:'#e8b647', desc:'Апгрейд-дерево, 59 нод (4 типа: capacity/radius/speed/crowd), 59 нод / 275 уровней' },
+    { name:'ui/TrolleyJournal.js', lines:1040, color:'#e8b647', desc:'Журнал прошлых выборов с возможностью пересмотра' },
+    { name:'ui/Onboarding.js', lines:775, color:'#e8b647', desc:'Туториал с анимированными подсказками' },
+    { name:'trailer/TrailerOverlay.js', lines:546, color:'#c0392b', desc:'Оверлей для 20-сек промо-трейлера' },
+    { name:'effects.js', lines:525, color:'#5a5046', desc:'Recalc effects: применяет апгрейды к стейту' },
+    { name:'game.js', lines:524, color:'#2a2520', desc:'Точка входа: boot engine + assets + scene' },
+    { name:'core/audio/audio.js', lines:505, color:'#4a7ba8', desc:'WebAudio + ogg streaming' },
+    { name:'ui/LeverControl.js', lines:488, color:'#e8b647', desc:'Рычаг в центре арены — активная механика игрока' },
+  ];
+  const maxLines = topFiles[0].lines;
+  const bars = document.getElementById('bars');
+  topFiles.forEach((f, i) => {
+    const row = document.createElement('div');
+    row.className = 'bar-row';
+    const pct = (f.lines / maxLines) * 100;
+    row.innerHTML = `
+      <span class="rank">#${i+1}</span>
+      <div class="bar"><div class="fill" style="width:${pct}%;background:${f.color}">${f.name}</div></div>
+      <span class="lines">${f.lines.toLocaleString()}</span>
+      <span class="desc">${f.desc}</span>
+    `;
+    bars.appendChild(row);
+  });
+</script>
+
+</body>
+</html>

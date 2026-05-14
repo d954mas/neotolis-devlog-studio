@@ -1,0 +1,69 @@
+# ─── Python ────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+.Python
+
+# ─── Render outputs (regenerable via `dl render`) ──────────
+**/data/finalize/.cache/
+**/data/finalize/frames_iter*/
+**/data/finalize/preview_frames/
+**/data/finalize/iterations/
+# All ffmpeg concat manifests (auto-generated)
+**/data/finalize/_concat.txt
+**/data/finalize/concat_*.txt
+# Build/render logs (auto-generated)
+**/data/finalize/*_log.txt
+**/data/finalize/*_render*.txt
+# Intermediate whisper outputs (final words.json IS tracked)
+**/data/finalize/*_raw_*.json
+**/data/finalize/*_preprocessed.wav
+
+# ─── Reviews + previews (per-session, ephemeral) ───────────
+**/data/review/
+**/data/previews/
+
+# ─── ALL media binaries under data/ (large, stored separately) ─
+# Videos and audio
+**/data/**/*.mp4
+**/data/**/*.webm
+**/data/**/*.wav
+**/data/**/*.m4a
+**/data/**/*.opus
+**/data/**/*.mov
+**/data/**/*.mkv
+**/data/**/*.flac
+**/data/**/*.aac
+**/data/**/*.ogg
+# Images (screenshots, infographics, thumbnails — track via ASSETS.md docs)
+**/data/**/*.png
+**/data/**/*.jpg
+**/data/**/*.jpeg
+**/data/**/*.gif
+**/data/**/*.bmp
+**/data/**/*.webp
+**/data/**/*.tiff
+
+# Raw recordings folder (large webm takes)
+**/data/recordings/*
+
+# ─── Stray temp files in project root ──────────────────────
+**/tmp_*
+**/tmp[a-z]*_reviewframe_*.jpg
+**/probe_*.jpg
+
+# ─── OS / IDE ──────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.bak
+
+# ─── Feedback (per-session) ────────────────────────────────
+**/data/review/feedback.json

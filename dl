@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Devlog CLI wrapper for POSIX shells.
+# Mirrors dl.bat: sets PYTHONPATH so `import devlog` finds common/devlog/
+# and project module paths (e.g. `trolley.edits.youtube`) resolve from devlogs/.
+HERE="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+export PYTHONPATH="$HERE/common:$HERE${PYTHONPATH:+:$PYTHONPATH}"
+exec python -m devlog "$@"

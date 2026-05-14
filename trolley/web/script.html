@@ -1,0 +1,885 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Trolley Devlog — Сценарий v1</title>
+<style>
+  :root {
+    --paper: #f2ede0;
+    --ink: #2a2520;
+    --ink-dim: #5a5046;
+    --accent: #c0392b;
+    --yellow: #e8b647;
+    --blue: #4a7ba8;
+    --green: #6b8e4e;
+    --purple: #8e4e8a;
+    --line: #d8d0bd;
+    --bg-panel: #faf6ec;
+    --bg-vo: #fffaef;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--paper); color: var(--ink);
+    font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; line-height: 1.5; }
+  body { padding: 0 0 80px; max-width: 1400px; margin: 0 auto; }
+
+  /* HEADER */
+  .top { padding: 24px 32px 16px; }
+  h1 { font-size: 28px; margin: 0 0 4px; }
+  h1 .accent { color: var(--accent); }
+  h1 .v { background: var(--ink); color: var(--paper); font-size: 13px;
+    padding: 4px 8px; border-radius: 4px; vertical-align: middle;
+    margin-left: 8px; }
+  .subtitle { font-size: 14px; color: var(--ink-dim); }
+
+  .stats-bar { display: flex; gap: 16px; flex-wrap: wrap; margin: 14px 0;
+    background: var(--bg-panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 12px 16px; font-size: 13px;
+    align-items: center; }
+  .stats-bar .s { font-size: 13px; }
+  .stats-bar .s b { font-weight: 700; }
+  .stats-bar .progress { flex: 1; min-width: 140px; height: 6px;
+    background: var(--line); border-radius: 3px; overflow: hidden; }
+  .stats-bar .progress > div { height: 100%; background: var(--green);
+    width: 0%; transition: width .3s; }
+
+  /* STICKY NAV */
+  .nav { position: sticky; top: 0; background: var(--paper);
+    padding: 12px 32px; z-index: 10; border-bottom: 1px solid var(--line);
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .nav a { padding: 6px 12px; border: 1px solid var(--line);
+    border-radius: 4px; font-size: 13px; color: var(--ink);
+    text-decoration: none; font-weight: 600; background: var(--bg-panel); }
+  .nav a:hover { background: var(--ink); color: var(--paper); }
+  .nav .spacer { flex: 1; }
+  .nav .mode-toggle { font-size: 12px; color: var(--ink-dim); }
+  .nav button { padding: 6px 12px; background: var(--ink); color: var(--paper);
+    border: 0; border-radius: 4px; font-size: 13px; cursor: pointer;
+    font-family: inherit; }
+  .nav button.secondary { background: transparent; color: var(--ink);
+    border: 1px solid var(--ink); }
+
+  /* CHAPTERS */
+  .chapter { padding: 24px 32px; border-top: 2px solid var(--line);
+    scroll-margin-top: 64px; }
+  .chapter:first-of-type { border-top: 0; }
+  .chapter-head { margin-bottom: 16px; }
+  .chapter-head h2 { margin: 0 0 4px; font-size: 22px;
+    display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .chapter-head h2 .ch-time { font-size: 13px; color: var(--ink-dim);
+    font-weight: 400; font-variant-numeric: tabular-nums; }
+  .chapter-head h2 .ch-dur { font-size: 12px; background: var(--paper);
+    border: 1px solid var(--line); padding: 2px 8px; border-radius: 12px;
+    color: var(--ink-dim); }
+  .chapter-head .intro { font-size: 14px; color: var(--ink-dim);
+    font-style: italic; }
+
+  /* BEAT CARD */
+  .beat { background: var(--bg-panel); border: 1px solid var(--line);
+    border-left: 6px solid var(--c, var(--ink-dim));
+    border-radius: 8px; padding: 16px 20px; margin-bottom: 16px; }
+  .beat[data-done="true"] { opacity: 0.55; background: #ebe6d8; }
+  .beat-head { display: flex; gap: 12px; align-items: center;
+    margin-bottom: 12px; flex-wrap: wrap; }
+  .beat-head .time { font-variant-numeric: tabular-nums; font-weight: 700;
+    font-size: 13px; color: var(--ink); padding: 2px 8px;
+    background: var(--paper); border-radius: 4px; border: 1px solid var(--line); }
+  .beat-head .title { font-size: 16px; font-weight: 700; flex: 1; }
+  .beat-head .tag { font-size: 10px; padding: 1px 7px; border-radius: 10px;
+    font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+  .tag-hook { background: var(--accent); color: #fff; }
+  .tag-thesis { background: var(--purple); color: #fff; }
+  .tag-method { background: var(--yellow); color: var(--ink); }
+  .tag-story { background: var(--green); color: #fff; }
+  .tag-climax { background: var(--ink); color: var(--yellow); }
+  .tag-cta { background: var(--blue); color: #fff; }
+  .tag-payoff { background: var(--green); color: #fff; }
+  .tag-meta { background: #fff; color: var(--ink); border: 1px solid var(--ink); }
+  .tag-rehook { background: #d35400; color: #fff; }
+  .tag-twist { background: var(--yellow); color: var(--ink); }
+  .tag-interrupt { background: #2c3e50; color: #fff; }
+  .beat-head .done-btn { padding: 4px 10px; background: var(--paper);
+    border: 1px solid var(--line); border-radius: 4px; font-size: 12px;
+    cursor: pointer; font-family: inherit; }
+  .beat[data-done="true"] .done-btn { background: var(--green); color: #fff;
+    border-color: var(--green); }
+
+  .beat-body { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; }
+
+  .vo-box { background: var(--bg-vo); border: 1px solid var(--yellow);
+    border-radius: 6px; padding: 14px 16px; }
+  .vo-label { font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .08em; color: var(--ink-dim); margin-bottom: 6px; }
+  .vo-text { font-size: 18px; line-height: 1.55; font-weight: 500; }
+  .vo-text b { background: rgba(232,182,71,0.5); padding: 0 3px;
+    font-weight: 800; }
+  .vo-text em { color: var(--accent); font-style: normal; font-weight: 600; }
+  .vo-text .pause { color: var(--ink-dim); font-style: italic; font-size: 14px; }
+  .stage { font-size: 12px; color: var(--ink-dim); font-style: italic;
+    margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line); }
+  .stage::before { content: "🎙 "; }
+
+  .visual-box { background: var(--paper); border: 1px solid var(--line);
+    border-radius: 6px; padding: 12px 14px; }
+  .visual-box img { width: 100%; height: auto; max-height: 140px;
+    object-fit: cover; border-radius: 4px; border: 1px solid var(--line);
+    margin-bottom: 8px; background: #fff; }
+  .visual-desc { font-size: 12px; color: var(--ink); line-height: 1.4; }
+  .visual-need { display: inline-block; background: var(--accent);
+    color: #fff; padding: 1px 6px; border-radius: 10px; font-size: 10px;
+    font-weight: 700; margin-left: 4px; text-transform: uppercase; }
+
+  .beat-foot { margin-top: 10px; padding-top: 8px;
+    border-top: 1px dashed var(--line);
+    display: flex; justify-content: space-between; font-size: 11px;
+    color: var(--ink-dim); }
+  .beat-foot .timing { font-variant-numeric: tabular-nums; }
+  .beat-foot .timing.warn { color: var(--accent); font-weight: 600; }
+
+  /* FOCUS MODE */
+  body.focus-mode .top, body.focus-mode .nav { display: none; }
+  body.focus-mode .chapter { padding: 20px 40px; }
+  body.focus-mode .beat { display: none; }
+  body.focus-mode .beat.focus-active { display: block;
+    max-width: 1000px; margin: 20px auto; }
+  body.focus-mode .vo-text { font-size: 26px; line-height: 1.6; }
+  body.focus-mode .beat-body { grid-template-columns: 1fr; }
+  body.focus-mode .focus-controls { display: flex; }
+  .focus-controls { display: none; position: fixed; bottom: 20px; left: 50%;
+    transform: translateX(-50%); background: var(--ink); color: var(--paper);
+    padding: 12px 20px; border-radius: 30px; gap: 12px; align-items: center;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.2); z-index: 20; }
+  .focus-controls button { background: transparent; color: var(--paper);
+    border: 1px solid var(--paper); padding: 6px 14px; border-radius: 20px;
+    font-size: 13px; cursor: pointer; font-family: inherit; }
+  .focus-controls button:hover { background: var(--paper); color: var(--ink); }
+  .focus-controls .pos { font-size: 13px; font-variant-numeric: tabular-nums;
+    padding: 0 8px; }
+
+  @media print {
+    .nav, .stats-bar, button { display: none !important; }
+    .beat { page-break-inside: avoid; }
+    body { padding: 0; }
+  }
+</style>
+</head>
+<body>
+
+<nav class="trolley-nav" style="position:sticky;top:0;z-index:1000;background:#2a2520;color:#f2ede0;padding:8px 18px;display:flex;gap:6px;align-items:center;font-size:13px;font-family:system-ui;box-shadow:0 2px 8px rgba(0,0,0,0.15);flex-wrap:wrap">
+  <span style="font-weight:700;color:#e8b647;margin-right:12px">🚋 Trolley Devlog</span>
+  <a href="structure.html" data-page="structure" style="color:#f2ede0;text-decoration:none;padding:5px 12px;border-radius:4px">📋 Структура</a>
+  <a href="script.html" data-page="script" style="color:#f2ede0;text-decoration:none;padding:5px 12px;border-radius:4px">📝 Сценарий</a>
+  <a href="recorder.html" data-page="recorder" style="color:#f2ede0;text-decoration:none;padding:5px 12px;border-radius:4px">🎙 Запись</a>
+  <a href="preview.html" data-page="preview" style="color:#f2ede0;text-decoration:none;padding:5px 12px;border-radius:4px">▶ Preview</a>
+  <a href="code-viz.html" data-page="code-viz" style="color:#f2ede0;text-decoration:none;padding:5px 12px;border-radius:4px">📊 Code-viz</a>
+  <script>(function(){var p=location.pathname.split('/').pop().replace('.html','');document.querySelectorAll('.trolley-nav a').forEach(function(a){if(a.dataset.page===p){a.style.background='#c0392b';a.style.fontWeight='600'}else{a.onmouseenter=function(){a.style.background='rgba(255,255,255,0.1)'};a.onmouseleave=function(){a.style.background='transparent'}}});})();</script>
+</nav>
+
+<div class="top">
+  <h1>Not a Trolley Problem <span class="accent">— Сценарий</span> <span class="v">v1 · 8:50</span></h1>
+  <div class="subtitle">Текст под озвучку с таймингами, эмоциональными метками и визуалом. Жми <b>Фокус</b> для записи по сценам.</div>
+
+  <div class="stats-bar">
+    <div class="s">⏱ <b id="total-time">8:50</b></div>
+    <div class="s">📝 <b id="total-words">0</b> слов</div>
+    <div class="s">🎙 <b>~140</b> слов/мин (норма)</div>
+    <div class="s">✓ <b id="done-count">0</b>/<b id="total-count">0</b></div>
+    <div class="progress"><div id="progress-fill"></div></div>
+  </div>
+</div>
+
+<div class="nav">
+  <a href="#a0">Акт 0 · Хук</a>
+  <a href="#a1">Акт 1 · Идея</a>
+  <a href="#a2">Акт 2 · Лошадь 🐎</a>
+  <a href="#a3">Акт 3 · Игра 📊</a>
+  <a href="#a4">Акт 4 · Цифры</a>
+  <a href="#a5">Акт 5 · Steam</a>
+  <span class="spacer"></span>
+  <button onclick="toggleFocus()">🎙 Фокус-запись</button>
+  <button class="secondary" onclick="resetDone()">↺ Сброс</button>
+  <button class="secondary" onclick="window.print()">🖨 Печать</button>
+</div>
+
+<!-- ACT 0 -->
+<section class="chapter" id="a0">
+  <div class="chapter-head">
+    <h2>Акт 0 — Хук <span class="ch-time">0:00 — 0:25</span> <span class="ch-dur">25 сек</span></h2>
+    <div class="intro">Цель: остановить скролл за 3 секунды. Claim-first + факты столбиком + title card.</div>
+  </div>
+
+  <div class="beat" style="--c:#c0392b">
+    <div class="beat-head">
+      <span class="time">0:00 — 0:03</span>
+      <span class="title">Шок-claim</span>
+      <span class="tag tag-hook">CLAIM ⚡</span>
+      <button class="done-btn">○</button>
+    </div>
+    <div class="beat-body">
+      <div class="vo-box">
+        <div class="vo-label">Текст озвучки</div>
+        <div class="vo-text">"<b>Ни одной строчки кода в этой игре я не написал сам.</b>"</div>
+        <div class="stage">Энергично, без вибрато. Произнести разборчиво — это ключевая фраза видео. Микро-пауза перед "сам".</div>
+      </div>
+      <div class="visual-box">
+        <img src="../data/trailer/beat_01_5_first_kill.png" alt="trailer chaos">
+        <div class="visual-desc">Trailer chaos (первый kill из трейлера) + поверх ОГРОМНЫЙ красный текст <b>"0 СТРОК КОДА"</b> синхронно с VO. Музыка трейлера громкая.</div>
+      </div>
+    </div>
+    <div class="beat-foot"><span class="timing">10 слов · ~3.0с при 200 слов/мин (быстрая речь хука)</span></div>
+  </div>
+
+  <div class="beat" style="--c:#c0392b">
+    <div class="beat-head">
+      <span class="time">0:03 — 0:26</span>
+      <span class="title">Хук-цифры ($1000 + 13д + AI)</span>
+      <span class="tag tag-hook">HOOK ⚡</span>
+      <button class="done-btn">○</button>
+    </div>
+    <div class="beat-body">
+      <div class="vo-box">
+        <div class="vo-label">Текст озвучки</div>
+        <div class="vo-text">"<b>Заработал тысячу долларов. Тринадцать дней. Тридцать тысяч строк кода — всё написал ИИ.</b> Инкременталка про проблему трамвая на Gamedev.js Jam. <b>Первое место в Wavedash Deploy Challenge.</b> Восемнадцатое в общем зачёте. И <b>топ-2 incremental на itch.</b>"</div>
+        <div class="stage">⚡ HOOK — критичный для ретеншна beat. Стаккато из ТРЁХ ударов ("Заработал тысячу долларов / Тринадцать дней / 30 тысяч строк — всё ИИ"). Каждая фраза = удар, микро-пауза 0.3-0.5с между. ⚠ "Заработал" — лёгкий акцент (снимает двусмысленность "потратил на API"). На "Первое место в Wavedash" — лёгкое поднятие тона. Финал "топ-2 incremental" — спокойно, bonus.</div>
+      </div>
+      <div class="visual-box">
+        <img src="../data/itch/05_trolley_progression.png" alt="gameplay">
+        <div class="visual-desc"><b>+$1000</b> крупно золотом (плюс = gain) → <b>13 ДНЕЙ</b> → <b>30 000 СТРОК · ВСЁ ИИ</b> → трамвай B-roll → <b>🏆 1-е МЕСТО · WAVEDASH</b> → <b>#18/489</b> → топ-2 incremental на itch.</div>
+      </div>
+    </div>
+    <div class="beat-foot"><span class="timing">~33 слова · ~23с (staccato hook — 3 ударные цифры в первые 4с)</span></div>
+  </div>
+
+  <div class="beat" style="--c:#c0392b">
+    <div class="beat-head">
+      <span class="time">0:18 — 0:25</span>
+      <span class="title">Title card</span>
+      <span class="tag tag-hook">PROMISE</span>
+      <button class="done-btn">○</button>
+    </div>
+    <div class="beat-body">
+      <div class="vo-box">
+        <div class="vo-label">Текст озвучки</div>
+        <div class="vo-text"><span class="pause">[без слов, 7 секунд title card + нарезка]</span></div>
+        <div class="stage">Не озвучивается. Музыка возвращается на полной громкости.</div>
+      </div>
+      <div class="visual-box">
+        <img src="../data/trailer/beat_18_2_title.png" alt="title card">
+        <div class="visual-desc">Title card "Not a Trolley Problem — Jam Devlog" из трейлера + быстрая нарезка boss/choice/upgrade кадров на оставшиеся секунды.</div>
+      </div>
+    </div>
+    <div class="beat-foot"><span class="timing">0 слов · 7с visual</span></div>
+  </div>
+</section>
+
+<!-- ACT 1 -->
+<section class="chapter" id="a1">
+  <div class="chapter-head">
+    <h2>Акт 1 — Идея <span class="ch-time">0:25 — 1:05</span> <span class="ch-dur">40 сек</span></h2>
+    <div class="intro">Контекст джема, поворот идеи, Day 1. Быстро.</div>
+  </div>
+
+  <div class="beat" style="--c:#4a7ba8">
+    <div class="beat-head">
+      <span class="time">0:25 — 0:50</span>
+      <span class="title">Тема + идея</span>
+      <span class="tag tag-twist">SETUP</span>
+      <button class="done-btn">○</button>
+    </div>
+    <div class="beat-body">
+      <div class="vo-box">
+        <div class="vo-label">Текст озвучки</div>
+        <div class="vo-text">"Gamedev.js Jam две тысячи двадцать шестой год. Тема — <b>Machines</b>. Тринадцать дней. Трамвай — это машина. А <em>проблема вагонетки</em> — это интересная задачка, про которую можно сделать игру. <b>А что если нет никакой проблемы?</b> Что если трамвай ездит по кругу, и нужно просто добавлять больше людей."</div>
+        <div class="stage">Конверсационно, с лёгкой улыбкой к финалу. На "А что если нет никакой проблемы?" — поднять интонацию, intrigue. На "добавлять больше людей" — спокойно, почти буднично — это и есть твист.</div>
+      </div>
+      <div class="visual-box">
+        <img src="../data/itch/02_day2_doodle_hud.png" alt="early HUD">
+        <div class="visual-desc">Логотип Gamedev.js → слово MACHINES крупно → силуэт трамвая → классическая иллюстрация trolley problem → ✕ → "ты рука" → кадр геймплея <span class="visual-need">NEED jam logo</span></div>
+      </div>
+    </div>
+    <div class="beat-foot"><span class="timing">43 слова · ~22с при 120 слов/мин (с паузой) ✓</span></div>
+  </div>
+
+  <div class="beat" style="--c:#4a7ba8">
+    <div class="beat-head">
+      <span class="time">0:50 — 1:05</span>
+      <span class="title">Day 1 — кружочки</span>
+      <span class="tag tag-twist">REFRAME</span>
+      <button class="done-btn">○</button>
+    </div>
+    <div class="beat-body">
+      <div class="vo-box">
+        <div class="vo-label">Текст озвучки</div>
+        <div class="vo-text">"День первый. Рельсы, кружочки. <b>Любая игра начинается с примитивов</b> — нужно проверить, интересна ли механика. Тащишь, бросаешь, <em>трамвай ездит, монетки летят.</em>"</div>
+        <div class="stage">Деловой тон. На "Любая игра начинается с примитивов" — спокойная уверенность, teaching moment. Финал "монетки летят" — лёгкое удовлетворение, чуть улыбкой.</div>
+      </div>
+      <div class="visual-box">
+        <img src="../data/itch/01_day1_first_trolley.png" alt="day 1">
+        <div class="visual-desc">itch/01_day1_first_trolley.png + Day 1 clip 5-6 сек реального геймплея <span class="visual-need">NEED day1 clip</span></div>
+      </div>
+    </div>
+    <div class="beat-foot"><span class="timing">23 слова · ~12с при 115 слов/мин ✓</span></div>
+  </div>
+</section>
+
+<!-- ACT 2 -->
+<section class="chapter" id="a2">
+  <div class="chapter-head">
+    <h2>Акт 2 — Лошадь без тормозов 🐎 <span class="ch-time">1:05 — 3:20</span> <span class="ch-dur">2:15</span></h2>
+    <div class="intro">Главная содержательная часть. Тезис + 3 практики. Без театра, без хайпа.</div>
+  </div>
+
+  <div class="beat" style="--c:#6b8e4e">
+    <div class="beat-head">
+      <span class="time">1:05 — 1:25</span>
+      <span class="title">0 строк кода — мой workflow</span>
+      <span class="tag tag-thesis">CLAIM</span>
+      <button class="done-btn">○</button>
+    </div>
+    <div class="beat-body">
+      <div class="vo-box">
+        <div class="vo-label">Текст озвучки</div>
+        <div class="vo-text">"<b>Эти примитивы написал ИИ.</b> И всё что было дальше — тоже. Полгода я не пишу код руками — Claude Code пишет, я проверяю. <em>Проверяю как код, так и тестирую результат.</em> <b>В этом проекте я вообще не смотрел на код</b> — это джем, времени было мало."</div>
+        <div class="stage">Прямой pickup из a1-2 (только что видели "примитивы"). "Эти примитивы написал ИИ" — без преамбулы. "И всё что было дальше — тоже" — расширение, лёгкое поднятие. "Я проверяю" — снижение тона (нормализация). На "Проверяю как код, так и тестирую результат" — деловое уточнение. На "вообще не смотрел на код" — честное признание. На "это джем, времени было мало" — объяснение, не извинение. БЕЗ "возвращаюсь к началу" — мост через "примитивы".</div>
+      </div>
+      <div class="visual-box">
+        <img src="../data/trailer/beat_06_0_upgrades_panel.png" alt="Claude Code IDE placeholder">
+        <div class="visual-desc">Скриншот Claude Code в IDE, tool calls пролетают на экране <span class="visual-need">NEED IDE screenshot</span></div>
+      </div>
+    </div>
+    <div class="beat-foot"><span class="timing">40 слов · ~18с при 130 слов/мин ✓</span></div>
+  </div>
+
+  <div class="beat" style="--c:#6b8e4e">
+    <div class="beat-head">
+      <span class="time">1:25 — 2:00</span>
+      <span class="title">Это инструмент — главный тезис</span>
+      <span class="tag tag-thesis">THESIS ⚡</span>
+      <button class="done-btn">○</button>
+    </div>
+    <div class="beat-body">
+      <div class="vo-box">
+        <div class="vo-label">Текст озвучки</div>
+        <div class="vo-text">"Вокруг ИИ много хайпа. С одной стороны — <em>'игра за один промпт'</em>. И да, что-то простое за один промпт сделать можно. <b>Но не большую игру.</b> С другой стороны — <em>'ИИ не умеет делать игры'</em>. И тут тоже есть правда — у многих не получается. <b>Реальность проще: ИИ — это инструмент. Нужно уметь им пользоваться.</b> И если умеешь — можно делать игры на полном ИИ-слопе. <b>Даже большие. Даже долгие.</b>"</div>
+        <div class="stage">Размеренно, без crusader-тона. На цитаты — лёгкая ироничная интонация (но не сарказм). На "Реальность проще" — снижение тона, спокойная декларация. Финал "Даже большие. Даже долгие." — отрубленно, как точки. БЕЗ [пауза] — natural micro-breath.</div>
+      </div>
+      <div class="visual-box">
+        <img src="../data/promo_itch/cover_v1_source.png" alt="hype contrast">
+        <div class="visual-desc">Левая: твит "AI in 1 prompt"* / Правая: твит "AI can't do games"* / звёздочки мелко снизу. cut → центр: одно слово <b>"ИНСТРУМЕНТ"</b></div>
+      </div>
+    </div>
+    <div class="beat-foot"><span class="timing">76 слов · ~35с при 130 слов/мин ✓</span></div>
+  </div>
+
+  <div class="beat" style="--c:#6b8e4e">
+    <div class="beat-head">
+      <span class="time">2:00 — 2:45</span>
+      <span class="title">Лошадь + 3 практики 🐎</span>
+      <span class="tag tag-method">METHOD ⚡</span>
+      <button class="done-btn">○</button>
+    </div>
+    <div class="beat-body">
+      <div class="vo-box">
+        <div class="vo-label">Текст озвучки</div>
+        <div class="vo-text">"ИИ — это <b>лошадь без тормозов</b>. Тянет быстро, не устаёт. Но без кучера улетит в канаву. И вот что делает кучер. <b>Первое — рамки.</b> Заранее решить какая игра, какого размера, что внутри. <b>Второе — декомпозиция.</b> Не <em>«сделай игру»</em>, а <em>«вот описание системы столкновений трамвая с NPC»</em>. Маленькие задачи, понятные интерфейсы. <b>Третье — все цифры баланса в отдельный файл.</b> Здоровье, скорости, цены — туда. ИИ читает и пишет, я правлю руками когда не нравится. <em>Этих трёх вещей хватает чтобы делать игры целиком на ИИ. Даже большие.</em>"</div>
+        <div class="stage">Самый важный beat видео — методология. Размеренно, человеческим русским (без "Pillars/scope/слоп"; "декомпозиция/интерфейсы" — нормальный gamedev-лексикон, оставляем). Каждое "Первое / Второе / Третье" — короткий beat-маркер. Финал — уверенно, чуть тише. 👀 PIP-лицо в углу, жесты пальцами 1-2-3. БЕЗ [пауза].</div>
+      </div>
+      <div class="visual-box">
+        <img src="../data/trailer/beat_06_0_upgrades_panel.png" alt="3 practices visual">
+        <div class="visual-desc">Doodle: лошадь несётся → кучер натягивает вожжи. Затем три плашки по очереди: <b>1️⃣ РАМКИ</b> (показать pillars из concept.md) → <b>2️⃣ ДЕКОМПОЗИЦИЯ</b> (кусок кода с разделением на systems/) → <b>3️⃣ КОНФИГИ В БАЛАНС</b> (balance.js на экране)</div>
+      </div>
+    </div>
+    <div class="beat-foot"><span class="timing">102 слова · ~45с при 135 слов/мин ✓</span></div>
+  </div>
+
+  <div class="beat" style="--c:#6b8e4e">
+    <div class="beat-head">
+      <span class="time">2:45 — 3:05</span>
+      <span class="title">С графикой та же история</span>
+      <span class="tag tag-interrupt">INTERRUPT</span>
+      <button class="done-btn">○</button>
+    </div>
+    <div class="beat-body">
+      <div class="vo-box">
+        <div class="vo-label">Текст озвучки</div>
+        <div class="vo-text">"С графикой та же история. ИИ генерирует — я отбираю. <b>Пятьдесят итераций обложки.</b> Стиль не пришёл из одного промпта — он <em>вырос из выкидывания того, что не зашло.</em>"</div>
+        <div class="stage">Спокойно, продолжая мысль. На "Пятьдесят итераций" — лёгкое подчёркивание, это конкретика. Финал — почти философски.</div>
+      </div>
+      <div class="visual-box">
+        <img src="../data/promo_steam/header_1.png" alt="cover iterations">
+        <div class="visual-desc">Карусель отвергнутых обложек (крестики на каждой) → финальная (галочка) → быстрый кроссфейд эволюции стиля itch/01-04. 20 секунд</div>
+      </div>
+    </div>
+    <div class="beat-foot"><span class="timing">28 слов · ~16с при 105 слов/мин ✓</span></div>
+  </div>
+
+  <div class="beat" style="--c:#6b8e4e">
+    <div class="beat-head">
+      <span class="time">3:05 — 3:20</span>
+      <span class="title">Критика игроков</span>
+      <span class="tag tag-meta">META</span>
+      <button class="done-btn">○</button>
+    </div>
+    <div class="beat-body">
+      <div class="vo-box">
+        <div class="vo-label">Текст озвучки</div>
+        <div class="vo-text">"На itch были комментарии про ИИ. <em>«ИИ-арт видно».</em> <b>Игроки правы.</b> Особенно на задних фонах. Но это прототип за тринадцать дней — <em>ИИ-арт на фоне лучше, чем белый экран.</em> <em>В Steam-версии будет нормальный визуал.</em>"</div>
+        <div class="stage">Открывается двумя короткими ударами: "Были комментарии про ИИ. ИИ-арт видно." — staccato, как цитата. "Игроки правы" — без иронии, серьёзно, прямой взгляд. "Особенно на задних фонах" — уточнение. "ИИ-арт на фоне лучше, чем белый экран" — tradeoff-объяснение, не оправдание. Финал — обещание, без театра.</div>
+      </div>
+      <div class="visual-box">
+        <img src="../data/itch/08_choice_reviews.png" alt="reviews">
+        <div class="visual-desc">Реальный комментарий с itch текстом + мой ответ типографикой <span class="visual-need">NEED itch comments screenshot</span></div>
+      </div>
+    </div>
+    <div class="beat-foot"><span class="timing">22 слова · ~13с при 100 слов/мин ✓</span></div>
+  </div>
+</section>
+
+<!-- ACT 3 -->
+<section class="chapter" id="a3">
+  <div class="chapter-head">
+    <h2>Акт 3 — Что я сделал за 13 дней 📊 <span class="ch-time">3:20 — 5:50</span> <span class="ch-dur">2:30</span></h2>
+    <div class="intro">Игра и разработка. Code-showcase + ядро механики + boss-история + остальные фичи + submit.</div>
+  </div>
+
+  <div class="beat" style="--c:#a87b4a">
+    <div class="beat-head">
+      <span class="time">3:20 — 3:50</span>
+      <span class="title">Code showcase — что я нагенерил 📊</span>
+      <span class="tag tag-interrupt">SHOWCASE ⚡</span>
+      <button class="done-btn">○</button>
+    </div>
+    <div class="beat-body">
+      <div class="vo-box">
+        <div class="vo-label">Текст озвучки</div>
+        <div class="vo-text">"Тринадцать дней работы. Посмотрим что получилось. <b>Двести семьдесят три коммита.</b> Самый продуктивный — день второй: <b>восемьдесят коммитов за сутки</b>. <b>Тридцать тысяч строк кода. Сто два файла.</b> Где они живут? <b>UI — восемь с половиной тысяч строк</b>, самая большая зона: модалки, панели, дерево. <b>Engine-core — почти семь тысяч</b> — это шаблон, переедет в следующие игры. Системы плюс данные — ещё четыре тысячи. Самый жирный файл — <b>TrolleyChoiceModal</b>, две тысячи триста сорок семь строк. Те самые выбор-карточки. <em>И всё это написал ИИ. Я писал промпты.</em>"</div>
+        <div class="stage">Гордость с лёгкой удивлённостью. Цифры — ритмично. На "Где они живут?" — короткая пауза-вопрос. Финал "И всё это написал ИИ. Я писал промпты" — снижение тона, спокойная констатация AI-тезиса. БЕЗ [пауза].</div>
+      </div>
+      <div class="visual-box">
+        <img src="../data/trailer/beat_06_0_upgrades_panel.png" alt="code stats">
+        <div class="visual-desc"><b>5 сцен × 30 сек:</b><br>
+          1. Bar chart commits/day (8с) — день 2 пиково мигает<br>
+          2. Counter 30 000 lines тикает (4с)<br>
+          3. Treemap по областям прорастает (8с)<br>
+          4. Top-3 файлов bar highlight (6с)<br>
+          5. Плашка "AI: 100% · Я: промпты" (4с)<br>
+          Источник: <code>web/code-viz.html</code></div>
+      </div>
+    </div>
+    <div class="beat-foot"><span class="timing">96 слов · ~32с при 180 слов/мин (нужно энергично)</span></div>
+  </div>
+
+  <div class="beat" style="--c:#a87b4a">
+    <div class="beat-head">
+      <span class="time">3:50 — 4:10</span>
+      <span class="title">#1 Липкий палец — ядро</span>
+      <span class="tag tag-story">FEATURE</span>
+      <button class="done-btn">○</button>
+    </div>
+    <div class="beat-body">
+      <div class="vo-box">
+        <div class="vo-label">Текст озвучки</div>
+        <div class="vo-text">"<b>Важная часть игры — это липкий палец.</b> Двигаешь пальцем. Человечки прилипают. Тащишь к рельсам. Отпускаешь. <em>Радиус, сколько за раз тянешь — всё это апгрейдится.</em>"</div>
+        <div class="stage">Простое объяснение механики, action-перечислением. Каждое короткое предложение — отдельный beat, микро-пауза между. БЕЗ англицизмов: липкий палец, человечки, радиус, кол-во.</div>
+      </div>
+      <div class="visual-box">
+        <img src="../data/trailer/beat_04_5_mid_chaos.png" alt="липкий палец">
+        <div class="visual-desc">Gameplay clip с annotations: палец двигается → человечки прилипают → тянем к рельсам → отпускаем (splat). Финал — плашка апгрейдов русским</div>
+      </div>
+    </div>
+    <div class="beat-foot"><span class="timing">24 слова · ~14с при 100 слов/мин ✓</span></div>
+  </div>
+
+  <div class="beat" style="--c:#a87b4a">
+    <div class="beat-head">
+      <span class="time">4:10 — 4:45</span>
+      <span class="title">#2 Боссы — переписал в последний день ⚡</span>
+      <span class="tag tag-story">STORY ⚡</span>
+      <button class="done-btn">○</button>
+    </div>
+    <div class="beat-body">
+      <div class="vo-box">
+        <div class="vo-label">Текст озвучки</div>
+        <div class="vo-text">"Первая версия боссов была с таймером. Босс появляется на тридцать секунд, не успел — ушёл, жди следующего. Сел играть сам. <em>Скучно и сложно. Бесит.</em> В idle-игре где смысл расслабиться. Двенадцатый день, двадцать четыре часа до сдачи. Сел и переписал. <b>Один босс на мир, всегда на сцене, ждёт пока ты его убьёшь. Убил — открывается следующий мир со своим боссом.</b> Никаких таймеров. <em>Стало в разы лучше.</em>"</div>
+        <div class="stage">История — рассказывай как историю. На "Скучно и сложно. Бесит." — снижение тона. На "Двенадцатый день, двадцать четыре часа до сдачи" — деловой тон, без драмы. На "Сел и переписал" — решимость. Финал "Стало в разы лучше" — удовлетворённо, тихо. 👀 ЛИЦО full-frame. БЕЗ [пауза].</div>
+      </div>
+      <div class="visual-box">
+        <img src="../data/trailer/beat_15_0_boss.png" alt="boss">
+        <div class="visual-desc">До: старая boss UI с таймером и "ESCAPED". cut → После: постоянный босс на сцене. trailer/beat_15_0_boss.png. Финал — clip нового геймплея 5-7 сек</div>
+      </div>
+    </div>
+    <div class="beat-foot"><span class="timing">82 слова · ~35с при 140 слов/мин ✓</span></div>
+  </div>
+
+  <div class="beat" style="--c:#a87b4a">
+    <div class="beat-head">
+      <span class="time">4:45 — 5:10</span>
+      <span class="title">#3 Выбор-карточки — тематический хребет</span>
+      <span class="tag tag-story">FEATURE</span>
+      <button class="done-btn">○</button>
+    </div>
+    <div class="beat-body">
+      <div class="vo-box">
+        <div class="vo-label">Текст озвучки</div>
+        <div class="vo-text">"Во время игры повышаешь ранги. Каждый ранг — <b>выбор-карточка</b>. Абсурдная дилемма. <em>Кот Шредингера в коробке или учёный. Мимы или клоуны.</em> <b>Десять штук.</b> Тот самый жирный файл из инфографики — две тысячи триста строк."</div>
+        <div class="stage">С лёгкой улыбкой — смешные дилеммы. Названия ("Шредингер", "мимы/клоуны") — чётко, как читаешь список. Финал — callback к жирному файлу из a3-1.</div>
+      </div>
+      <div class="visual-box">
+        <img src="../data/trailer/beat_10_6_choice_schrodinger.png" alt="choice cards">
+        <div class="visual-desc">Карусель beat_09/10/11 трейлера (classic / schrödinger / isekai) + clip трейлера 8.5-12.7</div>
+      </div>
+    </div>
+    <div class="beat-foot"><span class="timing">33 слова · ~20с при 100 слов/мин ✓</span></div>
+  </div>
+
+  <div class="beat" style="--c:#a87b4a">
+    <div class="beat-head">
+      <span class="time">5:10 — 5:30</span>
+      <span class="title">#4 Миры + апгрейд-дерево</span>
+      <span class="tag tag-story">FEATURE</span>
+      <button class="done-btn">○</button>
+    </div>
+    <div class="beat-body">
+      <div class="vo-box">
+        <div class="vo-label">Текст озвучки</div>
+        <div class="vo-text">"<b>Пять миров.</b> Каждый — своя палитра и свой босс. Дерево как в классических incrementals. <b>Пятьдесят девять нод.</b>"</div>
+        <div class="stage">Деловой тон. Названия миров не зачитываем (визуал покажет). "59 нод" — финал чётко. Визуал в монтаже: развёрнутое дерево показывает разнообразие нод (без явного "X типов" — в коде 26 effect.kind и 4 визуальные tone-группы, но в VO это излишне).</div>
+      </div>
+      <div class="visual-box">
+        <img src="../data/itch/04_forest_world.png" alt="worlds">
+        <div class="visual-desc">Кроссфейд 5 worlds (depot → suburbs → city → metropolis → forest) + clip трейлера 5-8 сек (upgrade каскад) + анимация дерева пустое → полное</div>
+      </div>
+    </div>
+    <div class="beat-foot"><span class="timing">35 слов · ~20с при 105 слов/мин ✓</span></div>
+  </div>
+
+  <div class="beat" style="--c:#a87b4a">
+    <div class="beat-head">
+      <span class="time">5:30 — 5:50</span>
+      <span class="title">Загружено · переход к цифрам</span>
+      <span class="tag tag-rehook">RE-HOOK</span>
+      <button class="done-btn">○</button>
+    </div>
+    <div class="beat-body">
+      <div class="vo-box">
+        <div class="vo-label">Текст озвучки</div>
+        <div class="vo-text">"Двадцать шестое апреля. <b>Загружено.</b> Игра живая, я доволен, я устал. Что я не ожидал — <em>что будет дальше.</em>"</div>
+        <div class="stage">"Submit" — отрубленно, точка. "Я устал" — буквально устало, искренне. На "Что будет дальше" — тон поднимается, intrigue. Это re-hook к Акту 4.</div>
+      </div>
+      <div class="visual-box">
+        <img src="../data/itch/06_submission_wavedash.png" alt="submit">
+        <div class="visual-desc">itch/06_submission_wavedash.png + cursor нажимает Submit → cut на чёрный экран → надпись "13/13" → cut на пустой график (тизер reveal'ов)</div>
+      </div>
+    </div>
+    <div class="beat-foot"><span class="timing">19 слов · ~13с при 90 слов/мин (медленнее для эффекта) ✓</span></div>
+  </div>
+</section>
+
+<!-- ACT 4 -->
+<section class="chapter" id="a4">
+  <div class="chapter-head">
+    <h2>Акт 4 — Reveal цифр (climax) <span class="ch-time">5:50 — 7:50</span> <span class="ch-dur">2:00</span></h2>
+    <div class="intro">Эскалирующий reveal. Каждая цифра бьёт сильнее. Climax — 214 wishlists с благодарностью.</div>
+  </div>
+
+  <div class="beat" style="--c:#e8b647">
+    <div class="beat-head">
+      <span class="time">5:50 — 6:05</span>
+      <span class="title">Reveal #1 — views</span>
+      <span class="tag tag-interrupt">INTERRUPT</span>
+      <button class="done-btn">○</button>
+    </div>
+    <div class="beat-body">
+      <div class="vo-box">
+        <div class="vo-label">Текст озвучки</div>
+        <div class="vo-text">"Первая цифра. <b>Тридцать шесть тысяч просмотров. Двадцать пять тысяч сыграли в браузере. За тридцать дней. Бесплатно.</b>"</div>
+        <div class="stage">Каждая цифра — отдельный удар. "Бесплатно" — лёгкая отделённая интонация, эта деталь важна.</div>
+      </div>
+      <div class="visual-box">
+        <img src="../data/steam/wishlist_daily_2026-05-11.png" alt="views graph">
+        <div class="visual-desc">Чёрный экран, 36 100 анимированно считается вверх + 25.6k плашка появляется <span class="visual-need">NEED itch views screenshot</span></div>
+      </div>
+    </div>
+    <div class="beat-foot"><span class="timing">22 слова · ~13с при 100 слов/мин ✓</span></div>
+  </div>
+
+  <div class="beat" style="--c:#e8b647">
+    <div class="beat-head">
+      <span class="time">6:05 — 6:20</span>
+      <span class="title">Reveal #2 — rating + collections</span>
+      <span class="tag tag-payoff">REVEAL</span>
+      <button class="done-btn">○</button>
+    </div>
+    <div class="beat-body">
+      <div class="vo-box">
+        <div class="vo-label">Текст озвучки</div>
+        <div class="vo-text">"Девятнадцать оценок, средняя <b>четыре и три из пяти</b>. Четыреста шестьдесят восемь человек добавили в коллекции. <em>Окей.</em>"</div>
+        <div class="stage">Деловой тон. "Окей" — лёгкое удовлетворение, без пафоса.</div>
+      </div>
+      <div class="visual-box">
+        <img src="../data/itch/05_trolley_progression.png" alt="ratings">
+        <div class="visual-desc">Плашки одна за одной: 4.3/5 (с звёздочками) → 468 (с иконкой коллекции)</div>
+      </div>
+    </div>
+    <div class="beat-foot"><span class="timing">21 слово · ~13с при 100 слов/мин ✓</span></div>
+  </div>
+
+  <div class="beat" style="--c:#e8b647">
+    <div class="beat-head">
+      <span class="time">6:20 — 6:40</span>
+      <span class="title">Reveal #3 — Theme #102 (слабое место)</span>
+      <span class="tag tag-twist">TWIST</span>
+      <button class="done-btn">○</button>
+    </div>
+    <div class="beat-body">
+      <div class="vo-box">
+        <div class="vo-label">Текст озвучки</div>
+        <div class="vo-text">"Места в джеме — из <b>четырёхсот восьмидесяти девяти игр</b>. Самое слабое: <b>Theme — сто второе.</b> Видно что жюри посчитали что трамвай не очень-то 'машина' в смысле темы. <em>Понимаю.</em>"</div>
+        <div class="stage">Спокойно признать. Без депрессии и без оправданий. "Понимаю" — финальная точка, как принятие.</div>
+      </div>
+      <div class="visual-box">
+        <img src="../data/itch/05_trolley_progression.png" alt="jam table">
+        <div class="visual-desc">Таблица jam-результатов с числами /489. Theme строка подсвечена нейтрально-оранжевым (не красным — это не провал, мидл-тейбл)</div>
+      </div>
+    </div>
+    <div class="beat-foot"><span class="timing">33 слова · ~18с при 110 слов/мин ✓</span></div>
+  </div>
+
+  <div class="beat" style="--c:#e8b647">
+    <div class="beat-head">
+      <span class="time">6:40 — 7:05</span>
+      <span class="title">Reveal #4 — Gameplay #11 🏆</span>
+      <span class="tag tag-payoff">PAYOFF ⚡</span>
+      <button class="done-btn">○</button>
+    </div>
+    <div class="beat-body">
+      <div class="vo-box">
+        <div class="vo-label">Текст озвучки</div>
+        <div class="vo-text">"Но я делал не Theme. Я делал <b>Gameplay</b>. И вот цифра ради которой всё это было: <b>Gameplay — одиннадцатое место. Из четырёхсот восьмидесяти девяти.</b>"</div>
+        <div class="stage">Это первая большая победа. Пауза перед "Gameplay" — drama. "Одиннадцатое место" — отчётливо. "Из четырёхсот восьмидесяти девяти" — медленнее, с акцентом на масштабе.</div>
+      </div>
+      <div class="visual-box">
+        <img src="../data/promo_steam/steam_05_maxed_out.png" alt="gameplay #11">
+        <div class="visual-desc">Большое <b>#11</b> на экране, золотая обводка, плашка GAMEPLAY. Музыка возвращается с подъёмом. Внизу мелко: "11/489"</div>
+      </div>
+    </div>
+    <div class="beat-foot"><span class="timing">30 слов · ~22с при 80 слов/мин (медленнее для веса) ✓</span></div>
+  </div>
+
+  <div class="beat" style="--c:#e8b647">
+    <div class="beat-head">
+      <span class="time">7:05 — 7:30</span>
+      <span class="title">Reveal #5 — 214 wishlists ⚡</span>
+      <span class="tag tag-climax">CLIMAX ⚡⚡</span>
+      <button class="done-btn">○</button>
+    </div>
+    <div class="beat-body">
+      <div class="vo-box">
+        <div class="vo-label">Текст озвучки</div>
+        <div class="vo-text">"И самое неожиданное. <b>У меня открыта Steam-страница.</b> Coming Soon. Без рекламы. <em>За три недели — двести четырнадцать wishlist'ов.</em> <b>Спасибо всем кто добавил.</b> Постараюсь сделать что-то крутое."</div>
+        <div class="stage">Самый эмоциональный момент. "Самое неожиданное" — с лёгким удивлением. "Двести четырнадцать wishlist'ов" — медленно, отчётливо. На "Спасибо всем кто добавил" — искренне, с теплотой. Финал "Постараюсь сделать что-то крутое" — обещание, но мягкое, не громкое.</div>
+      </div>
+      <div class="visual-box">
+        <img src="../data/promo_steam/library_capsule.png" alt="steam page">
+        <div class="visual-desc">data/promo_steam/library_capsule + плашка "214 wishlists" огромная с подсветкой + Steam wishlist icon мигает + ссылка внизу</div>
+      </div>
+    </div>
+    <div class="beat-foot"><span class="timing">36 слов · ~25с при 90 слов/мин (медленно для climax) ✓</span></div>
+  </div>
+
+  <div class="beat" style="--c:#e8b647">
+    <div class="beat-head">
+      <span class="time">7:30 — 7:50</span>
+      <span class="title">Channels — откуда пришли цифры</span>
+      <span class="tag tag-twist">CHANNELS</span>
+      <button class="done-btn">○</button>
+    </div>
+    <div class="beat-body">
+      <div class="vo-box">
+        <div class="vo-label">Текст озвучки</div>
+        <div class="vo-text">"Что я делал — <b>писал везде где мог</b>: Twitter, Telegram, Reddit, сам itch. <b>itch хорошо продвинул</b> — попадал в frontpage, держался топ-2 в incrementals. Первая волна wishlist'ов на Steam — из соцсетей. С самого itch конверсия небольшая, <b>но есть.</b> Когда itch снова продвигает — Steam подтягивается через день-два."</div>
+        <div class="stage">Спокойный аналитический разбор. Без crusader-тона. "Конверсия небольшая, но есть" — констатация, не разочарование. "Когда itch снова продвигает" — деловое наблюдение.</div>
+      </div>
+      <div class="visual-box">
+        <img src="../data/steam/wishlist_daily_2026-05-11.png" alt="channels graph">
+        <div class="visual-desc">Side-by-side два графика (itch views + Steam wishlist adds). Стрелочки: первый Steam-пик подписан "соцсети", май-пик подписан "itch frontpage → Steam +1-2 дня" <span class="visual-need">NEED itch graph</span></div>
+      </div>
+    </div>
+    <div class="beat-foot"><span class="timing">47 слов · ~22с при 130 слов/мин ✓</span></div>
+  </div>
+</section>
+
+<!-- ACT 5 -->
+<section class="chapter" id="a5">
+  <div class="chapter-head">
+    <h2>Акт 5 — Steam-направление + CTA <span class="ch-time">7:50 — 8:50</span> <span class="ch-dur">1:00</span></h2>
+    <div class="intro">Финал. Wavedash слот + что дальше + призыв.</div>
+  </div>
+
+  <div class="beat" style="--c:#e8b647">
+    <div class="beat-head">
+      <span class="time">7:50 — 8:02</span>
+      <span class="title">Wavedash — первое место ($1000)</span>
+      <span class="tag tag-hook">CALLBACK ⚡</span>
+      <button class="done-btn">○</button>
+    </div>
+    <div class="beat-body">
+      <div class="vo-box">
+        <div class="vo-label">Текст озвучки</div>
+        <div class="vo-text">"<b>Wavedash Deploy Challenge — первое место.</b> Тысяча долларов призовых. <em>Это сильно помогает.</em>"</div>
+        <div class="stage">Callback к hook'у — там бросили факт без объяснения, здесь возвращаемся с весом. Спокойно, без бравады. "Первое место" — лёгкое поднятие, без crusader-тона. "Тысяча долларов призовых" — ровно, констатация. "Это сильно помогает" — честно, прямой взгляд в камеру, без театра и без жалобы. 👀 ЛИЦО full-frame.</div>
+      </div>
+      <div class="visual-box">
+        <img src="../data/itch/06_submission_wavedash.png" alt="wavedash победа">
+        <div class="visual-desc"><b>🏆 1-е МЕСТО · WAVEDASH DEPLOY CHALLENGE</b> → <b>$1000</b> крупно золотом → face full без overlay.</div>
+      </div>
+    </div>
+    <div class="beat-foot"><span class="timing">~13 слов · ~12с</span></div>
+  </div>
+
+  <div class="beat" style="--c:#2a2520">
+    <div class="beat-head">
+      <span class="time">8:05 — 8:35</span>
+      <span class="title">Steam = визуал (3D) — главное направление</span>
+      <span class="tag tag-twist">FOCUS</span>
+      <button class="done-btn">○</button>
+    </div>
+    <div class="beat-body">
+      <div class="vo-box">
+        <div class="vo-label">Текст озвучки</div>
+        <div class="vo-text">"Что дальше? <b>Steam-версия.</b> Геймплей менять не буду — он хороший, это подтверждают и место в джеме, и оценки. <b>Главный фокус — визуал.</b> Думаю в сторону <b>качественного 3D</b>. Тестовая сцена с экспериментом у меня уже есть. <em>Если получится сделать достойно — это и снимет претензии к AI-арту, и сделает игру серьёзной для Steam.</em>"</div>
+        <div class="stage">Конструктивный тон. "Геймплей менять не буду" — уверенно. "Главный фокус — визуал" — задумчиво, с акцентом. Финал — обнадёживающее обещание, но мягкое.</div>
+      </div>
+      <div class="visual-box">
+        <img src="../data/promo_steam/main_capsule.png" alt="steam direction">
+        <div class="visual-desc">Кадры character_world_test (3D-эксперимент NPC, файлы tmp/rounded-3d-front.png, tmp/unified-3d-iso.png) + кроссфейд на текущую doodle-версию → плашка <b>"next: 3D"</b></div>
+      </div>
+    </div>
+    <div class="beat-foot"><span class="timing">62 слова · ~30с при 125 слов/мин ✓</span></div>
+  </div>
+
+  <div class="beat" style="--c:#2a2520">
+    <div class="beat-head">
+      <span class="time">8:35 — 8:50</span>
+      <span class="title">CTA — финал</span>
+      <span class="tag tag-cta">CTA</span>
+      <button class="done-btn">○</button>
+    </div>
+    <div class="beat-body">
+      <div class="vo-box">
+        <div class="vo-label">Текст озвучки</div>
+        <div class="vo-text">"Поиграть бесплатно — ссылка на itch под видео. Если хочешь поддержать — <b>wishlist на Steam</b>. <em>Буду делиться как идёт работа.</em> Подписывайся если интересно."</div>
+        <div class="stage">Финал. Спокойно, без давления. "Буду делиться" — открыто, без обещаний конкретного следующего контента. "Если интересно" — мягкое приглашение.</div>
+      </div>
+      <div class="visual-box">
+        <img src="../data/trailer/beat_19_8_fade.png" alt="end card">
+        <div class="visual-desc">End card: Steam wishlist button (большая красная кнопка) + itch link + subscribe pulse + социальные ссылки внизу мелко</div>
+      </div>
+    </div>
+    <div class="beat-foot"><span class="timing">26 слов · ~15с при 105 слов/мин ✓</span></div>
+  </div>
+</section>
+
+<!-- FOCUS CONTROLS (only visible in focus mode) -->
+<div class="focus-controls">
+  <button onclick="focusPrev()">← Назад</button>
+  <span class="pos" id="focus-pos">1 / 22</span>
+  <button onclick="focusNext()">Дальше →</button>
+  <button onclick="focusMarkDone()">✓ Записан</button>
+  <button onclick="toggleFocus()">Выйти из фокуса</button>
+</div>
+
+<script>
+  // Word count + stats
+  function countWords(el) {
+    return (el.textContent || '').split(/\s+/).filter(w => /[а-яёА-ЯЁa-zA-Z]/.test(w)).length;
+  }
+  const beats = Array.from(document.querySelectorAll('.beat'));
+  let totalWords = 0;
+  beats.forEach(b => {
+    const vo = b.querySelector('.vo-text');
+    if (vo) totalWords += countWords(vo);
+  });
+  document.getElementById('total-words').textContent = totalWords;
+  document.getElementById('total-count').textContent = beats.length;
+
+  // Done tracking (localStorage)
+  function loadDone() {
+    try { return JSON.parse(localStorage.getItem('trolley-script-done') || '{}'); }
+    catch (e) { return {}; }
+  }
+  function saveDone(s) { localStorage.setItem('trolley-script-done', JSON.stringify(s)); }
+  function refreshProgress() {
+    const s = loadDone();
+    const done = beats.filter((b,i) => s[i]).length;
+    document.getElementById('done-count').textContent = done;
+    document.getElementById('progress-fill').style.width = (done/beats.length*100).toFixed(1) + '%';
+  }
+  beats.forEach((b, i) => {
+    const s = loadDone();
+    b.setAttribute('data-done', !!s[i]);
+    const btn = b.querySelector('.done-btn');
+    btn.textContent = s[i] ? '✓ Записан' : '○';
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const st = loadDone();
+      st[i] = !st[i];
+      saveDone(st);
+      b.setAttribute('data-done', !!st[i]);
+      btn.textContent = st[i] ? '✓ Записан' : '○';
+      refreshProgress();
+    };
+  });
+  refreshProgress();
+  function resetDone() {
+    if (confirm('Сбросить все отметки "записан"?')) {
+      saveDone({});
+      beats.forEach((b, i) => {
+        b.setAttribute('data-done', 'false');
+        b.querySelector('.done-btn').textContent = '○';
+      });
+      refreshProgress();
+    }
+  }
+
+  // Focus mode
+  let focusIdx = 0;
+  function toggleFocus() {
+    document.body.classList.toggle('focus-mode');
+    if (document.body.classList.contains('focus-mode')) {
+      focusIdx = 0;
+      // Try resume from first unrecorded
+      const s = loadDone();
+      const next = beats.findIndex((b,i) => !s[i]);
+      if (next >= 0) focusIdx = next;
+      showFocus();
+    }
+  }
+  function showFocus() {
+    beats.forEach((b, i) => b.classList.toggle('focus-active', i === focusIdx));
+    document.getElementById('focus-pos').textContent = (focusIdx+1) + ' / ' + beats.length;
+    const active = beats[focusIdx];
+    if (active) active.scrollIntoView({behavior: 'auto', block: 'center'});
+  }
+  function focusNext() {
+    if (focusIdx < beats.length - 1) { focusIdx++; showFocus(); }
+  }
+  function focusPrev() {
+    if (focusIdx > 0) { focusIdx--; showFocus(); }
+  }
+  function focusMarkDone() {
+    beats[focusIdx].querySelector('.done-btn').click();
+    setTimeout(focusNext, 300);
+  }
+
+  // Keyboard nav in focus mode
+  document.addEventListener('keydown', (e) => {
+    if (!document.body.classList.contains('focus-mode')) return;
+    if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); focusNext(); }
+    if (e.key === 'ArrowLeft') { e.preventDefault(); focusPrev(); }
+    if (e.key === 'Enter') { e.preventDefault(); focusMarkDone(); }
+    if (e.key === 'Escape') { toggleFocus(); }
+  });
+</script>
+
+</body>
+</html>

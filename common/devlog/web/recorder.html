@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Devlog — Recorder</title>
+<style>
+  :root {
+    --paper: #f2ede0; --ink: #2a2520; --ink-dim: #5a5046;
+    --accent: #c0392b; --yellow: #e8b647; --green: #6b8e4e;
+    --line: #d8d0bd; --bg-panel: #faf6ec; --bg-vo: #fffaef;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--paper); color: var(--ink);
+    font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; line-height: 1.5;
+    height: 100vh; overflow: hidden; }
+  body { display: grid; grid-template-rows: auto 1fr; }
+
+  header.top { padding: 12px 24px; border-bottom: 1px solid var(--line);
+    display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; }
+  header h1 .accent { color: var(--accent); }
+  header .stat { font-size: 13px; color: var(--ink-dim); }
+  header .stat b { color: var(--ink); }
+  header .spacer { flex: 1; }
+
+  main { display: grid; grid-template-columns: 240px 1fr 280px; overflow: hidden; }
+
+  /* SIDEBAR — beat list */
+  aside.beats { background: var(--bg-panel); border-right: 1px solid var(--line);
+    overflow-y: auto; padding: 8px; }
+  .beat-item { padding: 8px 10px; border-radius: 4px; cursor: pointer;
+    margin-bottom: 4px; font-size: 12px; display: flex; gap: 8px;
+    align-items: center; border: 1px solid transparent; }
+  .beat-item:hover { background: var(--paper); }
+  .beat-item.active { background: var(--ink); color: var(--paper);
+    border-color: var(--ink); }
+  .beat-item .mark { width: 14px; height: 14px; border-radius: 50%;
+    border: 2px solid var(--line); flex-shrink: 0; }
+  .beat-item[data-recorded="true"] .mark { background: var(--green);
+    border-color: var(--green); }
+  .beat-item .title { flex: 1; }
+  .beat-item .face-tag { font-size: 10px; padding: 1px 5px; border-radius: 3px;
+    background: var(--paper); color: var(--ink-dim); }
+  .beat-item.active .face-tag { background: rgba(255,255,255,0.15);
+    color: rgba(255,255,255,0.7); }
+
+  /* CENTER — teleprompter pane */
+  section.pane { display: grid; grid-template-rows: auto 1fr auto;
+    overflow: hidden; background: var(--bg-vo); }
+  .pane-head { padding: 14px 28px; border-bottom: 1px solid var(--line);
+    display: flex; gap: 12px; align-items: center; }
+  .pane-head .title { font-size: 18px; font-weight: 700; flex: 1; }
+  .pane-head .face { font-size: 11px; padding: 2px 8px; border-radius: 10px;
+    background: var(--yellow); color: var(--ink); font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.04em; }
+
+  .teleprompter { padding: 24px 32px; overflow-y: auto; }
+  .stage-note { max-width: 900px; margin: 0 auto 16px; font-size: 14px;
+    padding: 12px 18px; background: #fff8e0; border: 2px solid var(--yellow);
+    border-radius: 8px; }
+  .stage-note::before { content: "🎙 "; font-weight: 700; color: var(--accent); }
+  .vo-text { font-size: 28px; line-height: 1.55; font-weight: 500;
+    max-width: 900px; margin: 0 auto; color: var(--ink); }
+
+  /* CONTROLS — bottom record bar */
+  .controls { padding: 16px 28px; border-top: 1px solid var(--line);
+    background: var(--paper); display: flex; gap: 16px; align-items: center; }
+  .btn { padding: 10px 20px; border-radius: 6px; border: 1px solid var(--ink);
+    background: var(--ink); color: var(--paper); font-size: 14px; font-weight: 700;
+    cursor: pointer; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn.record { background: var(--accent); border-color: var(--accent); }
+  .btn.record.recording { background: var(--green); border-color: var(--green); }
+  .timer { font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 700;
+    color: var(--ink-dim); }
+
+  /* RIGHT — takes panel */
+  aside.takes { background: var(--bg-panel); border-left: 1px solid var(--line);
+    overflow-y: auto; padding: 12px; }
+  aside.takes h3 { margin: 0 0 12px; font-size: 12px; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--ink-dim); }
+  .take { padding: 8px 10px; border-radius: 4px; background: var(--paper);
+    margin-bottom: 6px; font-size: 12px; border: 1px solid var(--line); }
+  .take .name { font-weight: 700; word-break: break-all; }
+  .take .meta { color: var(--ink-dim); font-size: 11px; margin-top: 2px; }
+  .take audio { width: 100%; margin-top: 6px; height: 32px; }
+
+  .empty { color: var(--ink-dim); font-style: italic; font-size: 13px;
+    text-align: center; padding: 16px; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <h1>Devlog <span class="accent">·</span> <span id="edit-name">…</span></h1>
+  <span class="stat"><b id="beat-count">0</b> beats</span>
+  <span class="spacer"></span>
+  <span class="stat">Backend: <b id="api-status">checking…</b></span>
+</header>
+
+<main>
+
+  <aside class="beats" id="beat-list">
+    <!-- populated from /api/project -->
+  </aside>
+
+  <section class="pane">
+    <div class="pane-head">
+      <span class="title" id="beat-title">Select a beat</span>
+      <span class="face" id="beat-face"></span>
+    </div>
+    <div class="teleprompter">
+      <div class="stage-note" id="stage-note" style="display:none"></div>
+      <div class="vo-text" id="vo-text">Pick a beat from the left to see its voiceover script.</div>
+    </div>
+    <div class="controls">
+      <button class="btn record" id="record-btn" disabled>● Record</button>
+      <span class="timer" id="timer">00:00</span>
+      <span class="spacer" style="flex:1"></span>
+      <span class="stat" id="mic-status">no mic permission</span>
+    </div>
+  </section>
+
+  <aside class="takes">
+    <h3>Takes for this beat</h3>
+    <div id="takes-list">
+      <div class="empty">No beat selected</div>
+    </div>
+  </aside>
+
+</main>
+
+<script>
+// ───────────────────────────────────────────────────────────────
+// State
+// ───────────────────────────────────────────────────────────────
+let PROJECT = null;       // /api/project response
+let RECORDINGS = [];      // /api/list response
+let ACTIVE_BEAT = null;   // beat id currently selected
+let recorder = null;      // MediaRecorder instance
+let chunks = [];          // recording chunks
+let startTs = 0;
+let timerInterval = null;
+
+// ───────────────────────────────────────────────────────────────
+// Load project + recordings on startup
+// ───────────────────────────────────────────────────────────────
+async function loadProject() {
+  try {
+    const r = await fetch('/api/project');
+    PROJECT = await r.json();
+    document.getElementById('edit-name').textContent = PROJECT.name;
+    document.getElementById('beat-count').textContent = PROJECT.order.length;
+    document.getElementById('api-status').textContent = 'ok';
+    document.getElementById('api-status').style.color = 'var(--green)';
+    renderBeatList();
+  } catch (e) {
+    document.getElementById('api-status').textContent = 'offline (run `dl serve <edit>`)';
+    document.getElementById('api-status').style.color = 'var(--accent)';
+    console.error('Failed to load /api/project:', e);
+  }
+}
+
+async function loadRecordings() {
+  try {
+    const r = await fetch('/api/list');
+    RECORDINGS = await r.json();
+    if (ACTIVE_BEAT) renderTakes();
+    renderBeatList();    // updates recorded-marks
+  } catch (e) {
+    console.error('Failed to load /api/list:', e);
+  }
+}
+
+// ───────────────────────────────────────────────────────────────
+// Rendering
+// ───────────────────────────────────────────────────────────────
+function renderBeatList() {
+  if (!PROJECT) return;
+  const el = document.getElementById('beat-list');
+  el.innerHTML = '';
+  for (const bid of PROJECT.order) {
+    const beat = PROJECT.beats[bid];
+    const hasRec = RECORDINGS.some(r => r.name.includes(`_${bid}_`));
+    const item = document.createElement('div');
+    item.className = 'beat-item' + (bid === ACTIVE_BEAT ? ' active' : '');
+    item.dataset.beatId = bid;
+    item.dataset.recorded = hasRec ? 'true' : 'false';
+    item.innerHTML = `
+      <span class="mark"></span>
+      <span class="title">${escapeHtml(beat.title || bid)}</span>
+      <span class="face-tag">${beat.face}</span>
+    `;
+    item.addEventListener('click', () => selectBeat(bid));
+    el.appendChild(item);
+  }
+}
+
+function selectBeat(bid) {
+  ACTIVE_BEAT = bid;
+  const beat = PROJECT.beats[bid];
+  document.getElementById('beat-title').textContent = beat.title || bid;
+  document.getElementById('beat-face').textContent = beat.face;
+  document.getElementById('vo-text').textContent = beat.vo || '(no VO text)';
+  const stage = document.getElementById('stage-note');
+  if (beat.stage) {
+    stage.textContent = beat.stage;
+    stage.style.display = 'block';
+  } else {
+    stage.style.display = 'none';
+  }
+  renderBeatList();
+  renderTakes();
+}
+
+function renderTakes() {
+  const el = document.getElementById('takes-list');
+  if (!ACTIVE_BEAT) { el.innerHTML = '<div class="empty">No beat selected</div>'; return; }
+  const takes = RECORDINGS.filter(r => r.name.includes(`_${ACTIVE_BEAT}_`));
+  if (takes.length === 0) {
+    el.innerHTML = '<div class="empty">No takes yet — hit Record</div>';
+    return;
+  }
+  el.innerHTML = '';
+  for (const t of takes) {
+    const card = document.createElement('div');
+    card.className = 'take';
+    const date = new Date(t.mtime).toLocaleString('ru-RU');
+    card.innerHTML = `
+      <div class="name">${escapeHtml(t.name)}</div>
+      <div class="meta">${(t.size/1024).toFixed(0)} KB · ${date}</div>
+      <audio controls src="/api/file/${encodeURIComponent(t.name)}"></audio>
+    `;
+    el.appendChild(card);
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, ch => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[ch]));
+}
+
+// ───────────────────────────────────────────────────────────────
+// Recording
+// ───────────────────────────────────────────────────────────────
+async function setupMic() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({audio: true});
+    recorder = new MediaRecorder(stream, {mimeType: 'audio/webm'});
+    recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+    recorder.onstop = saveTake;
+    document.getElementById('record-btn').disabled = false;
+    document.getElementById('mic-status').textContent = 'mic ready';
+    document.getElementById('mic-status').style.color = 'var(--green)';
+  } catch (e) {
+    document.getElementById('mic-status').textContent = 'mic denied';
+    document.getElementById('mic-status').style.color = 'var(--accent)';
+    console.error('Mic permission:', e);
+  }
+}
+
+function toggleRecord() {
+  if (!ACTIVE_BEAT) { alert('Select a beat first'); return; }
+  if (recorder.state === 'recording') {
+    recorder.stop();
+    clearInterval(timerInterval);
+    document.getElementById('record-btn').classList.remove('recording');
+    document.getElementById('record-btn').textContent = '● Record';
+  } else {
+    chunks = [];
+    recorder.start();
+    startTs = Date.now();
+    timerInterval = setInterval(updateTimer, 100);
+    document.getElementById('record-btn').classList.add('recording');
+    document.getElementById('record-btn').textContent = '■ Stop';
+  }
+}
+
+function updateTimer() {
+  const sec = (Date.now() - startTs) / 1000;
+  const m = String(Math.floor(sec / 60)).padStart(2, '0');
+  const s = (sec % 60).toFixed(1).padStart(4, '0');
+  document.getElementById('timer').textContent = `${m}:${s}`;
+}
+
+async function saveTake() {
+  const blob = new Blob(chunks, {type: 'audio/webm'});
+  const existingTakes = RECORDINGS.filter(r => r.name.includes(`_${ACTIVE_BEAT}_`)).length;
+  const takeNum = existingTakes + 1;
+  const slug = (PROJECT.beats[ACTIVE_BEAT].title || ACTIVE_BEAT)
+    .toLowerCase().replace(/[^a-z0-9а-я]+/gi, '-').slice(0, 40);
+  const stamp = Math.floor(Date.now() / 1000);
+  const name = `${stamp}_${ACTIVE_BEAT}_${slug}_take${takeNum}.webm`;
+  try {
+    const r = await fetch(`/api/save/${encodeURIComponent(name)}`, {
+      method: 'POST',
+      body: blob,
+      headers: {'Content-Type': 'application/octet-stream'},
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    document.getElementById('timer').textContent = '00:00';
+    await loadRecordings();
+  } catch (e) {
+    alert('Save failed: ' + e.message);
+    console.error(e);
+  }
+}
+
+// ───────────────────────────────────────────────────────────────
+// Init
+// ───────────────────────────────────────────────────────────────
+document.getElementById('record-btn').addEventListener('click', toggleRecord);
+loadProject();
+loadRecordings();
+setupMic();
+</script>
+
+</body>
+</html>

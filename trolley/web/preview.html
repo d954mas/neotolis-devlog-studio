@@ -1,0 +1,1877 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Trolley Devlog — Preview</title>
+<style>
+  :root {
+    --paper: #f2ede0;
+    --ink: #2a2520;
+    --ink-dim: #5a5046;
+    --accent: #c0392b;
+    --yellow: #e8b647;
+    --green: #6b8e4e;
+    --blue: #4a7ba8;
+    --line: #d8d0bd;
+    --bg-panel: #faf6ec;
+    --bg-vo: #fffaef;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--paper); color: var(--ink);
+    font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; line-height: 1.5; }
+  body { padding: 24px 32px 80px; max-width: 1400px; margin: 0 auto; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  h1 .accent { color: var(--accent); }
+  .subtitle { color: var(--ink-dim); font-size: 13px; margin-bottom: 16px; }
+
+  .preview-grid { display: grid; grid-template-columns: 1.5fr 1fr; gap: 20px; }
+  @media (max-width: 1000px) { .preview-grid { grid-template-columns: 1fr; } }
+
+  /* PLAYER */
+  .player-card { background: var(--bg-panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 14px; }
+  .player-card video { width: 100%; border-radius: 6px; background: #000;
+    display: block; }
+  .player-card h2 { margin: 0 0 8px; font-size: 16px;
+    display: flex; gap: 12px; align-items: baseline; }
+  .player-card h2 small { color: var(--ink-dim); font-weight: 400;
+    font-size: 12px; }
+
+  /* TIMELINE */
+  .timeline-bar { height: 26px; background: #1a1612; border-radius: 4px;
+    position: relative; margin: 10px 0 4px; overflow: hidden; }
+  .timeline-bar .seg { position: absolute; top: 0; bottom: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 11px; font-weight: 600;
+    border-right: 1px solid rgba(0,0,0,0.3); cursor: pointer;
+    transition: filter 0.15s; }
+  .timeline-bar .seg:hover { filter: brightness(1.2); }
+  .timeline-bar .seg.active { box-shadow: inset 0 -3px 0 var(--yellow); }
+  .timeline-bar .playhead { position: absolute; top: 0; bottom: 0;
+    width: 2px; background: var(--yellow); pointer-events: none;
+    box-shadow: 0 0 6px var(--yellow); z-index: 2; }
+
+  /* KARAOKE for current beat */
+  .karaoke-card { background: var(--bg-vo); border: 2px solid var(--yellow);
+    border-radius: 8px; padding: 14px 18px; margin-top: 14px; }
+  .karaoke-card .k-head { display: flex; justify-content: space-between;
+    align-items: baseline; margin-bottom: 8px; }
+  .karaoke-card .k-title { font-size: 13px; font-weight: 700;
+    color: var(--accent); text-transform: uppercase; letter-spacing: .04em; }
+  .karaoke-card .k-time { font-size: 12px; color: var(--ink-dim);
+    font-variant-numeric: tabular-nums; }
+  .karaoke { font-size: 18px; line-height: 1.5; }
+  .karaoke .chunk { padding: 2px 6px; border-radius: 4px;
+    transition: background 0.2s, color 0.2s; }
+  .karaoke .chunk.upcoming { color: var(--ink-dim); }
+  .karaoke .chunk.active { background: rgba(232,182,71,0.65);
+    color: var(--ink); font-weight: 700; box-shadow: 0 2px 0 var(--yellow); }
+  .karaoke .chunk.past { background: rgba(180,170,150,0.3);
+    color: var(--ink-dim); }
+  .karaoke .pause-marker { display: inline-block; padding: 1px 6px;
+    margin: 0 3px; background: var(--line); border-radius: 10px;
+    font-size: 12px; color: var(--ink-dim); font-style: italic; }
+
+  /* STAGE notes for current beat */
+  .stage-card { background: #fff8e0; border: 2px solid var(--yellow);
+    border-radius: 6px; padding: 10px 14px; margin-top: 10px;
+    font-size: 13px; line-height: 1.5; }
+  .stage-card::before { content: "🎙 Как должно звучать: ";
+    color: var(--accent); font-weight: 700; }
+
+  /* SIDE PANEL */
+  .side-panel { background: var(--bg-panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 14px; }
+  .side-panel h3 { margin: 0 0 8px; font-size: 13px;
+    text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-dim); }
+
+  /* Per-beat checklist */
+  .beat-check { background: var(--paper); border: 1px solid var(--line);
+    border-radius: 6px; padding: 10px 12px; }
+  .beat-check .bc-head { font-size: 13px; font-weight: 700; margin-bottom: 6px;
+    display: flex; justify-content: space-between; align-items: center; }
+  .beat-check .bc-head .bc-num { background: var(--ink); color: var(--paper);
+    padding: 2px 6px; border-radius: 3px; font-size: 10px;
+    font-variant-numeric: tabular-nums; }
+  .beat-check .bc-status { display: flex; gap: 4px; flex-wrap: wrap; }
+  .check-item { display: flex; align-items: center; gap: 4px;
+    font-size: 11px; padding: 3px 6px; background: #fff;
+    border: 1px solid var(--line); border-radius: 12px; cursor: pointer;
+    user-select: none; }
+  .check-item .mark { font-size: 12px; line-height: 1; }
+  .check-item.s-good { background: #e8f0dd; border-color: var(--green); }
+  .check-item.s-bad  { background: #fbeeec; border-color: var(--accent); }
+  .check-item.s-meh  { background: #fff8e0; border-color: var(--yellow); }
+  .check-item:hover { filter: brightness(0.96); }
+
+  /* Agent notes block */
+  .agent-notes { margin-top: 8px; padding: 8px 10px;
+    background: #1a1612; color: var(--paper); border-radius: 4px;
+    font-size: 11px; line-height: 1.45; }
+  .agent-notes .an-title { font-size: 10px; color: var(--yellow);
+    font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+    margin-bottom: 4px; }
+  .agent-notes .an-item { display: grid;
+    grid-template-columns: 16px auto 1fr; gap: 4px;
+    padding: 3px 0; border-top: 1px solid rgba(255,255,255,0.08);
+    align-items: baseline; }
+  .agent-notes .an-item:first-of-type { border-top: 0; }
+  .agent-notes .an-icon { font-size: 11px; }
+  .agent-notes .an-time { color: var(--yellow); font-weight: 600;
+    font-size: 10px; padding-right: 6px;
+    white-space: nowrap; max-width: 110px; overflow: hidden;
+    text-overflow: ellipsis; }
+  .agent-notes .an-text { color: #d8d0bd; }
+
+  .beat-notes { margin-top: 6px; width: 100%; min-height: 40px;
+    padding: 6px 8px; border: 1px solid var(--line); border-radius: 4px;
+    font-family: inherit; font-size: 12px; background: #fff; resize: vertical; }
+
+  .beat-check.active { border-color: var(--accent); border-width: 2px;
+    background: #fff8e0; }
+
+  /* Beat status indicator */
+  .beat-check.status-ready { border-left: 6px solid var(--green);
+    background: linear-gradient(90deg, rgba(107,142,78,0.08) 0%, var(--paper) 100%); }
+  .beat-check.status-rerecord { border-left: 6px solid var(--accent);
+    background: linear-gradient(90deg, rgba(192,57,43,0.08) 0%, var(--paper) 100%); }
+  .beat-check.status-pending { border-left: 6px solid var(--yellow);
+    background: linear-gradient(90deg, rgba(232,182,71,0.12) 0%, var(--paper) 100%); }
+  .status-pill { font-size: 10px; padding: 2px 8px; border-radius: 10px;
+    font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+    margin-left: 6px; }
+  .status-pill.ready { background: var(--green); color: #fff; }
+  .status-pill.rerecord { background: var(--accent); color: #fff; }
+  .status-pill.pending { background: var(--yellow); color: var(--ink); }
+
+  .rec-btn { background: var(--accent); color: #fff; border: 0;
+    padding: 5px 12px; border-radius: 4px; font-size: 11px;
+    cursor: pointer; font-family: inherit; font-weight: 700;
+    margin-top: 6px; }
+  .rec-btn:hover { filter: brightness(1.1); }
+
+  /* RECORD MODAL */
+  .rec-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.9);
+    z-index: 200; display: none; align-items: flex-start; justify-content: center;
+    padding: 180px 20px 220px 20px; /* top: teleprompter, bottom: full-text */
+  }
+  .rec-modal.show { display: flex; }
+  .rec-modal-card { background: var(--paper); border-radius: 10px;
+    max-width: 1100px; width: 100%; max-height: calc(100vh - 400px); overflow: hidden;
+    display: grid; grid-template-rows: auto 1fr auto; }
+
+  /* FULL TEXT — pinned to bottom of viewport, all chunks visible with active highlight */
+  .rec-full-text {
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 10001;
+    background: rgba(26, 22, 18, 0.95);
+    border-top: 3px solid var(--yellow);
+    padding: 14px 32px 18px;
+    display: none;
+    box-shadow: 0 -8px 32px rgba(0,0,0,0.5);
+    max-height: 200px; overflow-y: auto;
+    font-size: 18px; line-height: 1.65;
+    text-align: center;
+  }
+  .rec-full-text.show { display: block; }
+  .rec-full-text::before {
+    content: "ПОЛНЫЙ ТЕКСТ";
+    display: block; font-size: 9px; color: #e8b647;
+    opacity: 0.55; letter-spacing: 1.5px; margin-bottom: 6px;
+  }
+  .rec-full-text .chunk {
+    padding: 2px 6px; border-radius: 4px; display: inline;
+    color: rgba(255,255,255,0.5);
+    transition: all 0.15s ease;
+  }
+  .rec-full-text .chunk.active {
+    background: rgba(232,182,71,0.85);
+    color: #fff; font-weight: 700;
+    padding: 3px 8px;
+  }
+  .rec-full-text .chunk.past {
+    color: rgba(255,255,255,0.3);
+  }
+  .rec-full-text .chunk.pause {
+    color: rgba(232,182,71,0.6); font-style: italic; font-size: 14px;
+  }
+
+  /* TELEPROMPTER — pinned to top of viewport (keep eyes close to camera) */
+  .rec-teleprompter {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 10001;
+    background: rgba(26, 22, 18, 0.97);
+    border-bottom: 4px solid var(--yellow);
+    padding: 14px 32px 16px;
+    display: none; /* shown only when rec-modal.show */
+    flex-direction: column; gap: 8px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    text-align: center;
+  }
+  .rec-modal.show + .rec-teleprompter,
+  .rec-teleprompter.show { display: flex; }
+  .rec-teleprompter::before {
+    content: "📷 камера";
+    position: absolute; top: 4px; left: 50%; transform: translateX(-50%);
+    font-size: 10px; color: #e8b647; opacity: 0.55;
+    letter-spacing: 1px; text-transform: uppercase;
+  }
+  .rec-teleprompter .rt-active {
+    font-size: 46px; line-height: 1.15; font-weight: 700;
+    color: #fff;
+    background: rgba(232,182,71,0.85); padding: 8px 18px;
+    border-radius: 8px; align-self: center;
+    box-shadow: 0 2px 0 var(--yellow);
+    max-width: 90vw; word-wrap: break-word;
+  }
+  .rec-teleprompter .rt-active.pause-active {
+    background: rgba(180,170,150,0.4); color: #ddd; font-style: italic;
+    font-size: 30px; font-weight: 500;
+  }
+  .rec-teleprompter .rt-next {
+    font-size: 22px; line-height: 1.25;
+    color: rgba(255,255,255,0.55);
+    align-self: center; max-width: 90vw;
+  }
+  .rec-teleprompter .rt-next::before { content: "↳ "; opacity: 0.5; }
+  .rec-teleprompter .rt-next.pause-next { font-style: italic; }
+  .rec-modal-head { padding: 12px 18px; background: var(--ink);
+    color: var(--paper); display: flex; align-items: center; gap: 14px;
+    flex-wrap: wrap; }
+  .rec-modal-head h3 { margin: 0; font-size: 16px; }
+  .rec-modal-head .close { background: transparent; color: var(--paper);
+    border: 1px solid var(--paper); padding: 4px 10px; border-radius: 4px;
+    cursor: pointer; margin-left: auto; font-family: inherit; }
+  .rec-modal-body { padding: 18px 22px; overflow-y: auto;
+    display: grid; grid-template-columns: 1fr 280px; gap: 16px; }
+  .rec-stage { background: #fff8e0; border: 2px solid var(--yellow);
+    border-radius: 6px; padding: 10px 14px; font-size: 13px;
+    margin-bottom: 10px; line-height: 1.5; }
+  .rec-stage::before { content: "🎙 Как читать: ";
+    color: var(--accent); font-weight: 700; }
+  .rec-karaoke { font-size: 22px; line-height: 1.55; padding: 14px;
+    background: var(--bg-vo); border: 2px solid var(--yellow);
+    border-radius: 8px; min-height: 140px; }
+  .rec-karaoke .chunk { padding: 2px 5px; border-radius: 4px;
+    transition: background 0.2s, color 0.2s; color: var(--ink-dim); }
+  .rec-karaoke .chunk.active { background: rgba(232,182,71,0.65);
+    color: var(--ink); font-weight: 700; }
+  .rec-karaoke .chunk.past { background: rgba(180,170,150,0.3);
+    color: var(--ink-dim); }
+  .rec-karaoke .pause-marker { display: inline-block; padding: 1px 6px;
+    margin: 0 3px; background: var(--line); border-radius: 10px;
+    font-size: 13px; color: var(--ink-dim); font-style: italic; }
+  .rec-side { display: flex; flex-direction: column; gap: 8px; }
+  .rec-preview-vid { width: 100%; aspect-ratio: 16/9; background: #000;
+    border-radius: 6px; object-fit: cover; }
+  .rec-meter { display: flex; flex-direction: column; gap: 4px; }
+  .rec-meter-label { font-size: 10px; color: var(--ink-dim);
+    text-transform: uppercase; letter-spacing: 0.05em;
+    display: flex; justify-content: space-between;
+    font-variant-numeric: tabular-nums; }
+  .rec-meter-bar { height: 6px; background: var(--line);
+    border-radius: 3px; overflow: hidden; }
+  .rec-meter-bar > div { height: 100%; transition: width 0.05s linear;
+    background: linear-gradient(90deg, var(--green) 0%, var(--green) 60%,
+      var(--yellow) 75%, var(--accent) 95%, var(--accent) 100%); }
+  .rec-takes-row { font-size: 11px; color: var(--ink-dim);
+    border-top: 1px solid var(--line); padding-top: 6px; }
+  .rec-modal-foot { padding: 14px 22px; background: var(--bg-panel);
+    border-top: 1px solid var(--line); display: flex; gap: 14px;
+    align-items: center; flex-wrap: wrap; }
+  .rec-rec-btn { background: var(--accent); color: #fff; border: 0;
+    padding: 12px 22px; border-radius: 30px; font-size: 14px;
+    font-weight: 700; cursor: pointer; font-family: inherit;
+    display: flex; align-items: center; gap: 8px; }
+  .rec-rec-btn .dot { width: 10px; height: 10px; border-radius: 50%;
+    background: #fff; }
+  .rec-rec-btn.recording { background: var(--ink); }
+  .rec-rec-btn.recording .dot { animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: 0.3; } }
+  .rec-timer { font-variant-numeric: tabular-nums; font-size: 18px;
+    font-weight: 700; min-width: 110px; }
+  .rec-timer .target { font-size: 12px; color: var(--ink-dim);
+    font-weight: 400; }
+  .rec-status { font-size: 12px; color: var(--ink-dim); flex: 1; }
+
+  /* Agent notes inside record modal */
+  .rec-agent-notes { margin-top: 12px; padding: 12px 14px;
+    background: #1a1612; color: var(--paper); border-radius: 6px;
+    font-size: 12px; line-height: 1.5; }
+  .rec-agent-notes .ran-title { font-size: 11px; color: var(--yellow);
+    font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+    margin-bottom: 8px; }
+  .rec-agent-notes .ran-item { display: grid;
+    grid-template-columns: 20px auto 1fr; gap: 6px;
+    padding: 5px 0; border-top: 1px solid rgba(255,255,255,0.08);
+    align-items: baseline; }
+  .rec-agent-notes .ran-item:first-of-type { border-top: 0; padding-top: 0; }
+  .rec-agent-notes .ran-icon { font-size: 13px; }
+  .rec-agent-notes .ran-time { color: var(--yellow); font-weight: 600;
+    font-size: 11px; padding-right: 8px;
+    white-space: nowrap; max-width: 160px;
+    overflow: hidden; text-overflow: ellipsis; }
+  .rec-agent-notes .ran-text { color: #d8d0bd; }
+  .rec-agent-notes .ran-user { margin-top: 10px; padding-top: 8px;
+    border-top: 1px dashed rgba(255,255,255,0.15);
+    color: var(--yellow); font-style: italic; font-size: 12px; }
+  .rec-agent-notes .ran-user::before { content: "📝 Твоя заметка: ";
+    font-weight: 700; font-style: normal; }
+
+  /* Visual cue preview (what's on screen in final montage at this moment) */
+  .rec-visual-cue { background: var(--ink); color: var(--paper);
+    border-radius: 6px; padding: 8px; display: flex; flex-direction: column;
+    gap: 4px; }
+  .rec-visual-cue .rcue-label { font-size: 10px; color: var(--yellow);
+    text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700;
+    text-align: center; }
+  .rec-visual-cue .rcue-stage { width: 100%; aspect-ratio: 16/9;
+    background: #000; border-radius: 4px; overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+    position: relative; }
+  .rec-visual-cue img { width: 100%; height: 100%; object-fit: cover; }
+  .rec-visual-cue #rm-cue-plate { font-weight: 900; text-align: center;
+    line-height: 1.05; padding: 6px 10px; }
+  .rec-visual-cue .rcue-time { font-size: 10px; color: var(--paper);
+    opacity: 0.6; font-variant-numeric: tabular-nums; text-align: center; }
+
+  /* COUNTDOWN inside modal */
+  .rec-countdown { position: absolute; inset: 0; background: rgba(0,0,0,0.85);
+    display: none; align-items: center; justify-content: center;
+    flex-direction: column; gap: 12px; z-index: 10; border-radius: 10px; }
+  .rec-countdown.show { display: flex; }
+  .rec-countdown .num { font-size: 160px; color: var(--yellow);
+    font-weight: 900; line-height: 1; font-variant-numeric: tabular-nums; }
+  .rec-countdown .go { font-size: 70px; color: var(--accent);
+    font-weight: 900; letter-spacing: 0.1em; }
+
+  /* Audio fix banner */
+  .audio-banner { background: #1a1612; color: var(--paper);
+    border-radius: 6px; padding: 10px 14px; font-size: 12px; line-height: 1.5; }
+  .audio-banner b { color: var(--yellow); }
+</style>
+</head>
+<body>
+
+<nav class="trolley-nav" style="position:sticky;top:0;z-index:1000;background:#2a2520;color:#f2ede0;padding:8px 18px;display:flex;gap:6px;align-items:center;font-size:13px;font-family:system-ui;box-shadow:0 2px 8px rgba(0,0,0,0.15);flex-wrap:wrap;margin:-24px -32px 24px">
+  <span style="font-weight:700;color:#e8b647;margin-right:12px">🚋 Trolley Devlog</span>
+  <a href="structure.html" data-page="structure" style="color:#f2ede0;text-decoration:none;padding:5px 12px;border-radius:4px">📋 Структура</a>
+  <a href="script.html" data-page="script" style="color:#f2ede0;text-decoration:none;padding:5px 12px;border-radius:4px">📝 Сценарий</a>
+  <a href="recorder.html" data-page="recorder" style="color:#f2ede0;text-decoration:none;padding:5px 12px;border-radius:4px">🎙 Запись</a>
+  <a href="preview.html" data-page="preview" style="color:#f2ede0;text-decoration:none;padding:5px 12px;border-radius:4px">▶ Preview</a>
+  <a href="code-viz.html" data-page="code-viz" style="color:#f2ede0;text-decoration:none;padding:5px 12px;border-radius:4px">📊 Code-viz</a>
+  <script>(function(){var p=location.pathname.split('/').pop().replace('.html','');document.querySelectorAll('.trolley-nav a').forEach(function(a){if(a.dataset.page===p){a.style.background='#c0392b';a.style.fontWeight='600'}else{a.onmouseenter=function(){a.style.background='rgba(255,255,255,0.1)'};a.onmouseleave=function(){a.style.background='transparent'}}});})();</script>
+</nav>
+
+<h1>Preview v1 <span class="accent">— Акты 0-1</span></h1>
+<div class="subtitle">67 сек · ревью по beat'ам. Видео → караоке → stage-notes → отмечай качество.</div>
+
+<div class="preview-grid">
+
+  <!-- LEFT: Player + karaoke + stage -->
+  <div>
+    <div class="player-card">
+      <h2>▶ Preview <small>67 сек · 4 beat'а из 22</small></h2>
+      <div style="display:flex;gap:6px;margin-bottom:8px;align-items:center;font-size:12px;flex-wrap:wrap">
+        <button id="rebuild-btn" style="background:var(--accent);color:#fff;border:0;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:700;font-family:inherit" title="Пересобрать видео из последних takes + cues">🔁 Пересобрать preview</button>
+        <span style="color:var(--ink-dim)">|</span>
+        <span style="color:var(--ink-dim)">🔊 Аудио:</span>
+        <button id="audio-raw" class="ab-btn">Сырое</button>
+        <button id="audio-clean" class="ab-btn">v1 ❌</button>
+        <button id="audio-clean-v2" class="ab-btn">v2 ❌</button>
+        <button id="audio-clean-v3" class="ab-btn">v3 (минимум)</button>
+        <button id="audio-clean-v4" class="ab-btn active" title="HPF 60Hz + boom cut 180Hz + soften 3.5kHz mic peak + air shelf 12kHz + loudnorm -16 LUFS LRA=11">✨ v4 — финал (по реку инженера)</button>
+      </div>
+      <div style="position:relative">
+        <video id="player" controls preload="metadata" src="../data/previews/preview_v1_a0-a1_clean_v4.mp4" style="width:100%;display:block"></video>
+        <div id="cue-overlay" style="position:absolute;inset:0;pointer-events:none;display:none">
+          <img id="cue-overlay-img" style="display:none;width:100%;height:100%;object-fit:cover">
+          <div id="cue-overlay-plate" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;font-weight:900;text-align:center;line-height:1.05;padding:20px"></div>
+          <div id="cue-overlay-label" style="position:absolute;top:8px;left:8px;background:rgba(0,0,0,0.7);color:#e8b647;padding:3px 8px;border-radius:3px;font-size:11px;font-weight:600">—</div>
+        </div>
+        <div style="position:absolute;top:8px;right:8px;background:rgba(0,0,0,0.6);color:#fff;padding:3px 8px;border-radius:3px;font-size:11px;display:flex;gap:6px;align-items:center;pointer-events:auto">
+          <label style="cursor:pointer;display:flex;gap:4px;align-items:center"><input type="checkbox" id="show-cues" checked> Cues overlay</label>
+        </div>
+      </div>
+      <div class="timeline-bar" id="timeline-bar">
+        <div class="playhead" id="playhead"></div>
+      </div>
+    </div>
+    <style>
+      .ab-btn { background: transparent; border: 1px solid var(--line);
+        padding: 4px 10px; border-radius: 4px; font-size: 11px;
+        cursor: pointer; font-family: inherit; color: var(--ink-dim); }
+      .ab-btn:hover { background: var(--bg-panel); }
+      .ab-btn.active { background: var(--ink); color: var(--paper);
+        border-color: var(--ink); font-weight: 700; }
+    </style>
+
+    <div class="karaoke-card" id="karaoke-card" style="display:none">
+      <div class="k-head">
+        <span class="k-title" id="k-title">—</span>
+        <span class="k-time" id="k-time">—</span>
+      </div>
+      <div class="karaoke" id="karaoke"></div>
+    </div>
+
+    <div class="stage-card" id="stage-card" style="display:none"></div>
+
+    <div class="audio-banner" style="margin-top:14px">
+      <b>🔊 Слушай оба варианта — A/B переключатель сверху над плеером</b><br>
+      <span style="color:var(--yellow)">✨ Обработано</span> (default): HPF 80Hz · denoise (nr=12) · cut 250Hz mud · shelf +2dB на 10kHz (воздух) · cut 7kHz (de-ess) · comp 3:1 thresh −20 attack 10ms · loudnorm −14 LUFS · peak −1.5 dB. <b>Это финальный звук.</b><br>
+      <span style="color:#ccc">Сырое</span>: оригинал с микрофона, без обработки. Для сравнения — заметь разницу в плотности и громкости.
+    </div>
+  </div>
+
+  <!-- RIGHT: Per-beat checklists -->
+  <div class="side-panel">
+    <h3>✅ Оценка по beat'ам</h3>
+    <div id="beat-checks"></div>
+  </div>
+</div>
+
+<!-- RECORD MODAL -->
+<div class="rec-modal" id="rec-modal">
+  <div class="rec-modal-card" style="position:relative">
+    <div class="rec-modal-head">
+      <h3 id="rm-title">—</h3>
+      <span style="font-size:12px;opacity:0.7" id="rm-time">—</span>
+      <button class="close" id="rm-close">✕ Закрыть</button>
+    </div>
+    <div class="rec-modal-body">
+      <div>
+        <div class="rec-stage" id="rm-stage"></div>
+        <div class="rec-agent-notes" id="rm-agent-notes" style="display:none;margin-top:10px"></div>
+      </div>
+      <div class="rec-side">
+        <div class="rec-visual-cue" id="rm-cue">
+          <div class="rcue-label" id="rm-cue-label">— нет cues —</div>
+          <div class="rcue-stage" id="rm-cue-stage">
+            <img id="rm-cue-img" style="display:none">
+            <div id="rm-cue-plate" style="display:none"></div>
+          </div>
+          <div class="rcue-time" id="rm-cue-time">—</div>
+        </div>
+        <video class="rec-preview-vid" id="rm-preview" autoplay muted playsinline></video>
+        <div class="rec-meter">
+          <div class="rec-meter-label">Peak <span id="rm-peak">— dB</span></div>
+          <div class="rec-meter-bar"><div id="rm-peak-bar" style="width:0%"></div></div>
+          <div class="rec-meter-label">RMS <span id="rm-rms">— dB</span></div>
+          <div class="rec-meter-bar"><div id="rm-rms-bar" style="width:0%"></div></div>
+        </div>
+        <div class="rec-takes-row" id="rm-takes">Takes: —</div>
+      </div>
+    </div>
+    <div class="rec-modal-foot">
+      <button class="rec-rec-btn" id="rm-rec"><span class="dot"></span><span id="rm-rec-label">Запись</span></button>
+      <div class="rec-timer" id="rm-timer">0:00 <span class="target" id="rm-target"></span></div>
+      <span class="rec-status" id="rm-status">Готов записывать. Жми «Запись» — будет 3-сек отсчёт.</span>
+    </div>
+    <div class="rec-countdown" id="rm-countdown">
+      <div id="rm-countdown-content"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Floating teleprompter — fixed at top of viewport during recording so eyes stay near camera -->
+<div class="rec-teleprompter" id="rm-teleprompter">
+  <div class="rt-active" id="rm-rt-active">—</div>
+  <div class="rt-next" id="rm-rt-next"></div>
+</div>
+
+<!-- Full text bottom overlay — read the whole VO at a glance, with active chunk highlighted -->
+<div class="rec-full-text" id="rm-full-text"></div>
+
+<script>
+const BEATS = [
+  // ════════════════════════════════════════════════════════════════════
+  // НОВАЯ СТРУКТУРА (для записи и сборки видео):
+  //
+  //   1. a0-1  HOOK   "Ни одной строчки кода..."        ✅ записан
+  //   2. a1-1  JAM    "Gamedev.js Jam 2026..."          ✅ записан
+  //   3. a1-2  DAY 1  "День первый, рельсы, кружочки"   ✅ записан
+  //   4. b3    DAY 13 "Что получилось за 13 дней"       ✅ записан → в iter_40
+  //   5. b4    30K    "30 000 строк, 273 коммита..."    ✅ записан → в iter_40
+  //   6. a2-1  WORK   "Эти примитивы написал ИИ..."     ✅ записан
+  //   7. a2-2  THESIS "Вокруг ИИ хайп, реальность..."   ✅ записан
+  //   8. a2-3  HORSE  "Лошадь + 3 практики"             ✅ записан
+  //   9. a2-4  ART    "С графикой та же история"        ✅ записан
+  //  10. a2-5  CRITIC "На itch были комментарии..."     ✅ записан
+  //  11. b10   RESULT "Wavedash, $1000, top-2..."       🔴 ОСТАЛАСЬ ОДНА ЗАПИСЬ ↓
+  //  12. a3-6  SUBMIT "26 апреля. Загружено..."         ✅ записан
+  //
+  //   ❌ ДРОПНУТЫЕ (аудио НЕ используется, ничего не записывать):
+  //      a0-2 (фрагменты переехали в b10) · a3-1..a3-5 (заменены b3+b4)
+  // ════════════════════════════════════════════════════════════════════
+  //
+  // ⚠ ОСТАЛАСЬ ЗАПИСАТЬ ТОЛЬКО b10 (Результаты). Стоит на самом верху списка.
+  {
+    id: 'b10', start: 195, dur: 32,
+    title: '🔴 ПЕРЕЗАПИСАТЬ — РЕЗУЛЬТАТЫ (новая структура: itch → джем → wavedash)',
+    face: 'full',
+    voUpdated: '2026-05-12T20:30:00',
+    vo: 'И вот что я не ждал. Что игроки будут играть. И что им понравится. Тридцать тысяч просмотров. Топ-2 incremental на itch. На джеме — восемнадцатое место из четырёхсот восьмидесяти девяти игр. И как бонус — Wavedash Deploy Challenge. Первое место. Тысяча долларов. Спасибо всем кто играл и поддержал.',
+    stage: 'СТРУКТУРА v3 (по фидбеку iter_50): главный сюрприз = ИГРОКИ, не Wavedash. Wavedash — это бонус-вишенка. Тон — благодарное удивление на "что игроки будут играть и им понравится" (это эмоциональное ядро). Цифры — констатация. Wavedash — "как бонус", без overhype. "Спасибо всем" — eye-contact, искренне. 👀 ЛИЦО full-frame.',
+    checks: ['"Что игроки будут играть. И что им понравится." — эмоциональное ядро, мягко удивлённо','"13 000 просмотров" → "топ-2 incremental" — поддержка тезиса','#18/489 — деловая констатация','"И как бонус — Wavedash" — без overhype','$1000 — пунктирно','"Спасибо всем" — eye-contact, искренне','📌 СТАРАЯ b10_take1 пока в iter_50 — после перезаписи будет take2']
+  },
+  {
+    id: 'b10_old', start: 200, dur: 25,
+    title: '✅ ТЕКУЩАЯ ЗАПИСЬ (используется в iter_48, take1)',
+    face: 'full',
+    voUpdated: '2026-05-12T18:30:00',
+    vo: 'Пройдём к результатам. В Wavedash Deploy Challenge — первое место. Тысяча долларов призовых. Восемнадцатое место в общем зачёте джема. Из четырёхсот восьмидесяти девяти игр. И топ-2 incremental на itch. От игроков. Спасибо всем кто играл и поддержал.',
+    stage: 'Это уже записанный вариант. Структура: wavedash → джем → itch. Можно оставить как есть или перезаписать по новому скрипту выше.',
+    checks: ['📌 Если устраивает — оставляем как есть']
+  },
+  {
+    id: 'b3', start: 25, dur: 28,
+    title: '✅ Day 13 — большой список фич (в iter_40)',
+    face: 'pip',
+    voUpdated: '2026-05-12T19:00:00',
+    vo: 'За тринадцать дней — вот что получилось. Липкий палец — ядро механики. Пять миров, в каждом свой босс. Прокачиваешь ранг — можешь сделать трамвайный выбор. Например: кот Шредингера или учёный. Мимы или клоуны. Десять таких карточек. Апгрейд-дерево — пятьдесят девять нод. Полное прохождение — пятнадцать-двадцать минут.',
+    stage: 'Обзор фич игры списком. Темп — деловой, перечисляю по очереди. Две дилеммы как примеры разными короткими фразами: "кот Шредингера или учёный" → пауза → "мимы или клоуны" (две разные карты). Лёгкая улыбка на названиях (абсурд). 👀 PIP-лицо в углу.',
+    checks: ['Темп','Чёткое перечисление','Лёгкая улыбка на названиях карт','Финал "15-20 минут" — спокойно','📌 Заменяет блок a3-2..a3-5']
+  },
+  {
+    id: 'b4', start: 50, dur: 18,
+    title: '✅ 30k строк + инфографика (в iter_40)',
+    face: 'pip',
+    voUpdated: '2026-05-12T19:05:00',
+    vo: 'Тридцать тысяч строк кода. Двести семьдесят три коммита. Сто два файла. И всё это написал ИИ. Я говорил что делать, Клод делал.',
+    stage: 'Инфографика: 30k LOC + 273 commits + treemap. Голос — гордость с лёгкой удивлённостью, цифры подряд. На "всё это написал ИИ" — снижение тона, констатация. Финал "Я говорил что делать, Клод делал" — спокойное уточнение, без бравады. 👀 PIP-лицо.',
+    checks: ['Темп / ритмично','Цифры читаемы','Финал "Я говорил что делать, Клод делал" — тише, спокойно','Без англицизма "промпты"','📌 Заменяет блок a3-1 + a0-2 фрагменты']
+  },
+  // ──────────────── СТАРЫЕ BEATS (большинство переиспользуется в новом порядке) ────────────────
+  {
+    id: 'a0-1', start: 0, dur: 4.4,
+    title: 'Шок-claim',
+    face: 'full', // полный кадр лица — основной hook
+    vo: 'Ни одной строчки кода в этой игре я не написал сам.',
+    stage: 'Энергично, без вибрато. Произнести разборчиво — это ключевая фраза видео. Микро-пауза перед "сам".',
+    checks: ['Темп','Energy / интонация','Eye contact','Микро-пауза перед "сам"','Дикция чёткая'],
+    visualCues: [
+      // chunkAt 0 = вся фраза один chunk; cue меняется по времени внутри
+      { chunkAt: 0, at: 0,   dur: 2.5, type: 'image', src: '../data/trailer/beat_01_5_first_kill.png',
+        label: 'B-roll: trailer chaos' },
+      { chunkAt: 0, at: 2.5, dur: 1.5, type: 'plate', text: '0 СТРОК КОДА',
+        bg: '#c0392b', color: '#fff', size: 90, label: 'PLATE на "сам"' }
+    ],
+    agentReview: {
+      take: 'take13',
+      verdict: '✅ В ФИНАЛ. Live: eye contact ✓, мимика ✓, дикция ✓. LRA 1.8 (монотонно, но фраза короткая — ок). Лёгкая ухмылка на "сам" продаёт hook.',
+      marks: { 0: 'good', 1: 'good', 2: 'good', 3: 'good', 4: 'good' }
+    }
+  },
+  {
+    id: 'a0-2', start: 4.4, dur: 23.0,
+    title: '❌ [ДРОП → b10] Хук-цифры (β: $1000 + 13д + AI)',
+    face: 'none', // голос only — экран полностью B-roll + плашки. Аудио = всё.
+    voUpdated: '2026-05-12T09:07:00', // REWRITE: добавили Wavedash $1000 как opener
+    vo: 'Заработал тысячу долларов. Тринадцать дней. Тридцать тысяч строк кода — всё написал ИИ. Инкременталка про проблему трамвая на Gamedev.js Jam. Первое место в Wavedash Deploy Challenge. Восемнадцатое в общем зачёте. И топ-2 incremental на itch.',
+    // 7 chunks. Staccato первые 3 — короткие фразы должны "ударить", weight >1 даёт plate-time
+    chunkWeights: {
+      0: 1.3,  // "Заработал тысячу долларов" — 3 слова, должно сесть как удар, plate +$1000 заполняет экран
+      1: 1.4,  // "Тринадцать дней" — 2 слова, второй удар
+      2: 1.1,  // "30k — всё ИИ" — punchline тройки, чуть удержать
+      3: 0.9,  // "Инкременталка про gamedev.js Jam" — связка, скорее быстрее
+      4: 1.3,  // "Первое место Wavedash" — главная плашка-punchline, plate-time
+      5: 0.9,  // "Восемнадцатое в общем" — быстро, второстепенный факт
+      6: 1.2   // "топ-2 incremental на itch" — финальный bonus, чуть удержать
+    },
+    stage: 'Hook = ретеншн. Первые ТРИ chunk\'а ("Заработал тысячу долларов / Тринадцать дней / Тридцать тысяч строк кода — всё написал ИИ") — стаккато. Каждая фраза = удар, между ними короткая микро-пауза 0.3-0.5с, не больше. ⚠ На слове "ЗАРАБОТАЛ" — лёгкий акцент (это слово снимает двусмысленность "потратил на ИИ"). На "Первое место в Wavedash Deploy Challenge" — лёгкое поднятие тона. Финал "топ-2 incremental на itch" — спокойно, bonus.',
+    checks: ['"Заработал" — лёгкий акцент (не "потратил")','Стаккато первых 3 chunk\'ов','Цифры читаемы','"Wavedash" — лёгкое поднятие тона','Финал спокойно (bonus)'],
+    visualCues: [
+      // 7 chunks. chunkAt: 0=+$1000, 1=13дней, 2=30k+ИИ, 3=Инкременталка/Jam, 4=Wavedash 1-е, 5=#18, 6=топ-2 incremental
+      { chunkAt: 0, type: 'plate', text: '+$1000',                      bg:'#1a1612', color:'#e8b647', size:200, label:'ХУК: заработал ⇒ плюс перед суммой' },
+      { chunkAt: 1, type: 'plate', text: '13 ДНЕЙ',                     bg:'#1a1612', color:'#e8b647', size:120, label:'хук срок' },
+      { chunkAt: 2, type: 'plate', text: '30 000 СТРОК\nВСЁ НАПИСАЛ ИИ', bg:'#c0392b', color:'#fff',    size:70,  label:'хук AI-обоснование' },
+      { chunkAt: 3, type: 'image', src: '../data/itch/06_submission_wavedash.png', label:'B-roll: трамвай / Jam контекст' },
+      { chunkAt: 4, type: 'plate', text: '🏆 1-е МЕСТО\nWAVEDASH DEPLOY CHALLENGE', bg:'#1a1612', color:'#e8b647', size:55, label:'punchline: Wavedash победа' },
+      { chunkAt: 5, type: 'plate', text: '#18 / 489',                   bg:'#1a1612', color:'#fff',    size:90,  label:'общий зачёт' },
+      { chunkAt: 6, type: 'image', src: '../data/itch/itch_top2_incremental_2026-05-05.jpg', label:'B-roll: топ-2 incremental на itch' }
+    ],
+    agentReview: {
+      take: 'design-change',
+      verdict: '✏ Дизайн ИЗМЕНЁН (b-2026-05-12): VO полностью переписан — $1000 теперь opener, стаккато из трёх цифр в первые 4 секунды. Старый take4 (где "Тринадцать дней" в начале) больше не подходит — нужна новая запись по обновлённому караоке. Target ~23с.',
+      marks: { 0: 'meh', 1: 'meh', 2: 'meh', 3: 'meh', 4: 'meh' }
+    }
+  },
+  {
+    id: 'a1-1', start: 28.1, dur: 19.0,
+    title: 'Тема + идея',
+    face: 'none', // лица в финале нет — плашки MACHINES / trolley / твист + кадр игры
+    voUpdated: '2026-05-11T21:35:00', // убрал ОБА [пауза] маркера — чтение подряд
+    vo: 'Gamedev.js Jam две тысячи двадцать шестой год. Тема — Machines. Тринадцать дней. Трамвай — это машина. А проблема вагонетки — это интересная задачка, про которую можно сделать игру. А что если нет никакой проблемы? Что если трамвай ездит по кругу, и нужно просто добавлять больше людей.',
+    stage: 'Подряд, без длинных пауз. Только естественные микро-вдохи между предложениями (~0.3-0.5с). На "А что если нет никакой проблемы?" — поднять интонацию, intrigue. На "добавлять больше людей" — спокойно, почти буднично — это и есть твист.',
+    checks: ['Темп / плотно','Интрига на "А что если"','Энергия в голосе','Финал спокойно (не пафосно)','Связки между фразами'],
+    visualCues: [
+      // 7 chunks без пауз. chunkAt: 0=Jam, 1=Machines, 2=13дней, 3=Трамвай=машина, 4=trolley problem, 5=А что если, 6=трамвай по кругу
+      { chunkAt: 0, type: 'plate', text: 'GAMEDEV.JS JAM 2026',   bg:'#1a1612', color:'#e8b647', size:55, label:'jam intro' },
+      { chunkAt: 1, type: 'plate', text: 'MACHINES',              bg:'#1a1612', color:'#fff',    size:120, label:'тема' },
+      { chunkAt: 2, type: 'plate', text: '13 ДНЕЙ',               bg:'#c0392b', color:'#fff',    size:90, label:'дедлайн' },
+      { chunkAt: 3, type: 'image', src: '../data/itch/06_submission_wavedash.png', label:'силуэт трамвая' },
+      { chunkAt: 4, type: 'plate', text: '🚋 trolley problem',     bg:'#2a2520', color:'#e8b647', size:60, label:'дилемма' },
+      { chunkAt: 5, type: 'plate', text: 'А ЕСЛИ НЕТ ПРОБЛЕМЫ?',  bg:'#c0392b', color:'#fff',    size:55, label:'твист' },
+      { chunkAt: 6, type: 'image', src: '../data/itch/01_day1_first_trolley.png', label:'first геймплей' }
+    ],
+    agentReview: {
+      take: 'take1',
+      verdict: '✅ В ФИНАЛ (Sonnet). Duration 18.7с / target 19с — попадание. Дыхательные паузы 0.32-0.55с все в зелёной зоне. Emphasis-пауза 1.51с перед "А что если нет никакой проблемы?" — на верхней границе spec, структурно работает как поворот. Auto-fix: leading 0.37с, trailing 0.68с (silenceremove заберёт). LUFS -20.71 (тихо) → loudnorm вытянет до -16 в build-цепи. ⚠ Минор: восходящую интонацию на "А что если" по данным не подтвердить — услышь в монтаже, если плоско — единственный повод переписать.',
+      mainFix: 'не требуется',
+      marks: { 0: 'good', 1: 'meh', 2: 'good', 3: 'good', 4: 'good' }
+    }
+  },
+  {
+    id: 'a1-2', start: 51.2, dur: 15.9,
+    title: 'День первый — кружочки',
+    face: 'none', // лица нет — Day 1 геймплей + плашка цитаты
+    vo: 'День первый. Рельсы, кружочки. Любая игра начинается с примитивов — нужно проверить, интересна ли механика. Тащишь, бросаешь, трамвай ездит, монетки летят.',
+    stage: 'Деловой тон. На "Любая игра начинается с примитивов" — спокойная уверенность, teaching moment. Финал "монетки летят" — лёгкое удовлетворение, чуть улыбкой.',
+    checks: ['Темп','Teaching tone (уверенно)','Энергия в голосе','Улыбка на "монетки летят"','Без чтения с листа'],
+    chunkWeights: {
+      2: 0.55  // "Любая игра начинается с примитивов — нужно проверить, интересна ли механика" — 11 слов, читается быстрее чем word-count предлагает
+    },
+    visualCues: [
+      { at: 0,    dur: 2.0, type: 'plate', text: 'DAY 1',                  bg:'#1a1612', color:'#e8b647', size:110, label:'плашка день первый' },
+      { at: 2.0,  dur: 5.0, type: 'image', src: '../data/itch/01_day1_first_trolley.png', label:'gameplay Day 1 кружочки' },
+      { at: 7.0,  dur: 4.5, type: 'plate', text: 'примитивы → проверить механику', bg:'#2a2520', color:'#e8b647', size:42, label:'teaching цитата' },
+      { at: 11.5, dur: 4.4, type: 'image', src: '../data/trailer/beat_01_5_first_kill.png', label:'splat + монетка геймплей' }
+    ],
+    agentReview: {
+      take: 'take7',
+      verdict: '✅ В ФИНАЛ (Sonnet). После auto-trim длительность 12.67с — оптимально для лёгкого вступительного beat\'а. Паузы 0.55-0.70с — beat punctuation, работают как акценты. Перечисление "Тащишь, бросаешь, трамвай ездит, монетки летят" — энергичный ритм. ⚠ Внутренняя пауза 8.46-10.28с (1.82с) после "интересна ли механика" — на границе допустимого, в монтаже подрежу через jump-cut на B-roll.',
+      mainFix: 'не требуется',
+      marks: { 0: 'good', 1: 'good', 2: 'meh', 3: 'good', 4: 'good' }
+    }
+  },
+
+  // ──────────────── АКТ 2 — ЛОШАДЬ + КУЧЕР 🐎 ────────────────
+  {
+    id: 'a2-1', start: 67.1, dur: 22,
+    title: 'Эти примитивы — ИИ. Мой workflow',
+    face: 'pip', // лицо PiP в углу, основной кадр — кружочки → IDE Claude Code
+    voUpdated: '2026-05-12T09:35:00',
+    vo: 'Эти примитивы написал ИИ. И всё что было дальше — тоже. Полгода я не пишу код руками. Claude Code пишет, я проверяю. Проверяю как код, так и тестирую результат. В этом проекте я вообще не смотрел на код. Это джем, времени было мало.',
+    stage: 'Прямой pickup из a1-2: только что видели "примитивы". Сразу: "эти примитивы написал ИИ". На "И всё что было дальше — тоже" — расширение, лёгкое поднятие. На "Я проверяю" — снижение тона (нормализация процесса, не "wow я гений"). На "Проверяю как код, так и тестирую результат" — деловое уточнение. На "В этом проекте я вообще не смотрел на код" — честное признание, без оправданий. На "это джем, времени было мало" — спокойное объяснение, не извинение.',
+    // 7 chunks: 0:"Эти примитивы написал ИИ" 1:"И всё что было дальше — тоже"
+    // 2:"Полгода я не пишу код руками" 3:"Claude Code пишет, я проверяю"
+    // 4:"Проверяю как код, так и тестирую результат"
+    // 5:"В этом проекте я вообще не смотрел на код" 6:"Это джем, времени было мало"
+    chunkWeights: {
+      0: 1.1,  // открытие beat'а
+      2: 1.2,  // "Полгода" — лёгкий акцент
+      4: 1.2,  // уточнение что значит "проверяю"
+      5: 1.2,  // "вообще не смотрел" — punchline честности
+      6: 1.1   // "это джем, времени было мало" — спокойное объяснение
+    },
+    checks: ['Pickup из "примитивов" органичный','"полгода" — лёгкий акцент','"проверяю" — без бравады','"вообще не смотрел" — честно, без оправданий','"это джем" — объяснение, не извинение'],
+    visualCues: [
+      { chunkAt: 0, type: 'image', src: '../data/itch/01_day1_first_trolley.png', label:'продолжение Day 1 геймплея + arrow ↓ "WRITTEN BY AI"' },
+      { chunkAt: 1, type: 'plate', text: 'И ВСЁ ОСТАЛЬНОЕ ТОЖЕ',             bg:'#c0392b', color:'#fff',    size:60, label:'расширение' },
+      { chunkAt: 2, type: 'plate', text: '6 МЕСЯЦЕВ',                          bg:'#1a1612', color:'#e8b647', size:100, label:'срок' },
+      { chunkAt: 3, type: 'image', src: '../data/trailer/beat_06_0_upgrades_panel.png', label:'IDE Claude Code tool calls (NEED screenshot)' },
+      { chunkAt: 4, type: 'plate', text: 'ПРОВЕРЯЮ КОД\n+ ТЕСТИРУЮ РЕЗУЛЬТАТ', bg:'#1a1612', color:'#e8b647', size:55, label:'workflow' },
+      { chunkAt: 5, type: 'plate', text: 'NO CODE REVIEW',                     bg:'#c0392b', color:'#fff',    size:80, label:'честное признание' },
+      { chunkAt: 6, type: 'plate', text: 'ДЖЕМ · 13 ДНЕЙ',                     bg:'#1a1612', color:'#e8857a', size:75, label:'причина' }
+    ]
+  },
+  {
+    id: 'a2-2', start: 87.1, dur: 30,
+    title: 'Это инструмент — главный тезис',
+    face: 'full', // ключевой тезис видео — лицо в кадре
+    vo: 'Вокруг ИИ много хайпа. С одной стороны — игра за один промпт. И да, что-то простое за один промпт сделать можно. Но не большую игру. С другой стороны — ИИ не умеет делать игры. И тут тоже есть правда — у многих не получается. Реальность проще: ИИ — это инструмент. Нужно уметь им пользоваться. И если умеешь — можно делать игры на полном ИИ-слопе. Даже большие. Даже долгие.',
+    stage: 'Размеренно, без crusader-тона. На цитаты ("игра за 1 промпт", "ИИ не умеет") — лёгкая ироничная интонация (но не сарказм). На "Реальность проще" — снижение тона, спокойная декларация. Финал "Даже большие. Даже долгие." — отрубленно, как точки.',
+    checks: ['Темп','Ирония на цитатах (мягкая)','"ИИ — это инструмент" — punchline','Энергия в голосе','Финал "большие. долгие." отрубленно'],
+    visualCues: [
+      { chunkAt: 1, type: 'plate', text: '"игра за 1 промпт"',        bg:'#1a1612', color:'#e8857a', size:55, label:'хайп 1' },
+      { chunkAt: 3, type: 'plate', text: '* что-то простое — да\n* не большую игру',  bg:'#2a2520', color:'#fff', size:38, label:'звёздочка к 1 промпту' },
+      { chunkAt: 4, type: 'plate', text: '"ИИ не умеет делать игры"', bg:'#1a1612', color:'#e8857a', size:55, label:'хайп 2' },
+      { chunkAt: 5, type: 'plate', text: '* у многих не получается',  bg:'#2a2520', color:'#fff', size:38, label:'звёздочка к "не умеет"' },
+      { chunkAt: 6, type: 'plate', text: 'ИНСТРУМЕНТ',                 bg:'#c0392b', color:'#fff', size:120, label:'главное слово ⚡' },
+      { chunkAt: 9, type: 'plate', text: 'ДАЖЕ БОЛЬШИЕ',               bg:'#1a1612', color:'#e8b647', size:70, label:'точка 1' },
+      { chunkAt: 10, type: 'plate', text: 'ДАЖЕ ДОЛГИЕ',                bg:'#1a1612', color:'#e8b647', size:70, label:'точка 2' }
+    ]
+  },
+  {
+    id: 'a2-3', start: 117.1, dur: 36,
+    title: 'Лошадь + 3 практики 🐎',
+    face: 'pip', // методология — лицо в углу всё время
+    voUpdated: '2026-05-12T09:40:00',
+    vo: 'ИИ — это лошадь без тормозов. Тянет быстро, не устаёт. Но без кучера улетит в канаву. И вот что делает кучер. Первое — рамки. Заранее решить какая игра, какого размера, что внутри. Второе — декомпозиция. Не «сделай игру», а «вот описание системы столкновений трамвая с NPC». Маленькие задачи, понятные интерфейсы. Третье — все цифры баланса в отдельный файл. Здоровье, скорости, цены — туда. ИИ читает и пишет, я правлю руками когда не нравится. Этих трёх вещей хватает чтобы делать игры целиком на ИИ. Даже большие.',
+    stage: '⚠ FACE-PIP beat — читай **непрерывно**, точки в тексте только интонационные. Караоке advance быстро. Размеренно. Каждое "Первое / Второе / Третье" — короткий beat (акцент в голосе, не пауза), плашка появляется в визуале. Жестикулируй слегка пальцами 1-2-3. Финал "Этих трёх вещей хватает... Даже большие." — уверенно, чуть тише.',
+    chunkWeights: {
+      4: 1.2,  // "Первое — рамки." — beat-маркер
+      6: 1.2,  // "Второе — декомпозиция." — beat-маркер
+      9: 1.2   // "Третье — все цифры баланса в отдельный файл." — beat-маркер
+    },
+    checks: ['Темп','3 практики чётко разделены','PiP-выразительность лица','Жесты 1-2-3 (опционально)','Финал уверенно тише'],
+    visualCues: [
+      { chunkAt: 0, type: 'plate', text: '🐎 ЛОШАДЬ БЕЗ ТОРМОЗОВ',           bg:'#1a1612', color:'#e8b647', size:55, label:'метафора' },
+      { chunkAt: 3, type: 'plate', text: 'КУЧЕР = Я',                        bg:'#c0392b', color:'#fff',    size:90, label:'кучер intro' },
+      { chunkAt: 4, type: 'plate', text: '1️⃣ РАМКИ',                        bg:'#1a1612', color:'#e8b647', size:100, label:'практика 1' },
+      { chunkAt: 5, type: 'plate', text: 'КАКАЯ ИГРА\nКАКОГО РАЗМЕРА\nЧТО ВНУТРИ', bg:'#2a2520', color:'#e8b647', size:50, label:'рамки = decode' },
+      { chunkAt: 6, type: 'plate', text: '2️⃣ ДЕКОМПОЗИЦИЯ',                  bg:'#1a1612', color:'#e8b647', size:90, label:'практика 2' },
+      { chunkAt: 7, type: 'image', src: '../data/trailer/beat_06_0_upgrades_panel.png', label:'описание системы столкновений (NEED code snippet)' },
+      { chunkAt: 9, type: 'plate', text: '3️⃣ БАЛАНС → В ОТДЕЛЬНЫЙ ФАЙЛ',     bg:'#1a1612', color:'#e8b647', size:55, label:'практика 3' },
+      { chunkAt: 10, type: 'plate', text: 'ЗДОРОВЬЕ · СКОРОСТИ · ЦЕНЫ',        bg:'#2a2520', color:'#e8b647', size:50, label:'что внутри файла' },
+      { chunkAt: 11, type: 'image', src: '../data/trailer/beat_06_0_upgrades_panel.png', label:'balance.js скрин (NEED)' },
+      { chunkAt: 12, type: 'plate', text: 'ХВАТАЕТ.\nДАЖЕ БОЛЬШИЕ.',          bg:'#c0392b', color:'#fff',    size:65, label:'punchline' }
+    ]
+  },
+  {
+    id: 'a2-4', start: 155.1, dur: 22,
+    title: 'С графикой та же история',
+    face: 'none', // только B-roll отвергнутых обложек
+    voUpdated: '2026-05-12T10:10:00',
+    vo: 'С графикой та же история. ИИ генерирует — я отбираю. Пятьдесят итераций обложки. Стиль не пришёл из одного промпта. Он вырос из выкидывания того, что не зашло.',
+    stage: 'Спокойно, продолжая мысль. "ИИ генерирует — я отбираю" — паренная фраза, контрастная пара (не разбивать). "Пятьдесят итераций обложки" — лёгкое подчёркивание (конкретная цифра). Последние два предложения — отдельные точки, философское разделение: констатация что не из 1 промпта → объяснение откуда стиль.',
+    chunkWeights: {
+      2: 1.2,  // "Пятьдесят итераций" — heavy numeral
+      3: 1.1,  // "Стиль не пришёл из одного промпта" — констатация
+      4: 1.2   // "Он вырос из выкидывания того, что не зашло" — финал
+    },
+    checks: ['Темп','Связка с предыдущим thesis','Акцент на "50 итераций"','Последние 2 предложения — отдельные beat\'ы','Финал философски-спокойно'],
+    visualCues: [
+      { chunkAt: 0, type: 'plate', text: 'АРТ',                        bg:'#1a1612', color:'#e8b647', size:120, label:'title' },
+      { chunkAt: 1, type: 'image', src: '../data/promo_steam/header_1.png', label:'карусель: отвергнутые vs выбранные (NEED)' },
+      { chunkAt: 2, type: 'plate', text: '50 ИТЕРАЦИЙ',                 bg:'#c0392b', color:'#fff',    size:90, label:'счётчик' },
+      { chunkAt: 3, type: 'plate', text: 'НЕ ИЗ ОДНОГО ПРОМПТА',         bg:'#1a1612', color:'#e8857a', size:55, label:'констатация' },
+      { chunkAt: 4, type: 'image', src: '../data/promo_steam/library_capsule.png', label:'финальная обложка' }
+    ]
+  },
+  {
+    id: 'a2-5', start: 175.1, dur: 17,
+    title: 'Критика игроков — моя позиция',
+    face: 'full', // личный момент — "Игроки правы" + защита выбора
+    voUpdated: '2026-05-12T09:30:00',
+    vo: 'На itch были комментарии про ИИ. ИИ-арт видно. Игроки правы. Особенно на задних фонах. Но это прототип за тринадцать дней — ИИ-арт на фоне лучше, чем белый экран. В Steam-версии будет нормальный визуал.',
+    stage: 'Открывается двумя короткими ударами: "Были комментарии про ИИ. ИИ-арт видно." — staccato, как цитата. Потом признаём: "Игроки правы" — без иронии, серьёзно, прямой взгляд. На "Особенно на задних фонах" — уточнение, как разработчик разработчику. На "ИИ-арт на фоне лучше, чем белый экран" — это не оправдание, а tradeoff-объяснение, спокойно. Финал "В Steam-версии будет нормальный визуал" — обещание, но без театра. 👀 ЛИЦО full-frame.',
+    chunkWeights: {
+      1: 1.2,  // "ИИ-арт видно." — короткий удар-цитата, дай сесть
+      3: 1.2,  // "Особенно на задних фонах" — уточнение
+      4: 1.1   // "ИИ-арт на фоне лучше, чем белый экран" — основной аргумент защиты
+    },
+    checks: ['Стаккато первых двух chunk\'ов','"Игроки правы" — прямой взгляд, без иронии','"Особенно на задних фонах" — спокойное уточнение','"Лучше чем белый экран" — tradeoff, не оправдание','Eye contact (full face)'],
+    visualCues: [
+      { chunkAt: 0, type: 'image', src: '../data/itch/08_choice_reviews.png', label:'реальный комментарий itch (NEED скриншот)' },
+      { chunkAt: 1, type: 'plate', text: '«ИИ-АРТ ВИДНО»',                bg:'#2a2520', color:'#e8857a', size:80, label:'цитата комментария' },
+      { chunkAt: 2, type: 'plate', text: 'ИГРОКИ ПРАВЫ',                  bg:'#2a2520', color:'#e8b647', size:80, label:'признание' },
+      { chunkAt: 3, type: 'image', src: '../data/itch/04_forest_world.png', label:'зум на задний фон с ИИ-артефактами (NEED)' },
+      { chunkAt: 4, type: 'plate', text: 'ИИ-АРТ > БЕЛЫЙ ЭКРАН\n(прототип, 13 дней)', bg:'#1a1612', color:'#e8b647', size:50, label:'tradeoff defense' },
+      { chunkAt: 5, type: 'image', src: '../data/promo_steam/main_capsule.png', label:'Steam capsule (обещание)' }
+    ]
+  },
+
+  // ──────────────── АКТ 3 — CODE SHOWCASE + 4 ФИЧИ 📊 ────────────────
+  {
+    id: 'a3-1', start: 190.1, dur: 38,
+    title: '❌ [ДРОП → b4] Code showcase — что нагенерил 📊',
+    face: 'none', // data viz dominates — голос комментирует графики
+    voUpdated: '2026-05-12T09:55:00',
+    vo: 'Тринадцать дней работы. Посмотрим что получилось. Двести семьдесят три коммита. Самый продуктивный — день второй: восемьдесят коммитов за сутки. Тридцать тысяч строк кода. Сто два файла. Где они живут? UI — восемь с половиной тысяч строк. Самая большая зона: модалки, панели, дерево. Engine-core — почти семь тысяч. Это шаблон, переедет в следующие игры. Системы плюс данные — ещё четыре тысячи. Самый жирный файл — TrolleyChoiceModal, две тысячи триста сорок семь строк. Те самые выбор-карточки. И всё это написал ИИ. Я писал промпты.',
+    stage: 'Гордость с лёгкой удивлённостью. Цифры — ритмично, читай их размеренно (не торопись на числительных). На "Где они живут?" — короткая пауза-вопрос (~0.5с). Финал "И всё это написал ИИ. Я писал промпты." — снижение тона, спокойная констатация AI-тезиса доказательством. БЕЗ [пауза].',
+    // chunkWeights: правильно проиндексированы под 14 chunk'ов после splitChunks
+    // 0:"Тринадцать дней работы." 1:"Посмотрим что получилось." 2:"Двести семьдесят три коммита."
+    // 3:"Самый продуктивный — день второй: восемьдесят коммитов за сутки." 4:"Тридцать тысяч строк кода."
+    // 5:"Сто два файла." 6:"Где они живут?" 7:"UI — восемь с половиной тысяч строк, ... дерево."
+    // 8:"Engine-core — почти семь тысяч — ... игры." 9:"Системы плюс данные — ещё четыре тысячи."
+    // 10:"Самый жирный файл — TrolleyChoiceModal, две тысячи триста сорок семь строк."
+    // 11:"Те самые выбор-карточки." 12:"И всё это написал ИИ." 13:"Я писал промпты."
+    // 16 chunks после split UI и Engine-core
+    chunkWeights: {
+      2: 1.3,  // "273 коммита"
+      3: 1.4,  // "80 коммитов за сутки"
+      4: 1.2,  // "30k строк"
+      6: 1.4,  // "Где они живут?" — пауза-вопрос
+      7: 1.2,  // "UI — 8.5k строк"
+      9: 1.1,  // "Engine-core — 7k"
+      12: 1.5, // "TrolleyChoiceModal 2347" — HEAVIEST numeral
+      14: 1.2, // "И всё это написал ИИ" — AI-тезис
+      15: 1.3  // "Я писал промпты" — финал
+    },
+    checks: ['Темп / не торопиться на числительных','Цифры читаемы','"Где они живут?" — пауза-вопрос','Финал AI-тезис спокойно','Каждое предложение — отдельный beat'],
+    visualCues: [
+      { chunkAt: 2, type: 'plate', text: '273 КОММИТА',                    bg:'#1a1612', color:'#e8b647', size:90, label:'коммиты' },
+      { chunkAt: 3, type: 'plate', text: 'ДЕНЬ 2: 80 / СУТКИ',              bg:'#1a1612', color:'#e8b647', size:65, label:'peak day' },
+      { chunkAt: 4, type: 'plate', text: '30 000 СТРОК',                     bg:'#1a1612', color:'#e8b647', size:90, label:'volume — lines' },
+      { chunkAt: 5, type: 'plate', text: '102 ФАЙЛА',                        bg:'#1a1612', color:'#e8b647', size:90, label:'volume — files' },
+      { chunkAt: 7, type: 'plate', text: 'UI · 8 500',                        bg:'#2a2520', color:'#e8b647', size:70, label:'UI breakdown' },
+      { chunkAt: 8, type: 'plate', text: 'МОДАЛКИ · ПАНЕЛИ · ДЕРЕВО',          bg:'#1a1612', color:'#fff',    size:45, label:'UI детали' },
+      { chunkAt: 9, type: 'plate', text: 'ENGINE-CORE · 7 000',                bg:'#2a2520', color:'#e8b647', size:65, label:'engine breakdown' },
+      { chunkAt: 10, type: 'plate', text: 'ШАБЛОН →\nСЛЕД. ИГРЫ',              bg:'#1a1612', color:'#e8b647', size:55, label:'engine reuse' },
+      { chunkAt: 11, type: 'plate', text: 'СИСТЕМЫ+ДАННЫЕ · 4 000',            bg:'#2a2520', color:'#e8b647', size:55, label:'systems breakdown' },
+      { chunkAt: 12, type: 'plate', text: 'TrolleyChoiceModal\n2 347 строк',   bg:'#1a1612', color:'#e8857a', size:55, label:'жирный файл' },
+      { chunkAt: 14, type: 'plate', text: 'AI: 100%',                          bg:'#c0392b', color:'#fff',    size:130, label:'AI-тезис' },
+      { chunkAt: 15, type: 'plate', text: 'Я: ПРОМПТЫ',                        bg:'#1a1612', color:'#e8b647', size:90, label:'финал' }
+    ]
+  },
+  {
+    id: 'a3-2', start: 228.1, dur: 22,
+    title: '❌ [ДРОП → b3] #1 Липкий палец — ядро',
+    face: 'none', // gameplay clip с аннотациями
+    voUpdated: '2026-05-12T10:40:00',
+    vo: 'Важная часть игры — это липкий палец. Двигаешь пальцем. Человечки прилипают. Тащишь к рельсам. Отпускаешь. Радиус, сколько за раз тянешь — всё это апгрейдится.',
+    stage: 'Простое объяснение механики, action-перечислением. Каждое короткое предложение — отдельный beat, лёгкая микро-пауза между. Не торопись. Финал про апгрейды — спокойно, ровно.',
+    chunkWeights: {
+      1: 1.2,  // "Двигаешь пальцем."
+      2: 1.1,  // "Человечки прилипают."
+      3: 1.1,  // "Тащишь к рельсам."
+      4: 1.3,  // "Отпускаешь." — 1 слово, дай отдельный момент
+      5: 1.2   // финальный апгрейд-список
+    },
+    checks: ['Темп / action-перечисление','Каждое действие = свой beat','Микро-паузы между предложениями','Без избытка эмоций','Финал спокойно'],
+    visualCues: [
+      { chunkAt: 0, type: 'plate', text: '#1 ЛИПКИЙ ПАЛЕЦ',                   bg:'#1a1612', color:'#e8b647', size:80, label:'feature 1' },
+      { chunkAt: 1, type: 'image', src: '../data/trailer/beat_04_5_mid_chaos.png', label:'gameplay: палец двигается (NEED clip)' },
+      { chunkAt: 2, type: 'image', src: '../data/trailer/beat_04_5_mid_chaos.png', label:'gameplay: человечки прилипают (NEED clip)' },
+      { chunkAt: 3, type: 'image', src: '../data/trailer/beat_04_5_mid_chaos.png', label:'gameplay: тянем к рельсам (NEED clip)' },
+      { chunkAt: 4, type: 'image', src: '../data/trailer/beat_04_5_mid_chaos.png', label:'gameplay: отпускаем — splat (NEED clip)' },
+      { chunkAt: 5, type: 'plate', text: 'РАДИУС\nКОЛ-ВО',                     bg:'#2a2520', color:'#e8b647', size:75, label:'апгрейды' }
+    ]
+  },
+  {
+    id: 'a3-3', start: 240.1, dur: 38,
+    title: '❌ [ДРОП → b3] #2 Боссы — переписал в последний день 🏃',
+    face: 'full', // эмоциональная история — нужно лицо
+    voUpdated: '2026-05-12T10:20:00',
+    vo: 'Первая версия боссов была с таймером. Босс появляется на тридцать секунд. Не успел — ушёл. Жди следующего. Сел играть сам. Скучно и сложно. Бесит. В idle-игре где смысл расслабиться. Двенадцатый день. Двадцать четыре часа до сдачи. Сел и переписал. Один босс на мир. Всегда на сцене. Ждёт пока ты его убьёшь. Убил — открывается следующий мир. Со своим боссом. Никаких таймеров. Стало в разы лучше.',
+    stage: '⚠ FACE-FULL beat — читай **непрерывно**, точки в тексте только интонационные (микро-вдох, не пауза). Караоке будет advance быстро — это нормально, не дожидайся плашек. История — рассказывай как историю. На "Скучно и сложно. Бесит." — снижение тона. На "Двенадцатый день. Двадцать четыре часа до сдачи." — деловой тон, без драмы. На "Сел и переписал" — решимость. Финал "Стало в разы лучше" — удовлетворённо, тихо. 👀 ЛИЦО full-frame, эмоциональный пик на "Скучно. Бесит.". БЕЗ [пауза].',
+    // 18 chunks
+    chunkWeights: {
+      1: 1.2,  // "Босс появляется на тридцать секунд" — heavy numeral
+      8: 1.2,  // "Двенадцатый день" — heavy
+      9: 1.3,  // "Двадцать четыре часа до сдачи" — heavy numeral, drama
+      10: 1.2, // "Сел и переписал" — pivot
+      17: 1.3  // "Стало в разы лучше" — финал
+    },
+    checks: ['Темп','Action-перечисление с микро-паузами','"Скучно. Бесит." — снижение тона','"Сел и переписал" — решимость','Финал тихо-удовлетворённо'],
+    visualCues: [
+      { chunkAt: 0, type: 'plate', text: '#2 БОССЫ',                          bg:'#1a1612', color:'#e8b647', size:80, label:'feature 2' },
+      { chunkAt: 1, type: 'image', src: '../data/trailer/beat_15_0_boss.png', label:'старая boss UI с таймером (NEED)' },
+      { chunkAt: 2, type: 'plate', text: '30 СЕКУНД',                          bg:'#1a1612', color:'#e8857a', size:100, label:'таймер бесит' },
+      { chunkAt: 3, type: 'plate', text: 'ESCAPED',                             bg:'#c0392b', color:'#fff',    size:90, label:'провал' },
+      { chunkAt: 4, type: 'image', src: '../data/trailer/beat_15_0_boss.png', label:'игрок устал' },
+      { chunkAt: 6, type: 'plate', text: 'СКУЧНО · СЛОЖНО · БЕСИТ',             bg:'#c0392b', color:'#fff',    size:55, label:'эмоциональный пик' },
+      { chunkAt: 8, type: 'plate', text: 'ДЕНЬ 12',                              bg:'#1a1612', color:'#e8857a', size:120, label:'дата' },
+      { chunkAt: 9, type: 'plate', text: '24 ЧАСА ДО СДАЧИ',                     bg:'#c0392b', color:'#fff',    size:70, label:'давление' },
+      { chunkAt: 10, type: 'plate', text: 'ПЕРЕПИСАЛ',                           bg:'#1a1612', color:'#e8b647', size:110, label:'действие' },
+      { chunkAt: 12, type: 'image', src: '../data/trailer/beat_15_0_boss.png', label:'новый boss геймплей' },
+      { chunkAt: 16, type: 'plate', text: 'NO ТАЙМЕРОВ',                          bg:'#2a2520', color:'#e8b647', size:80, label:'результат 1' },
+      { chunkAt: 17, type: 'plate', text: 'В РАЗЫ ЛУЧШЕ',                          bg:'#1a1612', color:'#e8b647', size:90, label:'результат 2' }
+    ]
+  },
+  {
+    id: 'a3-4', start: 270.1, dur: 24,
+    title: '❌ [ДРОП → b3] #3 Выбор-карточки — тематический хребет 🎴',
+    face: 'none', // карусель карточек
+    voUpdated: '2026-05-12T10:55:00',
+    vo: 'Во время игры повышаешь ранги. Каждый ранг — выбор-карточка. Абсурдная дилемма. Кот Шредингера в коробке или учёный. Мимы или клоуны. Десять штук. Тот самый жирный файл из инфографики — две тысячи триста строк.',
+    stage: 'С лёгкой улыбкой — смешные дилеммы. Названия ("Шредингер", "мимы/клоуны") — чётко, как читаешь список. На "Десять штук" — короткий beat (количество). Финал — callback к инфографике из a3-1 ("тот самый жирный файл").',
+    // 7 chunks (убрали тёщу — такой карты нет; убрали Truck-kun по запросу)
+    chunkWeights: {
+      2: 1.2,  // "Абсурдная дилемма" — setup
+      3: 1.2,  // "Кот Шредингера в коробке или учёный"
+      4: 1.2,  // "Мимы или клоуны"
+      5: 1.3,  // "Десять штук" — punchline count
+      6: 1.4   // callback к жирному файлу + heavy numeral "2347"
+    },
+    checks: ['Темп','Дикция названий (Шредингер, Мимы)','Лёгкая улыбка','"Десять штук" — короткий beat','Callback к "жирному файлу" из a3-1'],
+    visualCues: [
+      { chunkAt: 0, type: 'plate', text: '#3 ВЫБОР-КАРТОЧКИ',                  bg:'#1a1612', color:'#e8b647', size:75, label:'feature 3' },
+      { chunkAt: 1, type: 'image', src: '../data/trailer/beat_10_6_choice_schrodinger.png', label:'rank-up момент с карточкой' },
+      { chunkAt: 2, type: 'plate', text: 'АБСУРДНАЯ\nДИЛЕММА',                  bg:'#c0392b', color:'#fff',    size:65, label:'setup' },
+      { chunkAt: 3, type: 'image', src: '../data/trailer/beat_10_6_choice_schrodinger.png', label:'Шредингер карточка' },
+      { chunkAt: 4, type: 'plate', text: 'МИМЫ vs КЛОУНЫ',                      bg:'#2a2520', color:'#fff',    size:80, label:'мимы карта' },
+      { chunkAt: 5, type: 'plate', text: '10 ШТУК',                            bg:'#1a1612', color:'#e8b647', size:130, label:'количество' },
+      { chunkAt: 6, type: 'plate', text: '↑ ТОТ САМЫЙ\nЖИРНЫЙ ФАЙЛ',            bg:'#c0392b', color:'#fff',    size:55, label:'callback к a3-1 (2347 строк)' }
+    ]
+  },
+  {
+    id: 'a3-5', start: 295.1, dur: 15,
+    title: '❌ [ДРОП → b3] #4 Миры + апгрейд-дерево 🌳',
+    face: 'none', // карусель миров + анимация дерева
+    voUpdated: '2026-05-12T11:20:00',
+    vo: 'Пять миров. Каждый — своя палитра и свой босс. Дерево как в классических incrementals. Пятьдесят девять нод.',
+    stage: 'Деловой тон. Названия миров не зачитываем (визуал покажет карусель). "59 нод" — финал, чётко. Группировка в визуале: можно показать дерево в развёрнутом виде, чтобы зритель видел разнообразие нод.',
+    // 4 chunks
+    chunkWeights: {
+      3: 1.4  // "59 нод" — финал, дай ему сесть как climax
+    },
+    checks: ['Темп','"59 нод" — чётко, как финал','Энергия в голосе','Названия миров не зачитывать','Без упоминания "X типов"'],
+    visualCues: [
+      { chunkAt: 0, type: 'plate', text: '#4 МИРЫ + ДЕРЕВО',             bg:'#1a1612', color:'#e8b647', size:75, label:'feature 4' },
+      { chunkAt: 1, type: 'image', src: '../data/itch/04_forest_world.png', label:'5 worlds кроссфейд (карусель имена показывают)' },
+      { chunkAt: 2, type: 'plate', text: 'ДЕРЕВО',                        bg:'#2a2520', color:'#e8b647', size:90, label:'tree intro' },
+      { chunkAt: 3, type: 'image', src: '../data/trailer/beat_06_0_upgrades_panel.png', label:'РАЗВЁРНУТОЕ ДЕРЕВО (visualиал разнообразия) + плашка 59 НОД оверлей' }
+    ]
+  },
+  {
+    id: 'a3-6', start: 315.1, dur: 12,
+    title: 'Загружено · переход к цифрам',
+    face: 'full', // личный момент устал-доволен + intrigue
+    voUpdated: '2026-05-12T11:35:00',
+    vo: 'Двадцать шестое апреля. Загружено. Игра живая, я доволен, я устал. А дальше пошло то, чего я не ждал.',
+    stage: '⚠ FACE-FULL — читай НЕПРЕРЫВНО, нормальным разговорным темпом. Точки только интонационные, без долгих пауз (тишина с лицом = ступор). "Загружено" — отрубленно, как точка (короткий beat, не пауза). "Игра живая, я доволен, я устал" — устало искренне. "А дальше пошло то, чего я не ждал" — тон чуть поднимается, intrigue в голосе (без растягивания). 👀 ЛИЦО full-frame. БЕЗ [пауза].',
+    chunkWeights: {
+      1: 1.6  // "Загружено." — 1 слово, нужно немного plate-time для плашки
+    },
+    checks: ['"Загружено" — отрубленно','"Я устал" — устало искренне','"А дальше пошло то, чего не ждал" — intrigue','Eye contact (full face)','Без [пауза]-театра'],
+    visualCues: [
+      { chunkAt: 0, type: 'plate', text: '26 АПРЕЛЯ',                    bg:'#1a1612', color:'#e8b647', size:90, label:'дата submit' },
+      { chunkAt: 1, type: 'plate', text: 'ЗАГРУЖЕНО',                     bg:'#c0392b', color:'#fff',    size:110, label:'submit' },
+      { chunkAt: 2, type: 'image', src: '../data/itch/06_submission_wavedash.png', label:'face full устал-доволен' },
+      { chunkAt: 3, type: 'plate', text: '...',                           bg:'#1a1612', color:'#e8b647', size:200, label:'intrigue tease' }
+    ]
+  },
+
+  // ──────────────── АКТ 4 — REVEAL-СТРИМ + 214 wishlists ────────────────
+  {
+    id: 'a4-1', start: 333.1, dur: 15,
+    title: 'Reveal #1 — 36k views',
+    face: 'none', // animated numbers
+    voUpdated: '2026-05-12T09:07:00',
+    vo: 'Первая цифра. Тридцать шесть тысяч просмотров. Двадцать пять тысяч сыграли в браузере. За тридцать дней. Бесплатно.',
+    stage: 'Каждая цифра — отдельный удар. "Бесплатно" — лёгкая отделённая интонация (как финальная точка-bonus).',
+    checks: ['Стаккато цифр','Цифры читаемы','"Бесплатно" — отделённая интонация','Энергия в голосе','Без длинных пауз'],
+    visualCues: [
+      { chunkAt: 0, type: 'plate', text: 'ПЕРВАЯ ЦИФРА',                  bg:'#1a1612', color:'#e8b647', size:75, label:'opener' },
+      { chunkAt: 1, type: 'plate', text: '36 100\nПРОСМОТРОВ',             bg:'#1a1612', color:'#e8b647', size:90, label:'views' },
+      { chunkAt: 2, type: 'plate', text: '25 600\nИГРАЛИ В БРАУЗЕРЕ',      bg:'#1a1612', color:'#e8b647', size:80, label:'plays' },
+      { chunkAt: 3, type: 'plate', text: 'ЗА 30 ДНЕЙ',                    bg:'#2a2520', color:'#fff',    size:70, label:'period' },
+      { chunkAt: 4, type: 'plate', text: 'БЕСПЛАТНО',                     bg:'#c0392b', color:'#fff',    size:90, label:'bonus' }
+    ]
+  },
+  {
+    id: 'a4-2', start: 348.1, dur: 15,
+    title: 'Reveal #2 — рейтинг + коллекции',
+    face: 'none',
+    voUpdated: '2026-05-12T09:07:00',
+    vo: 'Девятнадцать оценок, средняя четыре и три из пяти. Четыреста шестьдесят восемь человек добавили в коллекции. Окей.',
+    stage: 'Деловой тон. "Окей" — лёгкое удовлетворение, без пафоса (буквально "норм"). Короткий beat перед "Окей".',
+    chunkWeights: {
+      2: 1.4  // "Окей" — пауза-точка, дай сесть как финал
+    },
+    checks: ['Темп','Цифры (4.3/5, 468) читаемы','"Окей" без пафоса','Энергия в голосе','Финал спокойно'],
+    visualCues: [
+      { chunkAt: 0, type: 'plate', text: '4.3 / 5',                       bg:'#1a1612', color:'#e8b647', size:110, label:'rating (со звёздами)' },
+      { chunkAt: 1, type: 'plate', text: '468\nВ КОЛЛЕКЦИЯХ',              bg:'#1a1612', color:'#e8b647', size:80, label:'collections' },
+      { chunkAt: 2, type: 'plate', text: 'окей.',                          bg:'#2a2520', color:'#e8b647', size:75, label:'без пафоса' }
+    ]
+  },
+  {
+    id: 'a4-3', start: 363.1, dur: 22,
+    title: 'Reveal #3 — Theme #102 (слабое место)',
+    face: 'pip', // "Понимаю" — личное признание
+    voUpdated: '2026-05-12T10:30:00',
+    vo: 'Места в джеме — из четырёхсот восьмидесяти девяти игр. Самое слабое: Theme — сто второе. Видно что жюри посчитали так. Трамвай не очень-то «машина» в смысле темы. Понимаю.',
+    stage: 'Спокойно признать. Без депрессии и без оправданий. На "Theme — сто второе" — констатация, ровно. На "Трамвай не очень-то машина" — спокойное согласие с жюри. На "Понимаю" — финальная точка, принятие, прямой взгляд (PIP).',
+    // 5 chunks
+    chunkWeights: {
+      0: 1.3,  // "четырёхсот восьмидесяти девяти" — heavy numeral
+      1: 1.2,  // "Theme — 102" — констатация
+      4: 1.5   // "Понимаю." — пауза-принятие, дай сесть
+    },
+    checks: ['Темп','Без депрессии и оправданий','"Понимаю" — принятие','Без иронии','PiP-выразительность'],
+    visualCues: [
+      { chunkAt: 0, type: 'plate', text: 'из 489 ИГР',                    bg:'#1a1612', color:'#fff',    size:75, label:'контекст' },
+      { chunkAt: 1, type: 'plate', text: 'THEME · #102',                  bg:'#2a2520', color:'#e8857a', size:90, label:'слабое место' },
+      { chunkAt: 2, type: 'image', src: '../data/itch/05_trolley_progression.png', label:'таблица jam-результатов' },
+      { chunkAt: 3, type: 'plate', text: 'трамвай ≠\n"машина"?',           bg:'#2a2520', color:'#e8857a', size:55, label:'жюри прав' },
+      { chunkAt: 4, type: 'plate', text: 'понимаю.',                       bg:'#2a2520', color:'#e8b647', size:90, label:'принятие' }
+    ]
+  },
+  {
+    id: 'a4-4', start: 383.1, dur: 22,
+    title: 'Reveal #4 — Gameplay #11 🏆',
+    face: 'pip', // climax с гордостью — face PiP
+    voUpdated: '2026-05-12T09:07:00',
+    vo: 'Но я делал не Theme. Я делал Gameplay. И вот цифра ради которой всё это было: Gameplay — одиннадцатое место. Из четырёхсот восьмидесяти девяти.',
+    stage: 'Первая большая победа. На "Но я делал не Theme. Я делал Gameplay." — короткий beat между предложениями (контраст). На "одиннадцатое место" — отчётливо, медленно. Финал "Из четырёхсот восьмидесяти девяти" — медленнее, акцент на масштабе. БЕЗ [пауза]-театра — пауза органична через паузу-точку между предложениями.',
+    chunkWeights: {
+      1: 1.3,  // "Я делал Gameplay" — punchline
+      2: 1.3,  // "Gameplay — 11-е место" — climax
+      3: 1.4   // "из 489" — финальный масштаб
+    },
+    checks: ['Контраст "не Theme / Я Gameplay"','"11-е место" — отчётливо','"из 489" — медленно с акцентом','PiP-выразительность','Без театрального [пауза]'],
+    visualCues: [
+      { chunkAt: 0, type: 'plate', text: 'НО Я ДЕЛАЛ НЕ THEME',           bg:'#1a1612', color:'#fff',    size:60, label:'контраст' },
+      { chunkAt: 1, type: 'plate', text: 'Я ДЕЛАЛ GAMEPLAY',              bg:'#c0392b', color:'#fff',    size:75, label:'pivot' },
+      { chunkAt: 2, type: 'plate', text: '🏆 GAMEPLAY · #11',              bg:'#1a1612', color:'#e8b647', size:90, label:'climax' },
+      { chunkAt: 3, type: 'plate', text: 'ИЗ 489',                        bg:'#1a1612', color:'#e8b647', size:100, label:'масштаб' }
+    ]
+  },
+  {
+    id: 'a4-4b', start: 405.1, dur: 14,
+    title: '10 лет на itch — мостик',
+    face: 'pip',
+    voUpdated: '2026-05-12T10:30:00',
+    vo: 'Тут важный контекст. Я люблю джемы и делать прототипы. Выкладываю их на itch больше десяти лет. И это первое что реально полетело.',
+    stage: 'Размеренно, без пафоса. На "больше десяти лет" — лёгкий акцент. На "первое что реально полетело" — снижение тона, искренне. Это мостик к climax\'у Steam (a4-5) — задаёт эмоциональный вес следующему reveal\'у.',
+    // 4 chunks
+    chunkWeights: {
+      2: 1.2,  // "больше десяти лет" — heavy 10-year mark
+      3: 1.3   // "первое что реально полетело" — финальный landing
+    },
+    checks: ['Темп','"больше 10 лет" — акцент','"первое что полетело" — искренне','Без пафоса','PiP-выразительность'],
+    visualCues: [
+      { chunkAt: 0, type: 'plate', text: 'КОНТЕКСТ',                       bg:'#2a2520', color:'#e8b647', size:75, label:'opener' },
+      { chunkAt: 1, type: 'image', src: '../data/itch/itch_top2_incremental_2026-05-05.jpg', label:'itch профиль / прошлые прототипы' },
+      { chunkAt: 2, type: 'plate', text: '10+ ЛЕТ НА itch',                 bg:'#1a1612', color:'#e8b647', size:75, label:'timeline' },
+      { chunkAt: 3, type: 'plate', text: 'ПЕРВОЕ ЧТО ПОЛЕТЕЛО',              bg:'#c0392b', color:'#fff',    size:60, label:'emotional landing' }
+    ]
+  },
+  {
+    id: 'a4-5', start: 417.1, dur: 22,
+    title: 'Reveal #5 — 214 wishlists 🙏',
+    face: 'full', // самый личный момент видео
+    voUpdated: '2026-05-12T09:07:00',
+    vo: 'И самое неожиданное. У меня открыта Steam-страница. Coming Soon. Без рекламы. За три недели — двести четырнадцать wishlist-ов. Спасибо всем кто добавил. Постараюсь сделать что-то крутое.',
+    stage: 'Самый эмоциональный момент видео. "Самое неожиданное" — с лёгким удивлением. "Coming Soon. Без рекламы." — констатация. "Двести четырнадцать wishlist-ов" — медленно, отчётливо. На "Спасибо всем кто добавил" — искренне, с теплотой, прямой взгляд. "Постараюсь сделать что-то крутое" — обещание без театра. 👀 ЛИЦО full-frame, eye contact на "спасибо". БЕЗ [пауза]-театра.',
+    chunkWeights: {
+      3: 1.3,  // "214 wishlist-ов" — медленно отчётливо
+      4: 1.4,  // "Спасибо всем кто добавил" — pause-time для теплоты
+      5: 1.2   // "Постараюсь сделать что-то крутое" — финал спокойно
+    },
+    checks: ['Темп','"214 wishlist-ов" — медленно','"Спасибо" — искренне с теплотой','Eye contact (full face)','Без overclaim ("214 ≠ покупатели")'],
+    visualCues: [
+      { chunkAt: 0, type: 'plate', text: 'И САМОЕ НЕОЖИДАННОЕ',           bg:'#1a1612', color:'#e8b647', size:65, label:'opener' },
+      { chunkAt: 1, type: 'image', src: '../data/promo_steam/library_capsule.png', label:'Steam Coming Soon page' },
+      { chunkAt: 3, type: 'plate', text: '214\nWISHLISTS',                  bg:'#c0392b', color:'#fff',    size:130, label:'climax число' },
+      { chunkAt: 4, type: 'plate', text: 'СПАСИБО.',                       bg:'#1a1612', color:'#e8b647', size:100, label:'gratitude — лицо в full' }
+    ]
+  },
+  {
+    id: 'a4-6', start: 439.1, dur: 24,
+    title: 'Channels — откуда пришли цифры',
+    face: 'none', // анализ каналов через графики
+    voUpdated: '2026-05-12T10:30:00',
+    vo: 'Что я делал — писал везде где мог. Twitter, Telegram, Reddit, сам itch. itch хорошо продвинул. Попадал в frontpage. Держался топ-2 в incrementals. Первая волна wishlist-ов на Steam — из соцсетей. С самого itch конверсия небольшая, но есть. Когда itch снова продвигает — Steam подтягивается через день-два.',
+    stage: 'Спокойный аналитический разбор. Без crusader-тона. Перечисление каналов — ритмично, как список. "Конверсия небольшая, но есть" — констатация, не разочарование.',
+    // 8 chunks
+    chunkWeights: {
+      1: 1.3,  // "Twitter, Telegram, Reddit, itch" — 4 имени списком
+      4: 1.2,  // "топ-2 в incrementals" — punchline
+      5: 1.1,  // "wishlist-ов на Steam — из соцсетей" — analytic insight
+      7: 1.1   // финал день-два
+    },
+    checks: ['Темп / аналитично','Перечисление каналов чётко','Без crusader-тона','"Конверсия небольшая, но есть" — констатация','Энергия в голосе'],
+    visualCues: [
+      { chunkAt: 0, type: 'plate', text: 'КАНАЛЫ',                            bg:'#1a1612', color:'#e8b647', size:90, label:'opener' },
+      { chunkAt: 1, type: 'plate', text: 'TWITTER · TELEGRAM\nREDDIT · itch',  bg:'#2a2520', color:'#fff',    size:55, label:'4 каналов' },
+      { chunkAt: 2, type: 'plate', text: 'itch FRONTPAGE',                     bg:'#1a1612', color:'#e8b647', size:75, label:'itch продвинул' },
+      { chunkAt: 3, type: 'image', src: '../data/itch/itch_top2_incremental_2026-05-05.jpg', label:'frontpage скрин' },
+      { chunkAt: 4, type: 'plate', text: 'ТОП-2 incrementals',                 bg:'#c0392b', color:'#fff',    size:65, label:'tag-leader' },
+      { chunkAt: 5, type: 'image', src: '../data/steam/wishlist_daily_2026-05-11.png', label:'wishlist график' },
+      { chunkAt: 6, type: 'plate', text: 'itch → Steam:\nмалая конверсия',     bg:'#2a2520', color:'#e8857a', size:50, label:'честность' },
+      { chunkAt: 7, type: 'plate', text: 'itch ↑ → Steam ↑\n(день-два)',        bg:'#1a1612', color:'#e8b647', size:55, label:'корреляция' }
+    ]
+  },
+
+  // ──────────────── АКТ 5 — ФИНАЛ + Wavedash callback ────────────────
+  {
+    id: 'a5-1', start: 480, dur: 12,
+    title: 'Wavedash callback — $1000',
+    face: 'full', // личный момент — "это сильно помогает", прямой взгляд
+    voUpdated: '2026-05-12T09:07:00',
+    vo: 'Wavedash Deploy Challenge — первое место. Тысяча долларов призовых. Это сильно помогает.',
+    stage: 'Спокойно, без бравады. "Первое место" — лёгкое поднятие, но без crusader-тона. "Тысяча долларов призовых" — констатация факта, ровно. "Это сильно помогает" — честно, прямой взгляд, без театра и без жалобы (не "наконец-то поддержка", не "я бедный"). Просто признание: соло-разработчику деньги важны.',
+    checks: ['Темп / спокойствие','"Первое место" — лёгкий подъём','Eye contact (full face)','"Помогает" — искренне, без жалобы','Без бравады и без театра'],
+    visualCues: [
+      { chunkAt: 0, type: 'plate', text: '🏆 1-е МЕСТО\nWAVEDASH DEPLOY CHALLENGE', bg:'#1a1612', color:'#e8b647', size:55, label:'callback к hook\'у' },
+      { chunkAt: 1, type: 'plate', text: '$1000',                                   bg:'#1a1612', color:'#e8b647', size:200, label:'призовые крупно' },
+      { chunkAt: 2, type: 'image', src: '../data/itch/06_submission_wavedash.png', label:'face full — финал без overlay' }
+    ]
+  },
+  {
+    id: 'a5-2', start: 492, dur: 32,
+    title: 'Steam = визуал (3D) — главное направление',
+    face: 'full', // looking forward — нужно лицо для conviction
+    voUpdated: '2026-05-12T10:30:00',
+    vo: 'Что дальше? Steam-версия. Геймплей менять не буду — он хороший. Это подтверждают и место в джеме, и оценки. Главный фокус — визуал. Думаю в сторону качественного 3D. Тестовая сцена с экспериментом у меня уже есть. Если получится сделать достойно — это и снимет претензии к AI-арту. И сделает игру серьёзной для Steam.',
+    stage: '⚠ FACE-FULL beat — читай **непрерывно**, точки только интонационные. Конструктивный тон, looking forward. "Что дальше?" — короткий beat-вопрос (НЕ долгая пауза). "Геймплей менять не буду" — уверенно. "Главный фокус — визуал" — задумчиво, с акцентом. На "качественного 3D" — лёгкое поднятие. БЕЗ [пауза]-театра, БЕЗ ступоров на face.',
+    // 9 chunks
+    chunkWeights: {
+      0: 1.3,  // "Что дальше?" — пауза-вопрос
+      4: 1.2,  // "Главный фокус — визуал" — акцент
+      5: 1.2,  // "качественного 3D" — лёгкое поднятие
+      8: 1.2   // финальный landing "сделает игру серьёзной"
+    },
+    checks: ['"Что дальше?" — пауза-вопрос','"Геймплей менять не буду" — уверенно','"Фокус: визуал" — акцент','Eye contact (full face)','Финал без театра'],
+    visualCues: [
+      { chunkAt: 0, type: 'plate', text: 'ЧТО ДАЛЬШЕ?',                    bg:'#1a1612', color:'#e8b647', size:90, label:'opener вопрос' },
+      { chunkAt: 1, type: 'plate', text: 'STEAM-ВЕРСИЯ',                    bg:'#c0392b', color:'#fff',    size:90, label:'answer' },
+      { chunkAt: 2, type: 'plate', text: 'ГЕЙМПЛЕЙ → НЕ МЕНЯЮ',              bg:'#2a2520', color:'#e8b647', size:60, label:'gameplay stay' },
+      { chunkAt: 3, type: 'plate', text: 'место + оценки\nподтверждают',     bg:'#2a2520', color:'#fff',    size:50, label:'reasoning' },
+      { chunkAt: 4, type: 'plate', text: 'ФОКУС: ВИЗУАЛ',                    bg:'#1a1612', color:'#e8b647', size:90, label:'direction' },
+      { chunkAt: 5, type: 'plate', text: '3D',                                bg:'#1a1612', color:'#e8b647', size:200, label:'3D крупно' },
+      { chunkAt: 6, type: 'image', src: '../data/promo_steam/main_capsule.png', label:'тестовая 3D-сцена (NEED character_world_test)' },
+      { chunkAt: 7, type: 'plate', text: 'снимет претензии\nк AI-арту',       bg:'#2a2520', color:'#e8b647', size:55, label:'argument 1' },
+      { chunkAt: 8, type: 'plate', text: 'серьёзно для Steam',                bg:'#1a1612', color:'#e8b647', size:65, label:'argument 2 / финал' }
+    ]
+  },
+  {
+    id: 'a5-3', start: 522, dur: 15,
+    title: 'CTA — финал (subscribe call)',
+    face: 'full', // прямой subscribe call — нужен eye contact
+    voUpdated: '2026-05-12T09:07:00',
+    vo: 'Поиграть бесплатно — ссылка на itch под видео. Если хочешь поддержать — wishlist на Steam. Буду делиться как идёт работа. Подписывайся если интересно.',
+    stage: 'Финал. Спокойно, без давления. "Поиграть бесплатно" — приглашение, тепло. "Wishlist на Steam" — конкретный action. "Буду делиться" — открыто, без обещаний конкретных тем. "Подписывайся если интересно" — мягкое приглашение, не насилие. 👀 ЛИЦО full-frame, прямой eye contact, дружелюбно — viewer должен почувствовать что обращаешься лично.',
+    checks: ['Темп','"Поиграть бесплатно" — тепло','Без content-обещаний ("буду делиться" не "следующее видео про X")','Eye contact (full face)','"Если интересно" — мягко без давления'],
+    visualCues: [
+      { chunkAt: 0, type: 'plate', text: 'itch — БЕСПЛАТНО',              bg:'#1a1612', color:'#e8b647', size:70, label:'itch link' },
+      { chunkAt: 1, type: 'plate', text: 'WISHLIST · STEAM',              bg:'#c0392b', color:'#fff',    size:65, label:'steam CTA' },
+      { chunkAt: 2, type: 'image', src: '../data/trailer/beat_19_8_fade.png', label:'face full + buду делиться' },
+      { chunkAt: 3, type: 'plate', text: 'SUBSCRIBE',                     bg:'#1a1612', color:'#e8b647', size:130, label:'subscribe pulse' }
+    ]
+  },
+];
+const TOTAL = BEATS[BEATS.length-1].start + BEATS[BEATS.length-1].dur;
+
+// Split VO into chunks for karaoke (same logic as recorder.html)
+function splitChunks(text) {
+  const segments = [];
+  const parts = text.split(/(\[пауза\])/);
+  parts.forEach(part => {
+    if (!part.trim()) return;
+    if (part.trim() === '[пауза]') {
+      segments.push({ type: 'pause', text: '[пауза]', wordCount: 1 });
+      return;
+    }
+    const sentences = part.split(/(?<=[.!?…])\s+/).filter(s => s.trim());
+    sentences.forEach(s => {
+      const words = s.split(/\s+/).filter(Boolean);
+      if (words.length > 14) {
+        const subParts = s.split(/(?<=,)\s+/);
+        subParts.forEach(sp => {
+          const w = sp.split(/\s+/).filter(Boolean).length;
+          segments.push({ type: 'text', text: sp.trim(), wordCount: w });
+        });
+      } else {
+        segments.push({ type: 'text', text: s.trim(), wordCount: words.length });
+      }
+    });
+  });
+  return segments;
+}
+
+// Pre-compute chunks for each beat (with optional chunkWeights override)
+function getChunkWeight(b, i) {
+  return (b.chunkWeights && b.chunkWeights[i] != null) ? b.chunkWeights[i] : 1.0;
+}
+BEATS.forEach(b => {
+  b.chunks = splitChunks(b.vo);
+  const totalWeighted = b.chunks.reduce((s, c, i) => s + c.wordCount * getChunkWeight(b, i), 0);
+  let elapsed = 0;
+  b.chunks.forEach((c, i) => {
+    c.relativeStart = elapsed;
+    elapsed += (c.wordCount * getChunkWeight(b, i) / totalWeighted) * b.dur;
+    c.relativeEnd = elapsed;
+  });
+});
+
+// Build timeline
+const tlBar = document.getElementById('timeline-bar');
+const colors = ['#c0392b','#c0392b','#4a7ba8','#4a7ba8'];
+BEATS.forEach((b, i) => {
+  const el = document.createElement('div');
+  el.className = 'seg';
+  el.dataset.idx = i;
+  el.style.left = (b.start/TOTAL*100)+'%';
+  el.style.width = (b.dur/TOTAL*100)+'%';
+  el.style.background = colors[i];
+  el.textContent = b.title.length > 12 ? b.title.substring(0,12)+'…' : b.title;
+  el.title = `${b.id} · ${b.dur.toFixed(1)}с`;
+  el.onclick = () => { player.currentTime = b.start; player.play(); };
+  tlBar.insertBefore(el, document.getElementById('playhead'));
+});
+
+// Build per-beat checklists
+const checksContainer = document.getElementById('beat-checks');
+const checksKey = 'trolley-preview-beat-checks-v1';
+const savedChecks = JSON.parse(localStorage.getItem(checksKey) || '{}');
+const notesKey = 'trolley-preview-beat-notes-v1';
+const savedNotes = JSON.parse(localStorage.getItem(notesKey) || '{}');
+
+BEATS.forEach((b, i) => {
+  const card = document.createElement('div');
+  card.className = 'beat-check';
+  card.dataset.idx = i;
+
+  const m = Math.floor(b.start/60), sec = Math.floor(b.start%60);
+  const timeStr = `${m}:${String(sec).padStart(2,'0')}`;
+
+  // Auto-apply agentReview marks. Re-applies if take name in review changed
+  // (so a fresh review supersedes old one without manual reset).
+  const reviewAppliedKey = `_review_applied_${b.id}`;
+  if (b.agentReview && b.agentReview.marks) {
+    const appliedFor = localStorage.getItem(reviewAppliedKey);
+    if (appliedFor !== b.agentReview.take) {
+      Object.entries(b.agentReview.marks).forEach(([idx, status]) => {
+        const key = `${b.id}_${idx}`;
+        savedChecks[key] = status; // overwrite to reflect latest verdict
+      });
+      localStorage.setItem(checksKey, JSON.stringify(savedChecks));
+      localStorage.setItem(reviewAppliedKey, b.agentReview.take);
+    }
+  }
+
+  let checksHtml = '<div class="bc-status">';
+  b.checks.forEach((check, ci) => {
+    const key = `${b.id}_${ci}`;
+    const status = savedChecks[key] || 'none';
+    const marks = { good: '✓', bad: '✗', meh: '?', none: '○' };
+    checksHtml += `<div class="check-item s-${status === 'none' ? '' : status}" data-key="${key}" data-status="${status}" title="${check} — клик для смены">
+      <span class="mark">${marks[status]}</span><span>${check}</span>
+    </div>`;
+  });
+  checksHtml += '</div>';
+
+  // Verdict banner if agent reviewed
+  let verdictHtml = '';
+  if (b.agentReview && b.agentReview.verdict) {
+    verdictHtml = `<div style="margin-top:6px;padding:6px 10px;background:#e8f0dd;border:1px solid var(--green);border-radius:4px;font-size:11px;line-height:1.4">
+      <b style="color:var(--green)">🤖 Вердикт агента (${b.agentReview.take}):</b> ${b.agentReview.verdict}
+    </div>`;
+  }
+
+  let agentHtml = '';
+  if (b.agentNotes && b.agentNotes.length) {
+    // If agentReview confirms issues resolved — collapse the old notes (they're history)
+    const isResolved = !!(b.agentReview && b.agentReview.verdict);
+    if (isResolved) {
+      agentHtml = `<details class="agent-notes"><summary style="cursor:pointer;font-size:10px;color:#888;text-transform:uppercase;letter-spacing:0.05em">📋 История замечаний (решено новым take'ом) — раскрыть</summary>`;
+      b.agentNotes.forEach(n => {
+        agentHtml += `<div class="an-item" style="opacity:0.5;text-decoration:line-through"><span class="an-icon">${n.icon}</span><span class="an-time">${n.t}</span><span class="an-text">${n.text}</span></div>`;
+      });
+      agentHtml += '</details>';
+    } else {
+      agentHtml = '<div class="agent-notes"><div class="an-title">📋 Что заметил агент</div>';
+      b.agentNotes.forEach(n => {
+        agentHtml += `<div class="an-item"><span class="an-icon">${n.icon}</span><span class="an-time">${n.t}</span><span class="an-text">${n.text}</span></div>`;
+      });
+      agentHtml += '</div>';
+    }
+  }
+
+  const faceBadge = {
+    'full': '<span style="background:#c0392b;color:#fff;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700;text-transform:uppercase">👀 ЛИЦО В КАДРЕ</span>',
+    'pip':  '<span style="background:#d35400;color:#fff;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700;text-transform:uppercase">🪟 PIP</span>',
+    'none': '<span style="background:#2a2520;color:#e8b647;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700;text-transform:uppercase">🎙 ТОЛЬКО ГОЛОС</span>'
+  }[b.face || 'none'] || '';
+
+  // Determine status from agentReview verdict
+  let status = 'unknown';
+  let statusPill = '';
+  if (b.agentReview) {
+    const v = b.agentReview.verdict || '';
+    if (/✅|в финал|готов/i.test(v) && !/не в финал|переписать|нужен/i.test(v)) status = 'ready';
+    else if (/❌|переписать|нужен|take\d+ нужен/i.test(v)) status = 'rerecord';
+    else if (/design-change|✏|ожидает|pending/i.test(v)) status = 'pending';
+  } else {
+    status = 'pending';
+  }
+  const statusLabels = {
+    'ready': '✅ В ФИНАЛ',
+    'rerecord': '❌ ПЕРЕПИСАТЬ',
+    'pending': '⏳ ЖДЁМ TAKE',
+    'unknown': '?'
+  };
+  if (status !== 'unknown') {
+    statusPill = `<span class="status-pill ${status}">${statusLabels[status]}</span>`;
+  }
+  card.classList.add(`status-${status}`);
+
+  // Full VO preview shown right below the head — user reads BEFORE pressing record
+  const voPreviewHtml = b.vo ? `
+    <div class="bc-vo-preview" style="background:#fff8e0; border-left:4px solid #e8b647; padding:10px 14px; margin:8px 0; font-size:15px; line-height:1.5; color:#1a1612; font-weight:500;">
+      <div style="font-size:11px; text-transform:uppercase; letter-spacing:1px; color:#8a6f2a; margin-bottom:6px; font-weight:700;">📝 Текст для записи</div>
+      ${b.vo.replace(/—/g, '&mdash;')}
+    </div>` : '';
+
+  card.innerHTML = `
+    <div class="bc-head">
+      <span><span class="bc-num">${timeStr}</span> ${b.title} ${statusPill} ${faceBadge}</span>
+      <button class="rec-btn" data-rec-idx="${i}">🎙 Перезаписать</button>
+    </div>
+    ${voPreviewHtml}
+    ${checksHtml}
+    ${verdictHtml}
+    ${agentHtml}
+    <textarea class="beat-notes" data-id="${b.id}" placeholder="Твои заметки (переписать? переснять? OK?)">${savedNotes[b.id] || ''}</textarea>
+  `;
+  checksContainer.appendChild(card);
+});
+
+// Wire up record buttons
+document.querySelectorAll('.rec-btn[data-rec-idx]').forEach(btn => {
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    openRecordModal(+btn.dataset.recIdx);
+  };
+});
+
+// Check item click → cycle states: none → good → meh → bad → none
+checksContainer.addEventListener('click', e => {
+  const item = e.target.closest('.check-item');
+  if (!item) return;
+  const cur = item.dataset.status;
+  const next = { none:'good', good:'meh', meh:'bad', bad:'none' }[cur];
+  const marks = { good: '✓', bad: '✗', meh: '?', none: '○' };
+  item.dataset.status = next;
+  item.className = `check-item s-${next === 'none' ? '' : next}`;
+  item.querySelector('.mark').textContent = marks[next];
+  savedChecks[item.dataset.key] = next;
+  localStorage.setItem(checksKey, JSON.stringify(savedChecks));
+});
+
+// Notes save
+checksContainer.addEventListener('input', e => {
+  const ta = e.target;
+  if (ta.tagName !== 'TEXTAREA') return;
+  savedNotes[ta.dataset.id] = ta.value;
+  localStorage.setItem(notesKey, JSON.stringify(savedNotes));
+});
+
+// Sync karaoke + stage + active markers
+const player = document.getElementById('player');
+const playhead = document.getElementById('playhead');
+const karaokeCard = document.getElementById('karaoke-card');
+const karaokeEl = document.getElementById('karaoke');
+const stageCard = document.getElementById('stage-card');
+const kTitle = document.getElementById('k-title');
+const kTime = document.getElementById('k-time');
+
+let currentBeatIdx = -1;
+
+function renderKaraoke(beat, relativeTime) {
+  let html = '';
+  beat.chunks.forEach(c => {
+    let cls = 'upcoming';
+    if (relativeTime >= c.relativeEnd) cls = 'past';
+    else if (relativeTime >= c.relativeStart) cls = 'active';
+    if (c.type === 'pause') {
+      html += `<span class="chunk ${cls}"><span class="pause-marker">пауза</span></span>`;
+    } else {
+      html += `<span class="chunk ${cls}">${c.text}</span> `;
+    }
+  });
+  karaokeEl.innerHTML = html;
+}
+
+// A/B audio switcher
+const btnRaw = document.getElementById('audio-raw');
+const btnClean = document.getElementById('audio-clean');
+function switchAudio(file, btn) {
+  const wasPlaying = !player.paused;
+  const t = player.currentTime;
+  player.src = '../data/previews/' + file;
+  player.addEventListener('loadedmetadata', function once() {
+    player.removeEventListener('loadedmetadata', once);
+    player.currentTime = t;
+    if (wasPlaying) player.play();
+  });
+  document.querySelectorAll('.ab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+const btnCleanV2 = document.getElementById('audio-clean-v2');
+const btnCleanV3 = document.getElementById('audio-clean-v3');
+const btnCleanV4 = document.getElementById('audio-clean-v4');
+btnRaw.onclick = () => switchAudio('preview_v1_a0-a1.mp4', btnRaw);
+btnClean.onclick = () => switchAudio('preview_v1_a0-a1_clean.mp4', btnClean);
+btnCleanV2.onclick = () => switchAudio('preview_v1_a0-a1_clean_v2.mp4', btnCleanV2);
+btnCleanV3.onclick = () => switchAudio('preview_v1_a0-a1_clean_v3.mp4', btnCleanV3);
+btnCleanV4.onclick = () => switchAudio('preview_v1_a0-a1_clean_v4.mp4', btnCleanV4);
+
+// ──────────────────────────────────────────────────────────────────────
+// INLINE RECORDING MODAL
+// ──────────────────────────────────────────────────────────────────────
+let recStream = null;
+let recRecorder = null;
+let recChunks = [];
+let recStart = 0;
+let recTimer = null;
+let recMeterAnim = null;
+let recMeterCtx = null;
+let recAnalyser = null;
+let recKaraokeTimer = null;
+let recChunkIdx = 0;
+let recCurBeatIdx = -1;
+
+const rmModal = document.getElementById('rec-modal');
+const rmPreview = document.getElementById('rm-preview');
+const rmTitle = document.getElementById('rm-title');
+const rmTime = document.getElementById('rm-time');
+const rmStage = document.getElementById('rm-stage');
+const rmKaraoke = document.getElementById('rm-karaoke');
+const rmRec = document.getElementById('rm-rec');
+const rmRecLabel = document.getElementById('rm-rec-label');
+const rmTimer = document.getElementById('rm-timer');
+const rmTarget = document.getElementById('rm-target');
+const rmStatus = document.getElementById('rm-status');
+const rmCountdown = document.getElementById('rm-countdown');
+const rmCountdownContent = document.getElementById('rm-countdown-content');
+const rmTakes = document.getElementById('rm-takes');
+
+async function ensureStream() {
+  if (recStream && recStream.getTracks().every(t => t.readyState === 'live')) return recStream;
+  recStream = await navigator.mediaDevices.getUserMedia({
+    video: { width: {ideal:1920}, height:{ideal:1080}, frameRate:{ideal:30} },
+    audio: { echoCancellation:true, noiseSuppression:true, autoGainControl:false,
+             sampleRate:48000, channelCount:1 }
+  });
+  rmPreview.srcObject = recStream;
+  startMeter();
+  return recStream;
+}
+
+function startMeter() {
+  if (!recStream || recStream.getAudioTracks().length === 0) return;
+  if (recMeterCtx) recMeterCtx.close().catch(()=>{});
+  recMeterCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const src = recMeterCtx.createMediaStreamSource(recStream);
+  recAnalyser = recMeterCtx.createAnalyser();
+  recAnalyser.fftSize = 2048;
+  src.connect(recAnalyser);
+  const buf = new Float32Array(recAnalyser.fftSize);
+  function tick() {
+    if (!recAnalyser) return;
+    recAnalyser.getFloatTimeDomainData(buf);
+    let peak = 0, sq = 0;
+    for (let i = 0; i < buf.length; i++) {
+      const a = Math.abs(buf[i]);
+      if (a > peak) peak = a;
+      sq += buf[i] * buf[i];
+    }
+    const rms = Math.sqrt(sq / buf.length);
+    const pDb = peak > 0 ? 20*Math.log10(peak) : -Infinity;
+    const rDb = rms > 0 ? 20*Math.log10(rms) : -Infinity;
+    document.getElementById('rm-peak').textContent = isFinite(pDb) ? pDb.toFixed(1)+' dB' : '— dB';
+    document.getElementById('rm-rms').textContent = isFinite(rDb) ? rDb.toFixed(1)+' dB' : '— dB';
+    document.getElementById('rm-peak-bar').style.width = Math.max(0, Math.min(100, (pDb+60)/60*100))+'%';
+    document.getElementById('rm-rms-bar').style.width = Math.max(0, Math.min(100, (rDb+60)/60*100))+'%';
+    recMeterAnim = requestAnimationFrame(tick);
+  }
+  recMeterAnim = requestAnimationFrame(tick);
+}
+
+async function openRecordModal(beatIdx) {
+  recCurBeatIdx = beatIdx;
+  const b = BEATS[beatIdx];
+  const faceMode = b.face || 'none';
+  const faceLabel = {'full':'👀 Лицо в кадре','pip':'🪟 PiP','none':'🎙 Только голос'}[faceMode];
+  rmTitle.innerHTML = `${b.id} · ${b.title} <span style="font-size:11px;background:${faceMode==='full'?'#c0392b':faceMode==='pip'?'#d35400':'#444'};padding:2px 8px;border-radius:8px;margin-left:8px">${faceLabel}</span>`;
+  rmTime.textContent = `${b.dur.toFixed(1)} сек`;
+  rmStage.textContent = b.stage;
+  rmTarget.textContent = '/ ' + b.dur.toFixed(0) + 'с';
+  recChunkIdx = 0;
+  renderModalKaraoke(b);
+  renderVisualCueByChunk(b, 0); // show cue for first chunk
+
+  // Populate agent notes + user notes (so they're visible while recording)
+  const agentBox = document.getElementById('rm-agent-notes');
+  let agentHtml = '';
+  const hasResolved = !!(b.agentReview && b.agentReview.verdict);
+  if (hasResolved) {
+    // Show fresh verdict instead of old issues
+    agentHtml = `<div class="ran-title" style="color:#6b8e4e">✓ Вердикт агента (${b.agentReview.take})</div>
+      <div style="padding:8px 0;color:#d8d0bd;font-size:13px;line-height:1.5">${b.agentReview.verdict}</div>`;
+  } else if (b.agentNotes && b.agentNotes.length) {
+    agentHtml = '<div class="ran-title">📋 Что заметил агент в прошлый раз</div>';
+    b.agentNotes.forEach(n => {
+      agentHtml += `<div class="ran-item"><span class="ran-icon">${n.icon}</span><span class="ran-time">${n.t}</span><span class="ran-text">${n.text}</span></div>`;
+    });
+  }
+  const userNote = (JSON.parse(localStorage.getItem(notesKey) || '{}'))[b.id] || '';
+  if (userNote.trim()) {
+    agentHtml += `<div class="ran-user">${userNote.replace(/\n/g,'<br>')}</div>`;
+  }
+  if (agentHtml) {
+    agentBox.innerHTML = agentHtml;
+    agentBox.style.display = 'block';
+  } else {
+    agentBox.style.display = 'none';
+  }
+
+  rmStatus.textContent = 'Открываю камеру…';
+  rmModal.classList.add('show');
+  document.getElementById('rm-teleprompter').classList.add('show');
+  document.getElementById('rm-full-text').classList.add('show');
+  renderModalFullText(b);
+  try {
+    await ensureStream();
+    rmStatus.textContent = 'Готов. Жми «Запись» — 3-сек отсчёт, потом старт.';
+    await refreshTakesList(b.id);
+  } catch (e) {
+    rmStatus.textContent = '❌ Нет доступа к камере/микрофону: ' + e.message;
+  }
+}
+
+function renderVisualCueByChunk(b, chunkIdx) {
+  const cuesContainer = document.getElementById('rm-cue');
+  if (!b.visualCues || b.visualCues.length === 0) {
+    cuesContainer.style.display = 'none';
+    return;
+  }
+  cuesContainer.style.display = 'flex';
+  // Find latest cue whose chunkAt <= chunkIdx; if none, hide
+  let cue = null;
+  for (const c of b.visualCues) {
+    if ((c.chunkAt ?? 0) <= chunkIdx) cue = c;
+    else break;
+  }
+  const label = document.getElementById('rm-cue-label');
+  const img = document.getElementById('rm-cue-img');
+  const plate = document.getElementById('rm-cue-plate');
+  const timeEl = document.getElementById('rm-cue-time');
+  if (!cue) {
+    label.textContent = '— (нет cue)';
+    img.style.display = 'none';
+    plate.style.display = 'none';
+    timeEl.textContent = '';
+    return;
+  }
+  label.textContent = cue.label || '';
+  timeEl.textContent = `chunk ${cue.chunkAt ?? 0} · "${(b.chunks[cue.chunkAt ?? 0]||{}).text || ''}"`.substring(0, 60);
+  if (cue.type === 'image') {
+    img.src = cue.src;
+    img.style.display = 'block';
+    plate.style.display = 'none';
+  } else if (cue.type === 'plate') {
+    img.style.display = 'none';
+    plate.style.display = 'flex';
+    plate.style.alignItems = 'center';
+    plate.style.justifyContent = 'center';
+    plate.style.position = 'absolute';
+    plate.style.inset = '0';
+    plate.style.background = cue.bg || '#000';
+    plate.style.color = cue.color || '#fff';
+    plate.style.fontSize = (cue.size || 60) + 'px';
+    plate.textContent = cue.text || '';
+  }
+}
+
+function renderModalFullText(b) {
+  // Bottom overlay: render ALL chunks inline, with past/active/upcoming styling
+  const ftEl = document.getElementById('rm-full-text');
+  if (!b || !b.chunks) { ftEl.innerHTML = ''; return; }
+  const html = b.chunks.map((c, i) => {
+    const isPause = c.type === 'pause';
+    let cls = 'chunk';
+    if (i < recChunkIdx) cls += ' past';
+    else if (i === recChunkIdx) cls += ' active';
+    if (isPause) cls += ' pause';
+    const text = isPause ? '· пауза ·' : c.text;
+    return `<span class="${cls}">${text}</span>`;
+  }).join(' ');
+  ftEl.innerHTML = html;
+  // Scroll active chunk into view if overflowing
+  const active = ftEl.querySelector('.chunk.active');
+  if (active) active.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+function renderModalKaraoke(b) {
+  // Teleprompter: show current chunk LARGE + next chunk small preview
+  const actEl = document.getElementById('rm-rt-active');
+  const nextEl = document.getElementById('rm-rt-next');
+  const cur = b.chunks[recChunkIdx];
+  if (cur) {
+    if (cur.type === 'pause') {
+      actEl.textContent = '— пауза —';
+      actEl.className = 'rt-active pause-active';
+    } else {
+      actEl.textContent = cur.text;
+      actEl.className = 'rt-active';
+    }
+  }
+  const nxt = b.chunks[recChunkIdx + 1];
+  if (nxt) {
+    if (nxt.type === 'pause') {
+      nextEl.textContent = 'пауза';
+      nextEl.className = 'rt-next pause-next';
+    } else {
+      nextEl.textContent = nxt.text;
+      nextEl.className = 'rt-next';
+    }
+    nextEl.style.display = 'block';
+  } else {
+    nextEl.style.display = 'none';
+  }
+  // Update bottom full-text view too (active chunk highlight shifts)
+  renderModalFullText(b);
+}
+
+async function refreshTakesList(beatId) {
+  try {
+    const r = await fetch('/api/list');
+    const files = await r.json();
+    const takes = files.filter(f => f.name.includes('_' + beatId + '_'));
+    rmTakes.textContent = `Takes для ${beatId}: ${takes.length}`;
+  } catch (e) { rmTakes.textContent = ''; }
+}
+
+async function runModalCountdown() {
+  rmCountdown.classList.add('show');
+  for (let n = 3; n >= 1; n--) {
+    rmCountdownContent.innerHTML = `<div class="num">${n}</div>`;
+    await new Promise(r => setTimeout(r, 800));
+  }
+  rmCountdownContent.innerHTML = `<div class="go">ГОВОРИ!</div>`;
+  await new Promise(r => setTimeout(r, 400));
+  rmCountdown.classList.remove('show');
+}
+
+async function modalStartRecording() {
+  if (!recStream) { rmStatus.textContent = '❌ Нет потока'; return; }
+  await runModalCountdown();
+
+  const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
+    ? 'video/webm;codecs=vp9,opus' : 'video/webm';
+  recRecorder = new MediaRecorder(recStream, {
+    mimeType, videoBitsPerSecond: 5_000_000, audioBitsPerSecond: 128_000
+  });
+  recChunks = [];
+  recRecorder.ondataavailable = e => { if (e.data.size > 0) recChunks.push(e.data); };
+  recRecorder.onstop = onModalRecStop;
+  recRecorder.start();
+  recStart = performance.now();
+  recTimer = setInterval(updateModalTimer, 100);
+
+  // Karaoke auto-pace (respects chunkWeights override)
+  const b = BEATS[recCurBeatIdx];
+  recChunkIdx = 0;
+  renderModalKaraoke(b);
+  const totalWeighted = b.chunks.reduce((s, c, i) => s + c.wordCount * getChunkWeight(b, i), 0);
+  let elapsed = 0;
+  const schedule = b.chunks.map((c, i) => {
+    const start = elapsed;
+    elapsed += (c.wordCount * getChunkWeight(b, i) / totalWeighted) * b.dur;
+    return start;
+  });
+  function ktick() {
+    const t = (performance.now() - recStart) / 1000;
+    let idx = 0;
+    for (let i = 0; i < schedule.length; i++) if (t >= schedule[i]) idx = i;
+    if (idx !== recChunkIdx) {
+      recChunkIdx = idx;
+      renderModalKaraoke(b);
+      renderVisualCueByChunk(b, idx); // cue follows karaoke chunk, not time
+    }
+    if (recRecorder && recRecorder.state === 'recording') {
+      recKaraokeTimer = requestAnimationFrame(ktick);
+    }
+  }
+  recKaraokeTimer = requestAnimationFrame(ktick);
+
+  rmRec.classList.add('recording');
+  rmRecLabel.textContent = 'Стоп';
+  rmStatus.textContent = '🔴 Запись… Жми «Стоп» когда закончишь.';
+}
+
+function modalStopRecording() {
+  if (!recRecorder || recRecorder.state !== 'recording') return;
+  clearInterval(recTimer);
+  if (recKaraokeTimer) cancelAnimationFrame(recKaraokeTimer);
+  recRecorder.stop();
+}
+
+function updateModalTimer() {
+  const t = (performance.now() - recStart) / 1000;
+  const b = BEATS[recCurBeatIdx];
+  const m = Math.floor(t/60), s = Math.floor(t%60);
+  rmTimer.innerHTML = `${m}:${String(s).padStart(2,'0')} <span class="target" id="rm-target">/ ${b.dur.toFixed(0)}с</span>`;
+}
+
+async function onModalRecStop() {
+  rmRec.classList.remove('recording');
+  rmRecLabel.textContent = 'Запись';
+  if (recChunks.length === 0) { rmStatus.textContent = '❌ Ничего не записалось'; return; }
+
+  const blob = new Blob(recChunks, { type: 'video/webm' });
+  const b = BEATS[recCurBeatIdx];
+  // Find next take num
+  let takeNum = 1;
+  try {
+    const r = await fetch('/api/list');
+    const files = await r.json();
+    const existing = files.filter(f => f.name.match(new RegExp('_' + b.id + '_.+?_take(\\d+)\\.')));
+    if (existing.length) {
+      takeNum = Math.max(...existing.map(f => {
+        const m = f.name.match(/_take(\d+)\./);
+        return m ? +m[1] : 0;
+      })) + 1;
+    }
+  } catch (e) {}
+
+  // Filename: NN_beatId_slug_takeN.webm — match scheme of other beats
+  const idxInOrder = recCurBeatIdx + 1; // 1-based for the file prefix
+  const slug = b.title.toLowerCase().replace(/[^a-zа-я0-9]+/g,'-').replace(/^-+|-+$/g,'').substring(0,30);
+  const filename = `${String(idxInOrder).padStart(2,'0')}_${b.id}_${slug}_take${takeNum}.webm`;
+
+  rmStatus.textContent = `⏳ Загрузка ${filename}…`;
+  try {
+    const up = await fetch('/api/save/' + encodeURIComponent(filename), {
+      method:'POST', headers:{'Content-Type':'application/octet-stream'}, body: blob
+    });
+    if (!up.ok) throw new Error('upload ' + up.status);
+    rmStatus.textContent = `🛠 Пересборка preview с cues… (15-60 сек, рендерим overlay)`;
+    // Send beats with cues so server can bake them into video
+    const payload = { beats: BEATS.map(b => ({id: b.id, visualCues: b.visualCues || []})) };
+    const rbPromise = fetch('/api/build-preview-with-cues', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    }).catch(e => ({_err:e}));
+    // Poll for completion: check mtime of preview file periodically
+    const startedAt = Date.now();
+    const initialMtime = await getPreviewMtime();
+    let done = false;
+    for (let i = 0; i < 60; i++) {  // up to 60 sec poll
+      await new Promise(r => setTimeout(r, 1000));
+      const m = await getPreviewMtime();
+      if (m && m > initialMtime) { done = true; break; }
+    }
+    if (done) {
+      rmStatus.textContent = `✅ Готово! Preview обновлён за ${((Date.now()-startedAt)/1000).toFixed(0)}с. Закрой модалку.`;
+      const curSrc = player.src.split('?')[0];
+      player.src = curSrc + '?v=' + Date.now();
+      await refreshTakesList(b.id);
+    } else {
+      rmStatus.textContent = `⚠ Сервер долго не отвечает. Закрой модалку и refresh страницу.`;
+    }
+  } catch (e) {
+    rmStatus.textContent = '❌ Ошибка: ' + e.message;
+  }
+}
+
+async function getPreviewMtime() {
+  try {
+    const r = await fetch('/data/previews/preview_v1_a0-a1_clean_v4.mp4', { method: 'HEAD', cache: 'no-store' });
+    const lm = r.headers.get('last-modified');
+    return lm ? new Date(lm).getTime() : 0;
+  } catch (e) { return 0; }
+}
+
+function closeModal() {
+  if (recRecorder && recRecorder.state === 'recording') {
+    if (!confirm('Идёт запись. Прервать?')) return;
+    recRecorder.stop();
+  }
+  rmModal.classList.remove('show');
+  document.getElementById('rm-teleprompter').classList.remove('show');
+  document.getElementById('rm-full-text').classList.remove('show');
+  if (recMeterAnim) { cancelAnimationFrame(recMeterAnim); recMeterAnim = null; }
+  if (recMeterCtx) { recMeterCtx.close().catch(()=>{}); recMeterCtx = null; }
+  if (recStream) { recStream.getTracks().forEach(t => t.stop()); recStream = null; }
+}
+
+rmRec.onclick = () => {
+  if (recRecorder && recRecorder.state === 'recording') modalStopRecording();
+  else modalStartRecording();
+};
+document.getElementById('rm-close').onclick = closeModal;
+
+// Original player timeupdate handler
+// Cue overlay on main player — shows WYSIWYG visual cues during playback
+const cueOverlay = document.getElementById('cue-overlay');
+const cueOvImg = document.getElementById('cue-overlay-img');
+const cueOvPlate = document.getElementById('cue-overlay-plate');
+const cueOvLabel = document.getElementById('cue-overlay-label');
+const cueToggle = document.getElementById('show-cues');
+
+function renderPlayerCue(t) {
+  if (!cueToggle.checked) { cueOverlay.style.display = 'none'; return; }
+  // Find which beat we're in
+  const beat = BEATS.find(b => t >= b.start && t < b.start + b.dur);
+  if (!beat || !beat.visualCues) { cueOverlay.style.display = 'none'; return; }
+  const relT = t - beat.start;
+  const cue = beat.visualCues.find(c => relT >= c.at && relT < c.at + c.dur);
+  if (!cue) { cueOverlay.style.display = 'none'; return; }
+
+  cueOverlay.style.display = 'block';
+  cueOvLabel.textContent = `🎬 ${cue.label || ''}`;
+  if (cue.type === 'image') {
+    cueOvImg.src = cue.src;
+    cueOvImg.style.display = 'block';
+    cueOvPlate.style.display = 'none';
+  } else if (cue.type === 'plate') {
+    cueOvImg.style.display = 'none';
+    cueOvPlate.style.display = 'flex';
+    cueOvPlate.style.background = cue.bg || '#000';
+    cueOvPlate.style.color = cue.color || '#fff';
+    cueOvPlate.style.fontSize = (cue.size || 60) + 'px';
+    cueOvPlate.textContent = cue.text || '';
+  }
+}
+cueToggle.addEventListener('change', () => renderPlayerCue(player.currentTime));
+
+// Manual rebuild button — re-render preview with current cues + latest takes
+document.getElementById('rebuild-btn').onclick = async () => {
+  const btn = document.getElementById('rebuild-btn');
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '⏳ Пересборка…';
+  try {
+    const payload = { beats: BEATS.map(b => ({id: b.id, visualCues: b.visualCues || []})) };
+    await fetch('/api/build-preview-with-cues', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    }).catch(()=>{});
+    // poll mtime
+    const initialMtime = await getPreviewMtime();
+    for (let i = 0; i < 60; i++) {
+      await new Promise(r => setTimeout(r, 1000));
+      const m = await getPreviewMtime();
+      if (m && m > initialMtime) {
+        const curSrc = player.src.split('?')[0];
+        player.src = curSrc + '?v=' + Date.now();
+        btn.textContent = '✅ Готово';
+        setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 2000);
+        return;
+      }
+    }
+    btn.textContent = '⚠ Таймаут';
+    setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 3000);
+  } catch (e) {
+    btn.textContent = '❌ Ошибка';
+    setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 3000);
+  }
+};
+
+player.addEventListener('timeupdate', () => {
+  const t = player.currentTime;
+  playhead.style.left = (t/TOTAL*100)+'%';
+  renderPlayerCue(t);
+
+  // Find active beat
+  const idx = BEATS.findIndex(b => t >= b.start && t < b.start + b.dur);
+  if (idx >= 0) {
+    const b = BEATS[idx];
+    if (idx !== currentBeatIdx) {
+      currentBeatIdx = idx;
+      // Update karaoke header
+      karaokeCard.style.display = 'block';
+      stageCard.style.display = 'block';
+      kTitle.textContent = `${b.id} · ${b.title}`;
+      stageCard.textContent = b.stage;
+      // Highlight beat-check card
+      document.querySelectorAll('.beat-check').forEach((el, i) => {
+        el.classList.toggle('active', i === idx);
+      });
+      // Highlight timeline seg
+      document.querySelectorAll('.timeline-bar .seg').forEach((el, i) => {
+        el.classList.toggle('active', i === idx);
+      });
+    }
+    const relT = t - b.start;
+    kTime.textContent = `${relT.toFixed(1)} / ${b.dur.toFixed(1)} с`;
+    renderKaraoke(b, relT);
+  } else {
+    if (currentBeatIdx !== -1) {
+      currentBeatIdx = -1;
+      karaokeCard.style.display = 'none';
+      stageCard.style.display = 'none';
+      document.querySelectorAll('.beat-check.active').forEach(el => el.classList.remove('active'));
+    }
+  }
+});
+</script>
+
+</body>
+</html>

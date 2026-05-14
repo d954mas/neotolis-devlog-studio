@@ -1,0 +1,810 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Trolley Devlog v6.1 — 8:50 + code-showcase + Shorts</title>
+<style>
+  :root {
+    --paper: #f2ede0;
+    --ink: #2a2520;
+    --ink-dim: #5a5046;
+    --accent: #c0392b;
+    --accent-soft: #e8857a;
+    --yellow: #e8b647;
+    --blue: #4a7ba8;
+    --green: #6b8e4e;
+    --purple: #8e4e8a;
+    --line: #d8d0bd;
+    --bg-panel: #faf6ec;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--paper); color: var(--ink);
+    font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; line-height: 1.5; }
+  body { padding: 24px 32px 80px; max-width: 1400px; margin: 0 auto; }
+  h1 { font-size: 32px; margin: 0 0 4px; letter-spacing: -0.02em; }
+  h1 .accent { color: var(--accent); }
+  h1 .v { background: var(--ink); color: var(--paper); font-size: 14px;
+    padding: 4px 8px; border-radius: 4px; vertical-align: middle;
+    margin-left: 8px; }
+  .subtitle { font-size: 14px; color: var(--ink-dim); margin-bottom: 24px; }
+
+  /* What changed v2 → v3 */
+  .changelog {
+    background: #fff8e0; border-left: 6px solid var(--yellow);
+    border-radius: 8px; padding: 16px 20px; margin-bottom: 24px;
+  }
+  .changelog h3 { margin: 0 0 8px; font-size: 16px; }
+  .changelog ul { margin: 0; padding-left: 20px; font-size: 14px; }
+  .changelog li { margin-bottom: 4px; }
+  .changelog .del { text-decoration: line-through; color: var(--ink-dim); }
+  .changelog .new { background: rgba(107,142,78,0.25); padding: 0 4px;
+    border-radius: 2px; }
+
+  .meta-bar {
+    display: flex; gap: 16px; flex-wrap: wrap;
+    background: var(--bg-panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 12px 16px; margin-bottom: 24px;
+  }
+  .meta-bar .m { font-size: 13px; }
+  .meta-bar .m b { font-weight: 600; }
+
+  /* Tension arc visualization */
+  .arc-wrap { background: #1a1612; color: var(--paper);
+    border-radius: 8px; padding: 16px 20px; margin-bottom: 24px; }
+  .arc-wrap h3 { margin: 0 0 12px; color: var(--yellow); font-size: 15px; }
+  .arc { position: relative; height: 100px; }
+  .arc svg { width: 100%; height: 100%; display: block; }
+  .arc-labels { display: flex; font-size: 11px; color: #c9bfa8;
+    margin-top: 6px; padding: 0 4px; }
+  .arc-note { font-size: 12px; color: #c9bfa8; margin-top: 8px;
+    line-height: 1.4; }
+
+  /* Timeline ribbon */
+  .timeline {
+    position: relative; height: 56px;
+    background: var(--bg-panel); border: 1px solid var(--line);
+    border-radius: 6px; margin-bottom: 8px; overflow: hidden; cursor: pointer;
+  }
+  .tl-act { position: absolute; top: 0; bottom: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 600; font-size: 12px;
+    border-right: 1px solid rgba(0,0,0,0.15); transition: filter .15s;
+    flex-direction: column; gap: 2px; padding: 4px;
+    text-align: center; line-height: 1.1; }
+  .tl-act small { font-size: 10px; opacity: 0.85; font-weight: 400; }
+  .tl-act:hover { filter: brightness(1.15); }
+  .tl-labels { display: flex; font-size: 11px; color: var(--ink-dim);
+    margin-bottom: 24px; padding: 0 4px; }
+
+  /* Act blocks */
+  .act {
+    background: var(--bg-panel); border: 1px solid var(--line);
+    border-left: 6px solid var(--c, var(--ink));
+    border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;
+    scroll-margin-top: 12px;
+  }
+  .act header { display: flex; align-items: baseline; gap: 16px;
+    flex-wrap: wrap; margin-bottom: 8px; }
+  .act h2 { margin: 0; font-size: 22px; }
+  .act .time { color: var(--ink-dim); font-variant-numeric: tabular-nums;
+    font-size: 14px; }
+  .act .duration { background: var(--paper); border: 1px solid var(--line);
+    padding: 2px 8px; border-radius: 12px; font-size: 12px; color: var(--ink-dim); }
+  .act .role { background: var(--ink); color: var(--paper);
+    padding: 2px 8px; border-radius: 12px; font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+  .act .role.crisis { background: var(--accent); }
+  .act .role.climax { background: var(--yellow); color: var(--ink); }
+  .act .premise { font-style: italic; color: var(--ink-dim);
+    margin-bottom: 16px; font-size: 14px; }
+
+  .beats { display: grid; gap: 12px;
+    grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); }
+  .beat { background: var(--paper); border: 1px solid var(--line);
+    border-radius: 6px; padding: 12px 14px; position: relative;
+    display: flex; flex-direction: column; }
+  .beat .b-time { font-size: 11px; color: var(--ink-dim);
+    font-variant-numeric: tabular-nums; font-weight: 600; }
+  .beat .b-title { font-weight: 600; margin: 4px 0; font-size: 14px; }
+  .beat .b-vo { font-size: 13px; color: var(--ink); margin-bottom: 8px; flex: 1; }
+  .beat .b-vo b { background: rgba(232,182,71,0.4); padding: 0 2px; }
+  .beat .b-vo em { background: rgba(192,57,43,0.15); padding: 0 2px;
+    font-style: normal; }
+  .beat .b-visual { font-size: 12px; color: var(--ink-dim);
+    border-top: 1px dashed var(--line); padding-top: 6px; }
+  .beat .b-visual::before { content: "🎬 "; }
+  .beat .b-thumb { width: 100%; height: 80px; object-fit: cover;
+    border-radius: 4px; border: 1px solid var(--line); margin-bottom: 8px;
+    background: #fff; }
+  .beat .b-tags { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
+  .b-tag { display: inline-block; padding: 1px 6px; border-radius: 10px;
+    font-size: 9px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.04em; }
+  .b-tag.hook { background: var(--accent); color: #fff; }
+  .b-tag.loop { background: var(--purple); color: #fff; }
+  .b-tag.payoff { background: var(--green); color: #fff; }
+  .b-tag.twist { background: var(--yellow); color: var(--ink); }
+  .b-tag.rehook { background: #d35400; color: #fff; }
+  .b-tag.climax { background: var(--ink); color: var(--yellow); }
+  .b-tag.cta { background: var(--blue); color: #fff; }
+  .b-tag.meta { background: #fff; color: var(--ink); border: 1px solid var(--ink); }
+  .b-tag.ready { background: var(--green); color: #fff; }
+  .b-tag.need { background: var(--accent); color: #fff; }
+  .b-tag.interrupt { background: #2c3e50; color: #fff; }
+
+  /* Stats grid */
+  .stats-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px; margin: 16px 0; }
+  .stat { background: var(--paper); border: 1px solid var(--line);
+    border-radius: 6px; padding: 10px 12px; text-align: center;
+    position: relative; }
+  .stat .v { font-size: 22px; font-weight: 700; color: var(--ink);
+    font-variant-numeric: tabular-nums; }
+  .stat .l { font-size: 11px; color: var(--ink-dim); text-transform: uppercase;
+    letter-spacing: 0.04em; }
+  .stat .order { position: absolute; top: -6px; right: -6px;
+    background: var(--accent); color: #fff; width: 20px; height: 20px;
+    border-radius: 50%; font-size: 11px; line-height: 20px;
+    font-weight: 700; }
+  .stat.win { background: #f4f8ed; border-color: var(--green); }
+  .stat.weak { background: #fbeeec; border-color: var(--accent-soft); }
+  .stat.climax { background: #fff8e0; border: 2px solid var(--yellow); }
+
+  /* Decisions */
+  .decisions { background: #fff8e0; border: 1px solid var(--yellow);
+    border-radius: 8px; padding: 16px 20px; margin-top: 32px; }
+  .decisions h3 { margin: 0 0 10px; font-size: 16px; }
+  .decisions ol { margin: 0; padding-left: 20px; }
+  .decisions li { margin-bottom: 6px; font-size: 14px; }
+  .key { background: rgba(232,182,71,0.35); padding: 0 4px; border-radius: 3px; }
+
+  /* Legend */
+  .legend { display: flex; gap: 8px; font-size: 11px; color: var(--ink-dim);
+    margin-bottom: 24px; flex-wrap: wrap; align-items: center; }
+
+  /* Sticky timeline */
+  .sticky-tl { position: sticky; top: 0; background: var(--paper);
+    padding-top: 12px; padding-bottom: 4px; z-index: 10; }
+
+  .quote { background: #1a1612; color: var(--paper); padding: 10px 14px;
+    border-radius: 4px; font-style: italic; font-size: 14px;
+    margin: 8px 0; border-left: 3px solid var(--yellow); }
+  .quote .who { display: block; font-size: 11px; color: #c9bfa8;
+    font-style: normal; margin-top: 4px; }
+
+  button { background: var(--ink); color: var(--paper); border: 0;
+    padding: 8px 14px; border-radius: 4px; font-size: 13px; cursor: pointer;
+    font-family: inherit; }
+  button.secondary { background: transparent; color: var(--ink);
+    border: 1px solid var(--ink); }
+</style>
+</head>
+<body>
+
+<nav class="trolley-nav" style="position:sticky;top:0;z-index:1000;background:#2a2520;color:#f2ede0;padding:8px 18px;display:flex;gap:6px;align-items:center;font-size:13px;font-family:system-ui;box-shadow:0 2px 8px rgba(0,0,0,0.15);flex-wrap:wrap">
+  <span style="font-weight:700;color:#e8b647;margin-right:12px">🚋 Trolley Devlog</span>
+  <a href="structure.html" data-page="structure" style="color:#f2ede0;text-decoration:none;padding:5px 12px;border-radius:4px">📋 Структура</a>
+  <a href="script.html" data-page="script" style="color:#f2ede0;text-decoration:none;padding:5px 12px;border-radius:4px">📝 Сценарий</a>
+  <a href="recorder.html" data-page="recorder" style="color:#f2ede0;text-decoration:none;padding:5px 12px;border-radius:4px">🎙 Запись</a>
+  <a href="preview.html" data-page="preview" style="color:#f2ede0;text-decoration:none;padding:5px 12px;border-radius:4px">▶ Preview</a>
+  <a href="code-viz.html" data-page="code-viz" style="color:#f2ede0;text-decoration:none;padding:5px 12px;border-radius:4px">📊 Code-viz</a>
+  <script>(function(){var p=location.pathname.split('/').pop().replace('.html','');document.querySelectorAll('.trolley-nav a').forEach(function(a){if(a.dataset.page===p){a.style.background='#c0392b';a.style.fontWeight='600'}else{a.onmouseenter=function(){a.style.background='rgba(255,255,255,0.1)'};a.onmouseleave=function(){a.style.background='transparent'}}});})();</script>
+</nav>
+
+<h1>Not a Trolley Problem <span class="accent">— Jam Devlog</span> <span class="v">v6.1 · 8:50</span></h1>
+<div class="subtitle">Структура видео для YouTube · 8:50 · ревью v6.1 (2026-05-11) · с визуальным code-showcase в Акте 3 + план Shorts</div>
+
+<div class="changelog">
+  <h3>✅ Что изменилось v6 → v6.1</h3>
+  <ul>
+    <li><b>Акт 3 beat #1 расширен с 15с до 30с</b>: вместо краткого "30k строк, 102 файла" — полноценный визуальный showcase с infographics: bar chart коммитов по дням, treemap по областям кода (UI 8.6k, Core 6.7k и т.д.), top-3 жирных файлов, финальная плашка "AI: 100% · Я: промпты"</li>
+    <li><b>Готовая инфографика</b> — берётся прямо из <code>web/code-viz.html</code> и анимируется под 30 секунд</li>
+    <li><b>Это сильнейший момент подтверждения AI-тезиса</b> цифрами после Акта 2 (методология) → Акт 3 (доказательство)</li>
+    <li><b>Общая длина</b>: 8:35 → <b>8:50</b> (+15с). Всё ещё под 10 минутами для хорошего retention</li>
+  </ul>
+  <h3 style="margin-top:14px">✅ Что было сделано в v6 (контекст)</h3>
+  <ul>
+    <li>11:30 → 8:35 (cut Акт 2 "эволюция стиля", Акт 3 ballast, Акт 4 reveal'ы, Акт 5 повторный beat)</li>
+    <li>+ план 6 Shorts/Reels из того же материала</li>
+  </ul>
+</div>
+
+<div class="meta-bar">
+  <div class="m">📺 <b>YouTube</b> · 11:30</div>
+  <div class="m">🎙 <b>Voiceover RU</b> + trailer + B-roll</div>
+  <div class="m">👥 <b>Микс</b> — разрабы + игроки</div>
+  <div class="m">🎨 <b>Тон:</b> устал-но-доволен, AI-честный</div>
+  <div class="m">📂 <code>C:\projects\devlogs\trolley</code></div>
+  <div class="m">🔗 <a href="code-viz.html" style="color:#c0392b;font-weight:600">code-viz.html →</a></div>
+</div>
+
+<!-- TENSION ARC -->
+<div class="arc-wrap">
+  <h3>📈 Дуга напряжения — где должен быть пик внимания</h3>
+  <div class="arc">
+    <svg viewBox="0 0 1000 100" preserveAspectRatio="none">
+      <!-- Grid -->
+      <line x1="0" y1="50" x2="1000" y2="50" stroke="#3a3530" stroke-dasharray="2,4"/>
+      <!-- Tension curve -->
+      <path d="M 0,30 Q 30,5 65,15 L 130,55 Q 200,70 280,50 L 390,60 Q 430,5 480,25 L 580,80 Q 650,15 750,30 L 810,90 Q 870,10 920,40 L 1000,75"
+            stroke="#e8b647" stroke-width="3" fill="none"/>
+      <!-- Markers -->
+      <circle cx="65" cy="15" r="6" fill="#c0392b"/>
+      <text x="65" y="8" fill="#e8857a" font-size="10" text-anchor="middle">HOOK</text>
+
+      <circle cx="430" cy="5" r="6" fill="#8e4e8a"/>
+      <text x="430" y="-2" fill="#c897c4" font-size="10" text-anchor="middle">LOOP CLOSE</text>
+
+      <circle cx="580" cy="80" r="6" fill="#d35400"/>
+      <text x="580" y="98" fill="#f0a570" font-size="10" text-anchor="middle">RE-HOOK</text>
+
+      <circle cx="810" cy="90" r="6" fill="#e8b647"/>
+      <text x="810" y="100" fill="#f5cf75" font-size="10" text-anchor="middle">CLIMAX</text>
+
+      <circle cx="920" cy="40" r="6" fill="#4a7ba8"/>
+      <text x="920" y="33" fill="#86a8c8" font-size="10" text-anchor="middle">CTA</text>
+    </svg>
+  </div>
+  <div class="arc-labels">
+    <span style="flex:0 0 4.7%">0:00</span>
+    <span style="flex:0 0 7.5%">0:25</span>
+    <span style="flex:0 0 25.5%">1:05</span>
+    <span style="flex:0 0 28.3%">3:20</span>
+    <span style="flex:0 0 22.6%">5:50</span>
+    <span style="flex:0 0 11.3%">7:50 → 8:50</span>
+  </div>
+  <div class="arc-note">
+    Хук-пик в первые 10 сек. Спад на Акте 1 (контекст — естественное затишье). Второй мини-подъём в Акте 2 (AI-questions). <b>Loop close в начале Акта 3</b> — payoff обещания из хука. Спад середины Акта 3. <b>Re-hook на 6:30</b> перед цифрами. <b>Climax на 9:30 — reveal 214 wishlists</b>. CTA-плато.
+  </div>
+</div>
+
+<div class="sticky-tl">
+<div class="timeline" id="timeline"></div>
+<div class="tl-labels">
+  <span style="flex:0 0 4.7%">0:00</span>
+  <span style="flex:0 0 7.5%">0:25</span>
+  <span style="flex:0 0 25.5%">1:05</span>
+  <span style="flex:0 0 28.3%">3:20</span>
+  <span style="flex:0 0 22.6%">5:50</span>
+  <span style="flex:0 0 11.3%">7:50 → 8:50</span>
+</div>
+</div>
+
+<div class="legend">
+  <span><span class="b-tag hook">HOOK</span> крюк внимания</span>
+  <span><span class="b-tag loop">OPEN LOOP</span> обещание</span>
+  <span><span class="b-tag payoff">LOOP CLOSE</span> разрешение</span>
+  <span><span class="b-tag twist">TWIST</span> поворот / сюрприз</span>
+  <span><span class="b-tag interrupt">INTERRUPT</span> pattern interrupt</span>
+  <span><span class="b-tag rehook">RE-HOOK</span> повторный крюк</span>
+  <span><span class="b-tag climax">CLIMAX</span> кульминация</span>
+  <span><span class="b-tag meta">META</span> личность</span>
+  <span><span class="b-tag cta">CTA</span> призыв</span>
+  <span style="margin-left:auto"><span class="b-tag ready">READY</span> ассет готов · <span class="b-tag need">NEED</span> нужно от тебя</span>
+</div>
+
+<!-- ACT 0 -->
+<section class="act" id="a0" style="--c:#c0392b">
+  <header>
+    <h2>Акт 0 — Хук (факты)</h2>
+    <span class="time">0:00 — 0:25</span>
+    <span class="duration">25 сек</span>
+    <span class="role">attention</span>
+  </header>
+  <div class="premise">"Pattern interrupt + факты в столбик + один шок-факт + мягкий open loop. Никакой выдуманной драмы — просто реальные цифры, которые уже впечатляют."</div>
+  <div class="beats">
+    <div class="beat punch">
+      <div class="b-tags"><span class="b-tag hook">CLAIM ⚡</span><span class="b-tag ready">READY</span></div>
+      <div class="b-time">0:00 — 0:03</div>
+      <div class="b-title">Шок-claim с первой секунды</div>
+      <div class="b-vo">[VO с первого кадра] "<b>Ни одной строчки кода в этой игре я не написал сам.</b>"</div>
+      <div class="b-visual">trailer chaos (первый kill + FEED THE MACHINE плашка) + поверх huge text "0 СТРОК КОДА" одновременно с VO. <em>Никакой паузы между play и шок-фактом — start scroll-stop в первые 2 сек</em></div>
+    </div>
+    <div class="beat punch">
+      <div class="b-tags"><span class="b-tag hook">HOOK ⚡</span></div>
+      <div class="b-time">0:03 — 0:26</div>
+      <div class="b-title">Хук-цифры ($1000 + 13д + AI)</div>
+      <div class="b-vo">"<b>Заработал $1000. 13 дней. 30 тысяч строк кода — всё написал ИИ.</b> Инкременталка про проблему трамвая на Gamedev.js Jam. <b>Первое место в Wavedash Deploy Challenge.</b> 18 в общем зачёте. И <b>топ-2 incremental на itch.</b>"</div>
+      <div class="b-visual">+$1000 крупно золотом (плюс = gain, не "потратил") → 13 ДНЕЙ → 30k+ВСЁ ИИ → трамвай B-roll → 🏆 1-е МЕСТО · WAVEDASH → #18/489 → топ-2 incremental. Стаккато из 3 ударов в первые 4с.</div>
+    </div>
+    <div class="beat">
+      <div class="b-tags"><span class="b-tag hook">PROMISE</span><span class="b-tag ready">READY</span></div>
+      <div class="b-time">0:18 — 0:25</div>
+      <div class="b-title">Title card</div>
+      <div class="b-vo">[Без слов, 7 сек] "Not a Trolley Problem — Jam Devlog"</div>
+      <div class="b-visual">trailer/beat_18_2_title.png статиком + быстрая нарезка boss/choice/upgrade кадров. Музыка возвращается</div>
+    </div>
+  </div>
+</section>
+
+<!-- ACT 1 -->
+<section class="act" id="a1" style="--c:#4a7ba8">
+  <header>
+    <h2>Акт 1 — Идея и Day 1</h2>
+    <span class="time">0:25 — 1:05</span>
+    <span class="duration">40 сек</span>
+    <span class="role">setup</span>
+  </header>
+  <div class="premise">"Сжато. Контекст джема, поворот идеи, Day 1 кружочки — всё в 40 секунд."</div>
+  <div class="beats">
+    <div class="beat punch">
+      <div class="b-tags"><span class="b-tag twist">SETUP</span><span class="b-tag need">NEED logo</span></div>
+      <div class="b-time">0:25 — 0:50</div>
+      <div class="b-title">Тема + идея</div>
+      <div class="b-vo">"Gamedev.js Jam 2026, тема — <b>Machines</b>. 13 дней. Трамвай — это машина. А <i>проблема вагонетки</i> — это интересная задачка, про которую можно сделать игру. <b>А что если нет никакой проблемы? Что если трамвай ездит по кругу, и нужно просто добавлять больше людей.</b>"</div>
+      <div class="b-visual">Логотип Gamedev.js + MACHINES → силуэт трамвая → иллюстрация trolley problem → ✕ "проблемы нет" → круг с людьми + трамвай → first кадр геймплея</div>
+    </div>
+    <div class="beat">
+      <div class="b-tags"><span class="b-tag ready">READY</span></div>
+      <div class="b-time">0:50 — 1:05</div>
+      <div class="b-title">Day 1 — кружочки</div>
+      <div class="b-vo">"День первый. Рельсы, кружочки. <b>Любая игра начинается с примитивов</b> — нужно проверить, интересна ли механика. Тащишь, бросаешь, <em>трамвай ездит, монетки летят.</em>"</div>
+      <div class="b-visual">itch/01_day1_first_trolley.png + Day 1 clip 5-6 сек <span class="b-tag need">NEED day1 clip</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ACT 2 -->
+<section class="act" id="a2" style="--c:#6b8e4e">
+  <header>
+    <h2>Акт 2 — Лошадь без тормозов 🐎</h2>
+    <span class="time">1:05 — 3:20</span>
+    <span class="duration">2:15</span>
+    <span class="role">drive</span>
+  </header>
+  <div class="premise">"Главный тезис + методология. Без повторов — все 'AI-аспекты' собраны в один акт."</div>
+  <div class="beats">
+    <div class="beat punch">
+      <div class="b-tags"><span class="b-tag twist">CLAIM</span></div>
+      <div class="b-time">0:57 — 1:17</div>
+      <div class="b-title">0 строк кода</div>
+      <div class="b-vo">"<b>Эти примитивы написал ИИ.</b> И всё что было дальше — тоже. Полгода я не пишу код руками — Claude Code пишет, я проверяю. <em>Проверяю как код, так и тестирую результат.</em> <b>В этом проекте я вообще не смотрел на код</b> — это джем, времени было мало."</div>
+      <div class="b-visual">Скриншот Claude Code в IDE, tool calls пролетают <span class="b-tag need">NEED IDE screenshot</span></div>
+    </div>
+    <div class="beat punch">
+      <div class="b-tags"><span class="b-tag twist">THESIS ⚡</span></div>
+      <div class="b-time">1:17 — 1:47</div>
+      <div class="b-title">Это инструмент</div>
+      <div class="b-vo">"Вокруг ИИ много хайпа. С одной стороны — <em>'игра за 1 промпт'</em>. И да, что-то простое за 1 промпт можно. <b>Но не большую игру.</b> С другой — <em>'ИИ не умеет делать игры'</em>. И тут тоже есть правда — у многих не получается. <b>Реальность проще: ИИ — инструмент. Нужно уметь им пользоваться.</b> И если умеешь — можно делать игры на полном ИИ-слопе. Даже большие. Даже долгие."</div>
+      <div class="b-visual">Левая: твит "AI in 1 prompt"* / Правая: "AI can't do games"* / звёздочки снизу мелко. cut → центр: одно слово "ИНСТРУМЕНТ"</div>
+    </div>
+    <div class="beat punch">
+      <div class="b-tags"><span class="b-tag twist">METHOD ⚡</span></div>
+      <div class="b-time">1:47 — 2:25</div>
+      <div class="b-title">Лошадь + кучер · 3 практики 🐎</div>
+      <div class="b-vo">"ИИ — это <b>лошадь без тормозов</b>. Тянет быстро, не устаёт, но без кучера улетит в канаву. И что делает кучер. <b>Первое — рамки.</b> Заранее решить какая игра, какого размера, что внутри. <b>Второе — декомпозиция.</b> Не <em>«сделай игру»</em>, а <em>«вот описание системы столкновений трамвая с NPC»</em>. Маленькие задачи, понятные интерфейсы. <b>Третье — все цифры баланса в отдельный файл.</b> Здоровье, скорости, цены — туда. <em>Этих трёх вещей хватает чтобы делать игры целиком на ИИ. Даже большие.</em>"</div>
+      <div class="b-visual">Doodle: лошадь несётся → кучер натягивает вожжи. Три плашки по очереди: 1️⃣ РАМКИ (pillars) 2️⃣ ДЕКОМПОЗИЦИЯ (кусок кода с разделением на systems/) 3️⃣ КОНФИГИ В БАЛАНС (balance.js)</div>
+    </div>
+    <div class="beat">
+      <div class="b-tags"><span class="b-tag interrupt">INTERRUPT</span></div>
+      <div class="b-time">2:25 — 2:45</div>
+      <div class="b-title">С графикой та же история</div>
+      <div class="b-vo">"С графикой та же история. ИИ генерирует — я отбираю. <b>50 итераций обложки.</b> Стиль не пришёл из одного промпта — он <em>вырос из выкидывания того, что не зашло.</em>"</div>
+      <div class="b-visual">Карусель отвергнутых обложек (крестики) → финальная (галочка) → кроссфейд эволюции стиля itch/01-04. Все 20 сек</div>
+    </div>
+    <div class="beat punch">
+      <div class="b-tags"><span class="b-tag meta">META</span></div>
+      <div class="b-time">2:45 — 3:00</div>
+      <div class="b-title">Критика игроков</div>
+      <div class="b-vo">"На itch были комментарии про ИИ. <em>«ИИ-арт видно».</em> <b>Игроки правы.</b> Особенно на задних фонах. Но это прототип за 13 дней — <em>ИИ-арт на фоне лучше, чем белый экран.</em> <em>В Steam-версии будет нормальный визуал.</em>"</div>
+      <div class="b-visual">Реальный комментарий itch <span class="b-tag need">NEED itch comments</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ACT 3 — игра и разработка -->
+<section class="act" id="a3" style="--c:#a87b4a">
+  <header>
+    <h2>Акт 3 — Что я сделал за 13 дней</h2>
+    <span class="time">3:20 — 5:50</span>
+    <span class="duration">2:30 <small>(git-showcase расширен до 30с — реальная инфографика для visual interest)</small></span>
+    <span class="role">deep work · игра</span>
+  </header>
+  <div class="premise">"5 беатов: git → липкий палец → boss-история → choices → миры+дерево+submit. Boss — самая яркая, держит фокус."</div>
+  <div class="beats">
+    <div class="beat punch">
+      <div class="b-tags"><span class="b-tag interrupt">SHOWCASE 📊</span></div>
+      <div class="b-time">3:20 — 3:50</div>
+      <div class="b-title">Код — что я там нагенерил за 13 дней</div>
+      <div class="b-vo">"13 дней работы. Посмотрим что получилось. <b>273 коммита.</b> Самый продуктивный — день 2: <b>80 коммитов за сутки</b>. <b>30 тысяч строк кода. 102 файла.</b> Где они живут? <b>UI — 8.6 тысяч строк</b> (это самая большая зона — модалки, панели, дерево). <b>Engine-core — 6.7 тысяч</b> (это шаблон, переедет в следующие игры). Системы плюс данные — ещё 4 тысячи. Самый жирный файл — <b>TrolleyChoiceModal на 2 347 строк</b>, те самые выбор-карточки. <em>И всё это написал ИИ. Я писал промпты.</em>"</div>
+      <div class="b-visual">
+        Последовательность (30 сек):<br>
+        1. <b>Bar chart commits/day</b> (8с) — день 2 пиково мигает, циферки 273/80 крупно<br>
+        2. <b>Counter 30 000 lines</b> тикает анимированно (4с)<br>
+        3. <b>Treemap по областям</b> прорастает (8с) — UI (gold) самая большая зона, Core (blue), Systems+Data (purple/orange), Render (green). <em>Можно взять прямо из <code>web/code-viz.html</code> и анимировать</em><br>
+        4. <b>Top-3 биггест файлы bar</b> highlight (6с) — GameScene.js 2872 → TrolleyChoiceModal 2347 → UpgradesPanel 1217<br>
+        5. <b>Финальная плашка</b> "AI: 100% · Я: промпты" (4с)
+      </div>
+    </div>
+    <div class="beat">
+      <div class="b-tags"><span class="b-tag ready">READY</span></div>
+      <div class="b-time">3:50 — 4:10</div>
+      <div class="b-title">#1 Липкий палец — ядро</div>
+      <div class="b-vo">"<b>Важная часть игры — это липкий палец.</b> Двигаешь пальцем. Человечки прилипают. Тащишь к рельсам. Отпускаешь. <em>Радиус, сколько за раз тянешь — всё это апгрейдится.</em>"</div>
+      <div class="b-visual">Gameplay clip с annotations: палец → человечки прилипают → тянем к рельсам → отпускаем (splat). Финал — апгрейды русским.</div>
+    </div>
+    <div class="beat punch">
+      <div class="b-tags"><span class="b-tag twist">STORY ⚡</span></div>
+      <div class="b-time">4:10 — 4:45</div>
+      <div class="b-title">#2 Боссы — переписал в последний день</div>
+      <div class="b-vo">"<b>Первая версия боссов</b> была с таймером: появляется на 30 секунд, не успел — ушёл, жди следующего. <em>Сел играть сам — скучно и сложно. Бесит.</em> В idle-игре где смысл расслабиться. День 12, 24 часа до сдачи. Переписал: <b>один босс на мир, всегда на сцене, ждёт пока убьёшь. Убил — следующий мир со своим боссом.</b> Никаких таймеров. <em>Стало в разы лучше.</em>"</div>
+      <div class="b-visual">До/после: старая boss UI (таймер, "ESCAPED") → cut → новая (постоянный босс), trailer/beat_15_0_boss.png. Финал — clip нового геймплея</div>
+    </div>
+    <div class="beat">
+      <div class="b-tags"><span class="b-tag ready">READY</span></div>
+      <div class="b-time">4:45 — 5:10</div>
+      <div class="b-title">#3 Выбор-карточки — тематический хребет</div>
+      <div class="b-vo">"Во время игры повышаешь ранги. Каждый ранг — <b>выбор-карточка</b>. Абсурдная дилемма. <em>Кот Шредингера в коробке или учёный. Мимы или клоуны.</em> <b>10 штук.</b> Тот самый жирный файл из инфографики — 2 347 строк."</div>
+      <div class="b-visual">Карусель beat_09/10/11 трейлера + clip 8.5-12.7</div>
+    </div>
+    <div class="beat">
+      <div class="b-tags"><span class="b-tag ready">READY</span></div>
+      <div class="b-time">5:10 — 5:30</div>
+      <div class="b-title">#4 Миры + апгрейд-дерево</div>
+      <div class="b-vo">"<b>5 миров</b>: Depot → Suburbs → City → Metropolis → Forest. Каждый — своя палитра и свой босс. Дерево как в классических incrementals: <b>59 нод, 275 уровней</b>, 4 типа + 4 unlock-ноды для целых систем."</div>
+      <div class="b-visual">Кроссфейд 5 worlds + clip upgrade каскада + анимация дерева пустое→полное + плашки "59 нод · 275 уровней"</div>
+    </div>
+    <div class="beat">
+      <div class="b-tags"><span class="b-tag rehook">RE-HOOK</span></div>
+      <div class="b-time">5:30 — 5:50</div>
+      <div class="b-title">Загружено · переход к цифрам</div>
+      <div class="b-vo">"26 апреля. <b>Загружено.</b> Игра живая, я доволен, я устал. Что я не ожидал — <b>что будет дальше</b>."</div>
+      <div class="b-visual">itch/06_submission_wavedash.png + cursor → Submit → cut на чёрный → "13/13" → пустой график (тизер)</div>
+    </div>
+  </div>
+</section>
+
+<!-- ACT 4 - CLIMAX -->
+<section class="act" id="a4" style="--c:#e8b647">
+  <header>
+    <h2>Акт 4 — Reveal цифр (climax)</h2>
+    <span class="time">5:50 — 7:50</span>
+    <span class="duration">2:00 <small>(сжато по 5-10 сек на каждый reveal)</small></span>
+    <span class="role climax">climax · escalating reveal</span>
+  </header>
+  <div class="premise">"Эскалирующий reveal. Каждая цифра бьёт сильнее предыдущей. Climax — 214 wishlists на 9:30. После climax — meta-момент честности."</div>
+
+  <div class="stats-strip">
+    <div class="stat"><span class="order">1</span><div class="v">36.1k</div><div class="l">views</div></div>
+    <div class="stat"><span class="order">2</span><div class="v">25.6k</div><div class="l">plays</div></div>
+    <div class="stat"><span class="order">3</span><div class="v">4.3/5</div><div class="l">rating</div></div>
+    <div class="stat"><span class="order">4</span><div class="v">#102</div><div class="l">Theme / 489</div></div>
+    <div class="stat win"><span class="order">5</span><div class="v">#11</div><div class="l">Gameplay / 489 🏆</div></div>
+    <div class="stat climax"><span class="order">6</span><div class="v">214</div><div class="l">wishlists ⚡</div></div>
+  </div>
+
+  <div class="beats">
+    <div class="beat">
+      <div class="b-tags"><span class="b-tag interrupt">INTERRUPT</span></div>
+      <div class="b-time">5:50 — 6:05</div>
+      <div class="b-title">Reveal #1 — views</div>
+      <div class="b-vo">"Первая цифра. <b>36 тысяч просмотров. 25 тысяч сыграли в браузере. За 30 дней. Бесплатно.</b>"</div>
+      <div class="b-visual">Чёрный экран, 36 100 анимированно считается + 25.6k плашка <span class="b-tag need">NEED itch views graph</span></div>
+    </div>
+    <div class="beat">
+      <div class="b-time">6:05 — 6:20</div>
+      <div class="b-title">Reveal #2 — rating + collections</div>
+      <div class="b-vo">"19 оценок, средняя <b>4.3 из 5</b>. 468 человек добавили в коллекции. <em>Окей.</em>"</div>
+      <div class="b-visual">Плашки: 4.3/5 → 468</div>
+    </div>
+    <div class="beat punch">
+      <div class="b-tags"><span class="b-tag twist">TWIST</span></div>
+      <div class="b-time">6:20 — 6:40</div>
+      <div class="b-title">Reveal #3 — слабое место</div>
+      <div class="b-vo">"Места в джеме — из <b>489 игр</b>. Самое слабое: <b>Theme — #102.</b> Видно что жюри посчитали что трамвай не очень-то 'машина' в смысле темы. <em>Понимаю.</em>"</div>
+      <div class="b-visual">Таблица jam-результатов с /489. Theme подсвечена нейтрально-оранжевым</div>
+    </div>
+    <div class="beat punch">
+      <div class="b-tags"><span class="b-tag payoff">PAYOFF</span></div>
+      <div class="b-time">6:40 — 7:05</div>
+      <div class="b-title">Reveal #4 — Gameplay #11 🏆</div>
+      <div class="b-vo">"Но я делал не Theme. Я делал Gameplay. И вот цифра ради которой всё это было: <b>Gameplay — 11 место из 489.</b>"</div>
+      <div class="b-visual">Большое #11, золотая обводка, плашка GAMEPLAY. Музыка с подъёмом</div>
+    </div>
+    <div class="beat punch">
+      <div class="b-tags"><span class="b-tag climax">CLIMAX ⚡</span></div>
+      <div class="b-time">7:05 — 7:30</div>
+      <div class="b-title">Reveal #5 — 214 wishlists</div>
+      <div class="b-vo">"И самое неожиданное. <b>У меня открыта Steam-страница.</b> Coming Soon. Без рекламы. <em>За три недели — 214 wishlist'ов.</em> <b>Спасибо всем кто добавил.</b> Постараюсь сделать что-то крутое."</div>
+      <div class="b-visual">promo_steam/library_capsule + плашка "214 wishlists" огромная</div>
+    </div>
+    <div class="beat punch">
+      <div class="b-tags"><span class="b-tag twist">CHANNELS</span></div>
+      <div class="b-time">7:30 — 7:50</div>
+      <div class="b-title">Откуда пришли эти цифры</div>
+      <div class="b-vo">"Что я делал — <b>писал везде где мог</b>: Twitter, Telegram, Reddit, сам itch. <b>itch хорошо продвинул</b> — frontpage, топ-2 в incrementals. Первая волна wishlist'ов на Steam — из соцсетей. С самого itch конверсия небольшая, <b>но есть</b>. Когда itch снова продвигает — Steam подтягивается через 1-2 дня."</div>
+      <div class="b-visual">Side-by-side два графика, стрелки "соцсети" / "itch frontpage" <span class="b-tag need">NEED itch graph</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ACT 5 -->
+<section class="act" id="a5" style="--c:#2a2520">
+  <header>
+    <h2>Акт 5 — Steam-направление + CTA</h2>
+    <span class="time">7:50 — 8:50</span>
+    <span class="duration">1:00 <small>(beat'ы слиты)</small></span>
+    <span class="role">resolution</span>
+  </header>
+  <div class="premise">"Финал. Что дальше + спасибо + подписка. Без лишних beat'ов."</div>
+  <div class="beats">
+    <div class="beat punch">
+      <div class="b-tags"><span class="b-tag twist">CALLBACK ⚡</span></div>
+      <div class="b-time">7:50 — 8:02</div>
+      <div class="b-title">Wavedash — первое место ($1000)</div>
+      <div class="b-vo">"<b>Wavedash Deploy Challenge — первое место.</b> Тысяча долларов призовых. <em>Это сильно помогает.</em>"</div>
+      <div class="b-visual">🏆 1-е МЕСТО · WAVEDASH → $1000 крупно золотом → face full без overlay. Callback к $1000 из hook'а Акта 0.</div>
+    </div>
+    <div class="beat punch">
+      <div class="b-tags"><span class="b-tag twist">FOCUS</span></div>
+      <div class="b-time">8:05 — 8:35</div>
+      <div class="b-title">Steam = визуал (3D)</div>
+      <div class="b-vo">"Что дальше? <b>Steam-версия.</b> Геймплей менять не буду — он хороший, это подтверждают и место в джеме, и оценки. <b>Главный фокус — визуал.</b> Думаю в сторону <b>качественного 3D</b>. Тестовая сцена с экспериментом у меня уже есть. <em>Если получится сделать достойно — это и снимет претензии к AI-арту, и сделает игру серьёзной для Steam.</em>"</div>
+      <div class="b-visual">Кадры character_world_test (3D-эксперимент NPC) + кроссфейд на doodle → плашка "next: 3D". Использовать tmp/rounded-3d-front.png, tmp/unified-3d-iso.png</div>
+    </div>
+    <div class="beat punch">
+      <div class="b-tags"><span class="b-tag cta">CTA</span></div>
+      <div class="b-time">8:35 — 8:50</div>
+      <div class="b-title">Призыв</div>
+      <div class="b-vo">"Поиграть бесплатно — ссылка на itch под видео. Если хочешь поддержать — <b>wishlist на Steam</b>. <em>Буду делиться как идёт работа.</em> Подписывайся если интересно."</div>
+      <div class="b-visual">End card: Steam wishlist button + itch link + subscribe pulse</div>
+    </div>
+  </div>
+</section>
+
+<!-- TITLES + THUMBNAILS -->
+<section class="act" style="--c:#c0392b">
+  <header>
+    <h2>🎯 Title + Thumbnail — главные рычаги CTR</h2>
+    <span class="duration">для хита</span>
+  </header>
+  <div class="premise">"Сценарий уже хорош, но 80% кликов решает связка Title × Thumbnail. Без них даже идеальный сценарий получит 5k просмотров вместо 50k."</div>
+
+  <h3 style="margin:20px 0 8px;font-size:16px">10 title-вариантов на брейншторм</h3>
+  <table style="width:100%;border-collapse:collapse;font-size:13px">
+    <thead>
+      <tr style="background:var(--bg-panel);border-bottom:2px solid var(--line)">
+        <th style="text-align:left;padding:8px 10px;width:40px">#</th>
+        <th style="text-align:left;padding:8px 10px">Title</th>
+        <th style="text-align:left;padding:8px 10px;width:140px">Угол</th>
+        <th style="text-align:center;padding:8px 10px;width:80px">Сила</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr style="border-bottom:1px solid var(--line);background:#f4f8ed">
+        <td style="padding:6px 10px;font-weight:700">1 ⭐</td>
+        <td style="padding:6px 10px"><b>Я сделал idle-игру за 13 дней. Не написав ни строчки кода</b></td>
+        <td style="padding:6px 10px;color:var(--ink-dim)">claim + цифра</td>
+        <td style="padding:6px 10px;text-align:center">🔥🔥🔥</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--line);background:#f4f8ed">
+        <td style="padding:6px 10px;font-weight:700">2 ⭐</td>
+        <td style="padding:6px 10px"><b>0 строк кода. 13 дней. 11 место на джеме из 489</b></td>
+        <td style="padding:6px 10px;color:var(--ink-dim)">цифры-стэк</td>
+        <td style="padding:6px 10px;text-align:center">🔥🔥🔥</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--line)">
+        <td style="padding:6px 10px">3</td>
+        <td style="padding:6px 10px">Можно ли сделать игру одним промптом? Я пробовал 13 дней</td>
+        <td style="padding:6px 10px;color:var(--ink-dim)">вопрос + анти-хайп</td>
+        <td style="padding:6px 10px;text-align:center">🔥🔥</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--line)">
+        <td style="padding:6px 10px">4</td>
+        <td style="padding:6px 10px">ИИ написал мне всю игру. Steam-страница уже работает</td>
+        <td style="padding:6px 10px;color:var(--ink-dim)">результат</td>
+        <td style="padding:6px 10px;text-align:center">🔥🔥</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--line);background:#f4f8ed">
+        <td style="padding:6px 10px;font-weight:700">5 ⭐</td>
+        <td style="padding:6px 10px"><b>Почему "игра за 1 промпт" — миф. И как делать на самом деле</b></td>
+        <td style="padding:6px 10px;color:var(--ink-dim)">анти-хайп</td>
+        <td style="padding:6px 10px;text-align:center">🔥🔥🔥</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--line)">
+        <td style="padding:6px 10px">6</td>
+        <td style="padding:6px 10px">30 000 строк AI-кода. Топ-2 в incrementals на itch. Вот как</td>
+        <td style="padding:6px 10px;color:var(--ink-dim)">цифры</td>
+        <td style="padding:6px 10px;text-align:center">🔥🔥</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--line)">
+        <td style="padding:6px 10px">7</td>
+        <td style="padding:6px 10px">3 правила чтобы делать игры на ИИ. Проверено на джеме</td>
+        <td style="padding:6px 10px;color:var(--ink-dim)">методология</td>
+        <td style="padding:6px 10px;text-align:center">🔥🔥</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--line)">
+        <td style="padding:6px 10px">8</td>
+        <td style="padding:6px 10px">Я не пишу код полгода. Вот моя игра с jam'а</td>
+        <td style="padding:6px 10px;color:var(--ink-dim)">claim</td>
+        <td style="padding:6px 10px;text-align:center">🔥</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--line)">
+        <td style="padding:6px 10px">9</td>
+        <td style="padding:6px 10px">Not a Trolley Problem — как я делал idle-кликер с ИИ за 13 дней</td>
+        <td style="padding:6px 10px;color:var(--ink-dim)">дескриптив</td>
+        <td style="padding:6px 10px;text-align:center">🔥</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--line)">
+        <td style="padding:6px 10px">10</td>
+        <td style="padding:6px 10px">ИИ-слоп vs реальная игра. Где правда?</td>
+        <td style="padding:6px 10px;color:var(--ink-dim)">controversy</td>
+        <td style="padding:6px 10px;text-align:center">🔥🔥</td>
+      </tr>
+    </tbody>
+  </table>
+  <div style="font-size:13px;margin-top:8px;color:var(--ink-dim)">
+    <b>Рекомендация:</b> запустить с <b>#1</b>, через неделю A/B на <b>#5</b> (через YT Studio).
+  </div>
+
+  <h3 style="margin:24px 0 12px;font-size:16px">3 thumbnail-концепта</h3>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
+
+    <div style="background:var(--bg-panel);border:2px solid var(--green);border-radius:8px;padding:14px">
+      <div style="font-size:11px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:.06em">⭐ Концепт A · цифры-контраст</div>
+      <pre style="background:#1a1612;color:#f2ede0;padding:12px;border-radius:4px;font-size:11px;margin:8px 0;line-height:1.3">
+┌─────────────────────────┐
+│ [геймплей размытый фон] │
+│                         │
+│   0  ← огромное,        │
+│  СТРОК КОДА    красное  │
+│                         │
+│  30 000 ← мелко серое   │
+│  написал ИИ             │
+│                         │
+│  Steam wishlist · #11   │
+└─────────────────────────┘</pre>
+      <div style="font-size:12px;color:var(--ink-dim)">Контраст 0 vs 30 000 — мгновенное противоречие. Читается на 200×160. <b>CTR: 4/5</b>. Без съёмок.</div>
+    </div>
+
+    <div style="background:var(--bg-panel);border:1px solid var(--line);border-radius:8px;padding:14px">
+      <div style="font-size:11px;font-weight:700;color:var(--blue);text-transform:uppercase;letter-spacing:.06em">Концепт B · split IDE vs Game</div>
+      <pre style="background:#1a1612;color:#f2ede0;padding:12px;border-radius:4px;font-size:11px;margin:8px 0;line-height:1.3">
+┌────────────┬────────────┐
+│ IDE с      │ Trolley    │
+│ кодом      │ chaos из   │
+│ Claude     │ трейлера   │
+│ пишет      │            │
+│            │            │
+│  AI ──────→│  ИГРА      │
+│            │            │
+│      Я ↑ промпты        │
+└────────────┴────────────┘
+  "13 дней · 0 строк"
+</pre>
+      <div style="font-size:12px;color:var(--ink-dim)">Объясняет процесс метафорой. Хорошо для разрабской аудитории. <b>CTR: 3.5/5</b>.</div>
+    </div>
+
+    <div style="background:var(--bg-panel);border:1px solid var(--line);border-radius:8px;padding:14px;opacity:0.7">
+      <div style="font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.06em">Концепт C · лицо + текст ⚠</div>
+      <pre style="background:#1a1612;color:#f2ede0;padding:12px;border-radius:4px;font-size:11px;margin:8px 0;line-height:1.3">
+┌─────────────────────────┐
+│         ┌─────┐         │
+│         │ ТЫ  │ удивлён │
+│         │ 😶  │         │
+│         └─────┘         │
+│                         │
+│   ИИ НАПИСАЛ            │
+│   МНЕ ИГРУ              │
+│                         │
+│   за 13 дней            │
+│   #11 из 489            │
+└─────────────────────────┘</pre>
+      <div style="font-size:12px;color:var(--ink-dim)"><b>Лица на YT работают лучше всего. CTR: 4-5/5.</b> Но требует talking head — ты раньше отказался.</div>
+    </div>
+  </div>
+
+  <div style="margin-top:16px;padding:14px 16px;background:#fff8e0;border:1px solid var(--yellow);border-radius:6px;font-size:13px">
+    <b>Рекомендация — Концепт A.</b> Не требует съёмок, повторяет логику code-showcase из видео (цифровой контраст), сильный CTR. Если позже захочется лица — Концепт C, но это уже v2.
+  </div>
+
+  <h3 style="margin:24px 0 8px;font-size:16px">⚡ Ремонт первых 3 секунд (сделано в v6.1)</h3>
+  <div style="font-size:13px;background:var(--bg-panel);border-left:4px solid var(--accent);padding:10px 14px">
+    <b>Было:</b> 0:00-0:05 trailer chaos без VO → 0:05 VO начинает с фактов.<br>
+    <b>Стало:</b> <b>VO с первого кадра</b> — <em>"Ни одной строчки кода я не написал сам"</em> + одновременно trailer chaos + поверх "0 СТРОК КОДА" огромным текстом.<br>
+    <b>Почему:</b> для AI-темы claim-first сильнее визуала. Все idle-кликеры выглядят похоже, но "0 строк" — стоп-скролл.
+  </div>
+</section>
+
+<!-- SHORTS PLAN -->
+<section class="act" style="--c:#8e4e8a">
+  <header>
+    <h2>📱 План Shorts/Reels — что вынем из основного видео</h2>
+    <span class="duration">бонус-контент</span>
+  </header>
+  <div class="premise">"Из 8:35 материала получаем 4-5 вертикальных коротких клипов для YT Shorts / TikTok / Reels. Плюс уже готовый 20-сек вертикальный трейлер."</div>
+  <div class="beats">
+    <div class="beat">
+      <div class="b-tags"><span class="b-tag hook">SHORT #1</span></div>
+      <div class="b-title">Хук-стат (30 сек)</div>
+      <div class="b-vo">Хук-цифры из Акта 0 + title card. "$1000. 13 дней. 30k строк — всё ИИ. 1-е место Wavedash, 18/489 общий, топ-2 incremental."</div>
+      <div class="b-visual">Из исходника: Акт 0 (0:00-0:25) — уже готов почти один-в-один. Просто перебрать под 9:16</div>
+    </div>
+    <div class="beat punch">
+      <div class="b-tags"><span class="b-tag twist">SHORT #2 ⚡</span></div>
+      <div class="b-title">AI-методология (60 сек)</div>
+      <div class="b-vo">Тезис "ИИ инструмент" + лошадь+кучер + 3 практики (рамки/декомпозиция/конфиги в баланс). Самый цитируемый контент.</div>
+      <div class="b-visual">Из исходника: Акт 2 beat'ы 2-3 (1:25-2:45). Уплотнить под 60 сек, оставить только тезис и 3 практики. Для разрабской аудитории</div>
+    </div>
+    <div class="beat punch">
+      <div class="b-tags"><span class="b-tag twist">SHORT #3</span></div>
+      <div class="b-title">Boss redesign за день до сдачи (45 сек)</div>
+      <div class="b-vo">История про playtest → "скучно и сложно" → переписал за 24ч. Универсальная gamedev-история.</div>
+      <div class="b-visual">Из исходника: Акт 3 beat #2 (4:00-4:35). До/после механики, чистый рассказ. Прайм-контент для r/gamedev</div>
+    </div>
+    <div class="beat punch">
+      <div class="b-tags"><span class="b-tag climax">SHORT #4</span></div>
+      <div class="b-title">Цифры reveal (45 сек)</div>
+      <div class="b-vo">Эскалация: 36k → #11/489 → 214 wishlists. Без channel-breakdown — только реveals.</div>
+      <div class="b-visual">Из исходника: Акт 4 reveals 1-5 (5:35-7:15). Тематика — для общегеймерской аудитории, не разрабам</div>
+    </div>
+    <div class="beat">
+      <div class="b-tags"><span class="b-tag cta">SHORT #5</span></div>
+      <div class="b-title">"Что дальше — 3D-визуал" (30 сек)</div>
+      <div class="b-vo">Steam-направление + связь с критикой AI-арта. Тизер апгрейда.</div>
+      <div class="b-visual">Из исходника: Акт 5 beat #2 (7:50-8:20). Хороший CTA-короткометраж</div>
+    </div>
+    <div class="beat">
+      <div class="b-tags"><span class="b-tag ready">READY</span></div>
+      <div class="b-title">🎬 Bonus — готовый вертикальный трейлер (20 сек)</div>
+      <div class="b-vo">Промо-трейлер игры. Не из девлога, но в эту же серию шортсов идёт идеально.</div>
+      <div class="b-visual">data/trailer/trailer_vertical_final.mp4 — уже готов, 9:16, 15.6MB</div>
+    </div>
+  </div>
+  <div style="margin-top:12px;padding:12px 16px;background:#fff8e0;border:1px solid var(--yellow);border-radius:6px;font-size:13px">
+    <b>Итого — серия из 6 коротких клипов</b> для распыления в YT Shorts / TikTok / Reels / Twitter. Каждый ведёт обратно на основное видео + Steam wishlist. <em>Платформенно — Shorts (вертикаль) + Twitter (можно горизонталь до 2:20) + r/gamedev (gif или ссылка).</em>
+  </div>
+</section>
+
+<!-- Decisions -->
+<div class="decisions">
+  <h3>⚖ Решения на ревью v3</h3>
+  <ol>
+    <li><span class="key">Драйв</span> — теперь хук = шок + открытый луп, Акт 3 = drama с разрешением, цифры = эскалирующий reveal с climax. Это и есть огонь? Или ещё надо?</li>
+    <li><span class="key">Открытый луп</span> — <em>"на 12-й день чуть всё не похоронил"</em> в хуке. Окей формулировка или другую? (альтернативы: <em>"один критерий джема я провалил почти полностью"</em>, <em>"я чуть не соврал вам про funnel"</em>)</li>
+    <li><span class="key">Шок-факт в хуке</span> — <em>"ни одной строчки кода я не написал сам"</em>. Это и есть наша главная "крючок-фраза"? Или ставим вместо неё <em>"214 wishlists"</em>?</li>
+    <li><span class="key">Reveal #3 (Theme #102/489)</span> — показываем слабое место ПЕРЕД сильным (#11/489). Раскладка по позициям из 489 игр, без процентов. Контраст честный, без спина.</li>
+    <li><span class="key">Meta-момент 9:30</span> — <em>"я почти соврал"</em>. Идёт ли тебе как стиль? Это сильный момент личности, но требует чтобы ты комфортно его прочитал.</li>
+    <li><span class="key">Длительность</span> — 11:30 (было 12:00). Норм или хочешь добавить minute B-roll где-то?</li>
+    <li><span class="key">Нужно от тебя</span> — в этой версии я отметил <span class="b-tag need">NEED</span>:
+      <ul style="margin-top:4px">
+        <li>Скриншот itch views graph (для 9:30 главный визуал)</li>
+        <li>Скриншот Claude Code IDE в работе (для 2:00)</li>
+        <li>Скриншот комментариев с itch про AI (для 4:40)</li>
+        <li>Day 1 clip 8 сек (для 1:20) — иначе используем статиком</li>
+        <li>Логотип Gamedev.js (для 0:30) — могу скачать с их сайта</li>
+      </ul>
+    </li>
+  </ol>
+  <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+    <button onclick="window.location.reload()">🔄 Обновить</button>
+    <button class="secondary" onclick="alert('После твоего «ок» на v3 — пишу 02-script.md с полными репликами и таймингами по новой драматургии, потом собираю web/recorder.html для записи озвучки по сценам')">Что дальше?</button>
+  </div>
+</div>
+
+<script>
+  const acts = [
+    {id:'a0', start:0,   dur:25,  c:'#c0392b', label:'0', sub:'Хук'},
+    {id:'a1', start:25,  dur:40,  c:'#4a7ba8', label:'1', sub:'Идея'},
+    {id:'a2', start:65,  dur:135, c:'#6b8e4e', label:'2', sub:'Лошадь 🐎'},
+    {id:'a3', start:200, dur:150, c:'#a87b4a', label:'3', sub:'Игра + 📊'},
+    {id:'a4', start:350, dur:120, c:'#e8b647', label:'4', sub:'Цифры'},
+    {id:'a5', start:470, dur:60,  c:'#2a2520', label:'5', sub:'Steam'},
+  ];
+  const total = 530;
+  const tl = document.getElementById('timeline');
+  acts.forEach(a => {
+    const el = document.createElement('div');
+    el.className = 'tl-act';
+    el.style.left = (a.start/total*100)+'%';
+    el.style.width = (a.dur/total*100)+'%';
+    el.style.background = a.c;
+    if (a.label === '5') el.style.color = '#f2ede0';
+    el.innerHTML = '<span>Акт ' + a.label + '</span><small>' + a.sub + '</small>';
+    el.onclick = () => document.getElementById(a.id).scrollIntoView({behavior:'smooth', block:'start'});
+    tl.appendChild(el);
+  });
+</script>
+
+</body>
+</html>
