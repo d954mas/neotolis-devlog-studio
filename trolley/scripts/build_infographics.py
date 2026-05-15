@@ -495,8 +495,9 @@ def build_hype_curve_anim():
     base_rgba.alpha_composite(vignette())
     base = base_rgba.convert("RGBA")
     bd = ImageDraw.Draw(base)
-    title_with_underline(bd, "ХАЙП-ЦИКЛ ИИ", 70, size=100, sub="ГДЕ МЫ СЕЙЧАС")
-    cy_top_approx = 260  # approximate title bottom
+    # NOTE: title burnt-in removed — overlay band from parent beat carries
+    # context ("ВОКРУГ ИИ — ХАЙП" in a2-2). Curve gets the full canvas height.
+    cy_top_approx = 180  # more room for curve since no title eats top
     bd.line([(cx_left, cy_base), (cx_right, cy_base)], fill=(*COL_GOLD, 255), width=4)
 
     pts = _hype_curve_pts(cx_left, cx_right, cy_base, cy_top_approx)
@@ -614,9 +615,9 @@ def build_biggest_files():
     canvas = canvas_rgba.convert("RGB")
     draw = ImageDraw.Draw(canvas)
 
-    next_y = title_with_underline(draw, "ТОП-10 ФАЙЛОВ", 50, size=95, sub="ПО СТРОКАМ КОДА")
-
-    list_top = next_y + 10
+    # NOTE: title burnt-in removed — parent beat overlay ("102 ФАЙЛА" in b4
+    # or "2. ДЕКОМПОЗИЦИЯ" in a2-3) carries the header. List uses full canvas.
+    list_top = 70
     row_h = 52
     f_path = ImageFont.truetype(FONT_MONO, 30)
     f_meta = ImageFont.truetype(FONT_BOLD, 28)
@@ -1162,8 +1163,9 @@ def build_timeline_anim():
         canvas_rgba.alpha_composite(vignette())
         canvas = canvas_rgba.convert("RGB")
         draw = ImageDraw.Draw(canvas)
-        title_with_underline(draw, "13 ДНЕЙ РАЗРАБОТКИ", 60, size=100,
-                              sub="GAMEDEV.JS JAM 2026 · 273 КОММИТА")
+        # NOTE: title burnt-in removed — parent beat overlay ("13 ДНЕЙ" or
+        # "1. РАМКИ" depending on usage) carries the headline. Timeline gets
+        # full canvas without competing header.
         nodes_visible = min(13, int(progress * 13 + 1))
         if nodes_visible >= 1:
             last_t = (min(nodes_visible - 1, 12)) / 12
