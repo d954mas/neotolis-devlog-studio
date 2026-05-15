@@ -1040,16 +1040,19 @@ def build_workflow_anim():
     n_anim = int(FPS * total_anim)
     n_hold = int(FPS * hold_dur)
 
+    # Layout: no burnt-in title — caller (compose_beat) supplies the overlay
+    # label. Boxes are centered vertically; layout has room for an optional
+    # bottom band without overlap.
     box_w, box_h, gap = 420, 280, 100
     total_w = box_w * 3 + gap * 2
     start_x = (W - total_w) // 2
-    cy = (H - box_h) // 2 + 50
+    cy = (H - box_h) // 2          # true center now that no title eats the top
     boxes = [("ЗАДАЧА", "я говорю", COL_GOLD),
              ("CLAUDE\nCODE", "пишет код", COL_GOLD),
              ("РЕЗУЛЬТАТ", "я проверяю", COL_GOLD)]
     f_title = ImageFont.truetype(FONT_BLACK, 70)
     f_sub = ImageFont.truetype(FONT_BLACK, 36)
-    # iter_70: load city bg once, blend per-frame at low opacity
+    # City bg loaded once, blended per-frame at low opacity for mood
     _city_wf = Image.open(r"C:\projects\devlogs\trolley\data\itch\snap_city.png").convert("RGB").resize((W, H), Image.LANCZOS).filter(ImageFilter.GaussianBlur(14))
     _city_wf_arr = np.array(_city_wf, dtype=np.float32)
     _bg_base_wf = np.array(COL_BG, dtype=np.float32)
@@ -1060,7 +1063,9 @@ def build_workflow_anim():
         canvas_rgba.alpha_composite(vignette())
         canvas = canvas_rgba.convert("RGB")
         draw = ImageDraw.Draw(canvas)
-        title_with_underline(draw, "КАК Я РАБОТАЮ", 70, size=100, sub="CLAUDE CODE · ЦИКЛ")
+        # NOTE: removed burnt-in "КАК Я РАБОТАЮ" title. The overlay band from
+        # the parent beat (e.g. "6 МЕСЯЦЕВ" or "1.  РАМКИ") supplies context
+        # without competing for header real estate.
 
         for i, (title, sub, color) in enumerate(boxes):
             # Box i visible when phase_progress > i

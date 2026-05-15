@@ -33,11 +33,27 @@ GOLDEN_DIR.mkdir(exist_ok=True)
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 TROLLEY_FINALIZE = PROJECT_ROOT / "trolley" / "data" / "finalize"
 
-# Beats to regress. (beat_id, suffix, sample timestamps in seconds)
-# Sample at mid-chunk to land on stable content.
+# Beats to regress. (beat_id, suffix, sample timestamps in seconds).
+# Pick timestamps INSIDE chunks (away from boundary transitions where xfade
+# math can produce 1-frame drift). Cover hook, build, climax, payoff, outro.
 REGRESSION_BEATS = [
+    # Hook + setup
     ("a0-1", "_video_1080p.mp4", [1.5, 2.5]),
-    ("b4",   "_video_1080p.mp4", [1.0, 5.0, 10.0]),
+    ("a1-1", "_video_1080p.mp4", [3.0, 8.0, 15.0]),
+    ("a1-2", "_video_1080p.mp4", [2.0, 6.0, 12.0]),
+    # Showcase
+    ("b3",   "_video_1080p.mp4", [3.0, 12.0, 20.0]),
+    ("b4",   "_video_1080p.mp4", [1.0, 7.0, 12.0]),
+    # Method (climax plates: a2-2 thesis, a2-3 3-rule)
+    ("a2-1", "_video_1080p.mp4", [3.0, 9.0]),
+    ("a2-2", "_video_1080p.mp4", [3.0, 12.0, 22.0]),
+    ("a2-3", "_video_1080p.mp4", [5.0, 20.0, 28.0]),
+    ("a2-4", "_video_1080p.mp4", [2.0, 10.0]),
+    ("a2-5", "_video_1080p.mp4", [3.0, 12.0]),
+    # Climax + payoff
+    ("finale", "_video_1080p.mp4", [2.0, 10.0, 18.0, 28.0]),
+    # Outro
+    ("outro",  "_video_1080p.mp4", [2.0, 10.0, 16.0]),
 ]
 
 
