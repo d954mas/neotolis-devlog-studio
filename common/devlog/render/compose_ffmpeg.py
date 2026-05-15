@@ -153,6 +153,15 @@ def _scene_input_args(scene: Scene, eff_dur: float) -> tuple[list[str], float]:
     """
     if scene.kind == "video":
         actual_dur = _probe_duration(scene.src)
+        # Safety: if offset is past EOF, ffmpeg silently produces no video
+        # stream and the whole pipeline silently fails. Clamp + warn.
+        if scene.offset >= actual_dur - 0.1:
+            print(f"[ff-compose] WARNING: scene offset {scene.offset:.2f}s "
+                  f"is past source duration {actual_dur:.2f}s for {scene.src}. "
+                  f"Falling back to offset=0.")
+            scene = Scene(kind=scene.kind, src=scene.src, offset=0.0,
+                          fit=scene.fit, loop=scene.loop,
+                          ken_burns=scene.ken_burns, kb_zoom=scene.kb_zoom)
         available = max(0.0, actual_dur - scene.offset)
         if scene.loop:
             # Source explicitly marks "loop this": -stream_loop -1 keeps reading

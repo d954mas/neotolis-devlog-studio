@@ -18,6 +18,24 @@ iterations on top of a "needs polish" baseline).
 
 ---
 
+## Validate after render
+
+- **DO `ffprobe duration video vs audio` after every `dl render` / `dl concat`.**
+  When ffmpeg-engine has a bug or a source asset is shorter than expected,
+  the video stream silently truncates. iter22→iter35 of trolley loop:
+  half the content was invisible for 13 iterations because audio=363s
+  vs video=181s was missed. The user noticed before I did. **Rule: numbers
+  don't lie, eyes do.**
+
+## Sanity-check reviewer suggestions
+
+- **DO verify any `Scene.src` or `offset` suggestion against the asset's
+  actual duration.** Reviewer agents propose offsets that look plausible
+  in a 30s segment timeline but don't account for source file length.
+  iter23 of trolley: reviewer suggested trailer_final_30fps offset=22.0,
+  but the trailer is 20s. ffmpeg silently rendered audio-only (no video),
+  broke concat. **Fix: probe duration; clamp offset past EOF; warn.**
+
 ## Pacing
 
 - **DO keep continuous-motion background under 70% of runtime.** Static
