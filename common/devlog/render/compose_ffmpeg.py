@@ -295,29 +295,22 @@ def _chunk_overlay_filter(bg_label: str, chunk_input_idx: int,
         )
         chain.append(f"crop={W}:{H}")
 
-    # Per-chunk fade-in/out via `geq` alpha multiplier — direct per-pixel
-    # control. We avoid `fade=alpha=1` because in combination with overlay
-    # alpha composition it produces semi-transparent bands even mid-chunk
-    # (the fade filter's alpha-mode interacts badly with overlay's straight
-    # alpha when the source has variable per-pixel alpha like our band PNGs).
+    # Per-chunk fade-in/out via `fade=alpha=1`. Speedup vs `geq`: ~7× per beat.
     #
-    # geq lets us multiply the existing alpha plane (which preserves the
-    # source's varying alpha: 240 in band, 0 outside) by a time-based
-    # fade factor that ramps 0→1 over fade_in, stays 1, then ramps 1→0
-    # over fade_out. Result: opaque mid-chunk, smooth fades at edges.
+    # CRITICAL: `setpts=PTS+{t_start}/TB` shifts the chunk stream's PTS so its
+    # frames arrive at output time `t_start..t_end`, aligned with the overlay's
+    # `enable=between(t,t_start,t_end)` window. Without this shift the chunk
+    # stream runs 0..dur in output time and is past EOF by the time enable
+    # activates → `eof_action=pass` drops the overlay entirely → every chunk
+    # whose t_start > 0 silently rendered as scene-only. Only chunk 0 happened
+    # to work because t_start = 0 aligned by accident.
     fi = max(fade_in, 0.001)
     fo = max(fade_out, 0.001)
     fade_out_start = max(0.0, dur - fo)
-    # Time-based multiplier expression. `T` is current frame time in input stream;
-    # since we use `-loop 1 -t dur`, T runs 0..dur as overlay timeline progresses.
-    fade_expr = (
-        f"if(lt(T,{fi:.3f}),T/{fi:.3f},"
-        f"if(gt(T,{fade_out_start:.3f}),({dur:.3f}-T)/{fo:.3f},1))"
-    )
     chain.append("format=rgba")
-    chain.append(
-        f"geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*({fade_expr})'"
-    )
+    chain.append(f"fade=t=in:st=0:d={fi:.3f}:alpha=1")
+    chain.append(f"fade=t=out:st={fade_out_start:.3f}:d={fo:.3f}:alpha=1")
+    chain.append(f"setpts=PTS+{t_start:.3f}/TB")
 
     chunk_label = f"ch{chunk_input_idx}"
     # If chain has no filters (rare — only when no animations/fades), pass through.

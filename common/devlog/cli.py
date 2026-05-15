@@ -140,6 +140,29 @@ def cmd_render(args):
 
     if not args.no_concat and not args.beat:
         _concat(edit, root, suffix=suffix)
+        # Auto-review the final concatenated output — catches silent overlay
+        # drops that the renderer happily produces but a human would spot.
+        # Skip on --no-review; promote warnings to exit code on --strict-review.
+        if not args.no_review and suffix == "_video_1080p":
+            out = Path(edit.output)
+            if out.exists():
+                print(f"\n[devlog] reviewing {out}...")
+                from devlog.review import review_video
+                verdicts = review_video(edit, str(out),
+                                        threshold=args.review_threshold,
+                                        verbose=False)
+                fails = [v for v in verdicts if not v.passed]
+                if fails:
+                    print(f"\n  ⚠ {len(fails)}/{len(verdicts)} chunks failed visual review:")
+                    for v in fails:
+                        text = v.spec.text.replace("\n", " / ")[:50]
+                        print(f"    [FAIL] {v.spec.beat_id} c{v.spec.chunk_idx} "
+                              f"t={v.spec.t_video_mid:.2f}  diff={v.diff:.1f}  {text}")
+                    print(f"\n  Run `dl review {args.edit} {out}` for full report.")
+                    if args.strict_review:
+                        raise SystemExit(1)
+                else:
+                    print(f"  ✓ {len(verdicts)}/{len(verdicts)} chunks render correctly")
 
 
 def _render_suffix(args) -> str:
@@ -323,6 +346,18 @@ def cmd_cache_clear(args):
     print(f"[devlog] cleared {n} cache entries")
 
 
+def cmd_review(args):
+    """Chunk-aware visual review of a rendered video."""
+    edit, root = _load_edit(args.edit)
+    _project_chdir(root)
+    from devlog.review import review_video
+    print(f"[devlog] reviewing {args.video} against {args.edit}")
+    verdicts = review_video(edit, args.video, threshold=args.threshold)
+    fails = sum(1 for v in verdicts if not v.passed)
+    if args.strict and fails:
+        raise SystemExit(1)
+
+
 # ─── Argparse setup ──────────────────────────────────────────────
 
 def build_parser() -> argparse.ArgumentParser:
@@ -359,6 +394,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_render.add_argument("--parallel", "-j", type=int, default=1, help=parallel_help)
     p_render.add_argument("--engine", choices=["ffmpeg", "moviepy"], default="ffmpeg",
                            help="Render engine: ffmpeg (default, fast) or moviepy (legacy)")
+    p_render.add_argument("--no-review", action="store_true",
+                          help="Skip chunk-aware visual review of the concatenated output")
+    p_render.add_argument("--strict-review", action="store_true",
+                          help="Exit 1 if any chunk fails visual review (for CI gates)")
+    p_render.add_argument("--review-threshold", type=float, default=35.0,
+                          help="Max diff for chunk to count as rendered correctly (default 35)")
     p_render.set_defaults(func=cmd_render)
 
     p_concat = sub.add_parser("concat", help="Concat existing rendered beats into edit.output")
@@ -402,6 +443,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_cc = sub.add_parser("cache-clear", help="Wipe the render cache")
     p_cc.add_argument("edit")
     p_cc.set_defaults(func=cmd_cache_clear)
+
+    p_review = sub.add_parser("review", help="Chunk-aware visual review of rendered video")
+    p_review.add_argument("edit", help="Edit module path (e.g. trolley.edits.youtube)")
+    p_review.add_argument("video", help="Path to rendered .mp4 (relative to project root)")
+    p_review.add_argument("--threshold", type=float, default=35.0,
+                          help="Max mean abs RGB diff in band region for PASS (default 35)")
+    p_review.add_argument("--strict", action="store_true",
+                          help="Exit 1 on any FAIL (for CI gates)")
+    p_review.set_defaults(func=cmd_review)
 
     return parser
 

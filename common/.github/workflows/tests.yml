@@ -1,0 +1,36 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pytest:
+    name: pytest (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pillow pytest
+
+      - name: Run pure unit tests
+        # Skip test_visual_regression — that one needs rendered MP4s from the
+        # trolley project repo and is meant to run locally before commits.
+        # Pure tests: types, cache, scene merging, xfade math, scene inputs,
+        # chunk-aware review detection. 36 tests total.
+        env:
+          PYTHONPATH: .
+        run: pytest tests/ -v --ignore=tests/test_visual_regression.py
