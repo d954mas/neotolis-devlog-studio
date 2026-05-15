@@ -130,19 +130,58 @@ class _Graph:
         return ";".join(self.parts)
 
 
-def _scene_input_args(scene: Scene, eff_dur: float) -> list[str]:
-    """ffmpeg input flags for one scene segment."""
+def _probe_duration(src: str) -> float:
+    """Get duration in seconds of a video/image (image returns 0)."""
+    r = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "csv=p=0", src],
+        capture_output=True, text=True,
+    )
+    try:
+        return float(r.stdout.strip())
+    except ValueError:
+        return 0.0
+
+
+def _scene_input_args(scene: Scene, eff_dur: float) -> tuple[list[str], float]:
+    """ffmpeg input flags for one scene segment + pad_needed (seconds to
+    freeze-extend if source is shorter than eff_dur).
+
+    For videos shorter than eff_dur (e.g. a 5s animation needed for 6s),
+    we still seek+read what's there but ALSO compute how much extra time
+    needs to be padded with the last-frame clone in the normalize filter.
+    """
     if scene.kind == "video":
-        return ["-ss", f"{scene.offset:.3f}", "-t", f"{eff_dur:.3f}", "-i", scene.src]
+        actual_dur = _probe_duration(scene.src)
+        available = max(0.0, actual_dur - scene.offset)
+        if scene.loop:
+            # Source explicitly marks "loop this": -stream_loop -1 keeps reading
+            args = ["-stream_loop", "-1", "-ss", f"{scene.offset:.3f}",
+                    "-t", f"{eff_dur:.3f}", "-i", scene.src]
+            pad_needed = 0.0
+        elif available < eff_dur - 0.05:
+            # Source shorter than needed: read whole tail, freeze last frame for remainder
+            args = ["-ss", f"{scene.offset:.3f}", "-i", scene.src]
+            pad_needed = eff_dur - available
+        else:
+            # Source long enough: trim to eff_dur
+            args = ["-ss", f"{scene.offset:.3f}", "-t", f"{eff_dur:.3f}", "-i", scene.src]
+            pad_needed = 0.0
+        return args, pad_needed
     elif scene.kind == "image":
-        return ["-loop", "1", "-t", f"{eff_dur:.3f}", "-i", scene.src]
+        return ["-loop", "1", "-t", f"{eff_dur:.3f}", "-i", scene.src], 0.0
     raise ValueError(f"Unknown scene kind: {scene.kind}")
 
 
 def _scene_normalize_filter(idx: int, seg_dur: float, eff_dur: float,
-                            design: Design, scene: Scene, label: str) -> str:
+                            design: Design, scene: Scene, label: str,
+                            pad_needed: float = 0.0) -> str:
     """Filter that scales/crops scene input to design size + applies Ken Burns
     if image with ken_burns enabled.
+
+    If `pad_needed > 0`, the source video is shorter than eff_dur. We use
+    `tpad=stop_mode=clone:stop_duration=pad_needed` to freeze the last frame
+    for the remainder. Matches MoviePy compose.py freeze-last-frame behavior.
 
     Inputs: [idx:v]
     Output: [label]  — RGB stream at design resolution, eff_dur seconds long
@@ -151,6 +190,10 @@ def _scene_normalize_filter(idx: int, seg_dur: float, eff_dur: float,
     fps = design.fps
     base = f"[{idx}:v]"
     chain = []
+    # If source is short, freeze last frame to fill the remainder. Must come
+    # BEFORE scale/crop so we have native source frames to clone.
+    if pad_needed > 0.01:
+        chain.append(f"tpad=stop_mode=clone:stop_duration={pad_needed:.3f}")
     if scene.kind == "image" and scene.ken_burns and seg_dur > 2.0:
         # Ken Burns: scale up over time, crop centered. Use zoompan? Simpler: scale+crop with expr.
         z = scene.kb_zoom
@@ -243,20 +286,41 @@ def _chunk_overlay_filter(bg_label: str, chunk_input_idx: int,
         )
         chain.append(f"crop={W}:{H}")
 
-    # NOTE: per-chunk fade-in/out skipped for now — `fade=alpha=1` interacts
-    # badly with overlay alpha composition (produces semi-transparent bands
-    # even mid-chunk). Crossfades between SCENES are still handled via xfade
-    # at the scene level. Animated entry/exit can be re-added once we find a
-    # form that doesn't break alpha.
+    # Per-chunk fade-in/out via `geq` alpha multiplier — direct per-pixel
+    # control. We avoid `fade=alpha=1` because in combination with overlay
+    # alpha composition it produces semi-transparent bands even mid-chunk
+    # (the fade filter's alpha-mode interacts badly with overlay's straight
+    # alpha when the source has variable per-pixel alpha like our band PNGs).
+    #
+    # geq lets us multiply the existing alpha plane (which preserves the
+    # source's varying alpha: 240 in band, 0 outside) by a time-based
+    # fade factor that ramps 0→1 over fade_in, stays 1, then ramps 1→0
+    # over fade_out. Result: opaque mid-chunk, smooth fades at edges.
+    fi = max(fade_in, 0.001)
+    fo = max(fade_out, 0.001)
+    fade_out_start = max(0.0, dur - fo)
+    # Time-based multiplier expression. `T` is current frame time in input stream;
+    # since we use `-loop 1 -t dur`, T runs 0..dur as overlay timeline progresses.
+    fade_expr = (
+        f"if(lt(T,{fi:.3f}),T/{fi:.3f},"
+        f"if(gt(T,{fade_out_start:.3f}),({dur:.3f}-T)/{fo:.3f},1))"
+    )
+    chain.append("format=rgba")
+    chain.append(
+        f"geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*({fade_expr})'"
+    )
 
     chunk_label = f"ch{chunk_input_idx}"
     # If chain has no filters (rare — only when no animations/fades), pass through.
     src_chain = (src + ",".join(chain) + f"[{chunk_label}]") if chain else f"{src}null[{chunk_label}]"
 
-    # Plain overlay — ffmpeg auto-picks pixel format & alpha mode.
+    # eof_action=pass: when the chunk PNG source ends (it's looped for chunk_dur,
+    # which is shorter than the full beat audio), DO NOT terminate the bg stream
+    # — just pass through bg alone after the chunk's enable window. Critical:
+    # without this, the first chunk's EOF would truncate the whole beat output.
     overlay = (f"[{bg_label}][{chunk_label}]"
                f"overlay=enable='between(t,{t_start:.3f},{t_end:.3f})'"
-               f":x=0:y=0[{out_label}]")
+               f":x=0:y=0:eof_action=pass[{out_label}]")
     return src_chain + ";" + overlay
 
 
@@ -308,13 +372,14 @@ def compose_ffmpeg(beat: Beat, design: Design, out_path: str,
         # ── Build ffmpeg inputs ──
         cmd: list[str] = ["ffmpeg", "-y", "-i", beat.audio]
         input_idx = 1                                            # 0 = audio
-        scene_inputs: list[tuple[int, Scene, float, float]] = []     # (idx, scene, seg_dur, eff_dur)
+        scene_inputs: list[tuple[int, Scene, float, float, float]] = []     # (idx, scene, seg_dur, eff_dur, pad_needed)
         for seg_idx, (seg_start, seg_end, scene) in enumerate(scene_segments):
             seg_dur = seg_end - seg_start
             is_last = (seg_idx == len(scene_segments) - 1)
             eff_dur = seg_dur + (design.crossfade_dur if not is_last else 0)
-            cmd += _scene_input_args(scene, eff_dur)
-            scene_inputs.append((input_idx, scene, seg_dur, eff_dur))
+            args, pad_needed = _scene_input_args(scene, eff_dur)
+            cmd += args
+            scene_inputs.append((input_idx, scene, seg_dur, eff_dur, pad_needed))
             input_idx += 1
 
         chunk_inputs: dict[int, int] = {}                        # chunk_index -> input_idx
@@ -331,10 +396,10 @@ def compose_ffmpeg(beat: Beat, design: Design, out_path: str,
 
         # Step 1: normalize each scene to design resolution + Ken Burns
         scene_labels: list[str] = []
-        for seg_idx, (idx, scene, seg_dur, eff_dur) in enumerate(scene_inputs):
+        for seg_idx, (idx, scene, seg_dur, eff_dur, pad_needed) in enumerate(scene_inputs):
             label = f"s{seg_idx}"
             filter_parts.append(
-                _scene_normalize_filter(idx, seg_dur, eff_dur, design, scene, label)
+                _scene_normalize_filter(idx, seg_dur, eff_dur, design, scene, label, pad_needed)
             )
             scene_labels.append(label)
 
@@ -417,7 +482,7 @@ def compose_ffmpeg(beat: Beat, design: Design, out_path: str,
             out_label = f"v_vid_{ci}"
             filter_parts.append(
                 f"[{bg_label}][{tmp_label}]overlay=enable='between(t,{t_start:.3f},{t_end:.3f})'"
-                f":x=0:y=0:format=auto[{out_label}]"
+                f":x=0:y=0:format=auto:eof_action=pass[{out_label}]"
             )
             bg_label = out_label
 
@@ -456,7 +521,11 @@ def compose_ffmpeg(beat: Beat, design: Design, out_path: str,
             *codec_args,
             "-c:a", "aac", "-b:a", "192k",
             "-t", f"{audio_dur:.3f}",
-            "-shortest",
+            # NOTE: NO `-shortest`. Each chunk PNG is `-loop 1 -t chunk_dur`
+            # which is shorter than the audio. With -shortest, overlay's EOF
+            # on the chunk source could terminate the whole pipeline early,
+            # truncating output to first-chunk duration. -t audio_dur caps
+            # to audio length explicitly, which is what we actually want.
             out_path,
         ]
 
