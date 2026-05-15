@@ -396,22 +396,40 @@ def compose_ffmpeg(beat: Beat, design: Design, out_path: str,
 
         # Step 1: normalize each scene to design resolution + Ken Burns
         scene_labels: list[str] = []
+        seg_durs: list[float] = []
         for seg_idx, (idx, scene, seg_dur, eff_dur, pad_needed) in enumerate(scene_inputs):
             label = f"s{seg_idx}"
             filter_parts.append(
                 _scene_normalize_filter(idx, seg_dur, eff_dur, design, scene, label, pad_needed)
             )
             scene_labels.append(label)
+            seg_durs.append(seg_dur)
+
+        # If the first scene doesn't start at t=0 (e.g. finale opens with a
+        # full-screen plate before the daily_views animation), inject a solid
+        # color base for the gap. Without this, the first real scene would
+        # play in the wrong slot (its first frame at output t=0, animation
+        # finishing before its associated plate even disappears).
+        gap_start = scene_segments[0][0] if scene_segments else 0.0
+        if gap_start > 0.05 and scene_labels:
+            # gap is followed by at least 1 real scene -> needs crossfade tail
+            gap_eff_dur = gap_start + design.crossfade_dur
+            bg_color = "0x{:02x}{:02x}{:02x}".format(*design.palette.bg)
+            filter_parts.insert(0,
+                f"color=c={bg_color}:s={design.W}x{design.H}"
+                f":d={gap_eff_dur:.3f}:r={design.fps},format=yuv420p[gap0]"
+            )
+            scene_labels.insert(0, "gap0")
+            seg_durs.insert(0, gap_start)
 
         # Step 2: xfade chain across scenes
         if scene_labels:
-            seg_durs = [s[2] for s in scene_inputs]
             xfade_str, bg_label = _chain_xfade(scene_labels, seg_durs,
                                                 design.crossfade_dur, design)
             if xfade_str:
                 filter_parts.append(xfade_str)
         else:
-            # No scenes — solid color base
+            # No scenes at all — solid color base across whole audio
             bg_color = "0x{:02x}{:02x}{:02x}".format(*design.palette.bg)
             filter_parts.append(
                 f"color=c={bg_color}:s={design.W}x{design.H}:d={audio_dur:.3f}:r={design.fps}[bg0]"
