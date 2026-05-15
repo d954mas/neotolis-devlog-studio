@@ -546,7 +546,10 @@ def compose_ffmpeg(beat: Beat, design: Design, out_path: str,
             "-map", f"[{bg_label}]",
             "-map", "0:a",
             *codec_args,
-            "-c:a", "aac", "-b:a", "192k",
+            # Force 48kHz audio output — otherwise mismatched sample rates
+            # across beats (e.g. outro processed at 96kHz) break demuxer
+            # concat downstream by introducing inconsistent packet timing.
+            "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
             "-t", f"{audio_dur:.3f}",
             # NOTE: NO `-shortest`. Each chunk PNG is `-loop 1 -t chunk_dur`
             # which is shorter than the audio. With -shortest, overlay's EOF
