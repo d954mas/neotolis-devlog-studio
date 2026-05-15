@@ -1710,21 +1710,87 @@ def build_playtime_infographic():
     return out
 
 
+# ───────────────────────────────────────────────────────────────────────────
+# Source-hash cache.
+# Each build_* function is skipped if its source + shared-helper source is
+# unchanged AND its output file already exists. Cache file is JSON in OUT_DIR.
+# Pass --force on CLI to bypass.
+# ───────────────────────────────────────────────────────────────────────────
+
+import inspect, hashlib, json, sys
+
+# Helpers that many charts depend on. If any of these change, all charts
+# invalidate (conservative but cheap to evaluate). Per-chart helpers stay
+# inside their function — those are caught by getsource on the chart itself.
+_SHARED_HELPER_NAMES = [
+    "vignette", "title_with_underline",
+    "_ease_out_cubic", "_ease_out_quart",
+    "_hype_curve_pts", "build_hype_curve_frame",
+    "build_commits_chart_frame", "build_daily_views_frame",
+    "build_day1_progression",  # build_day1_progression_anim reuses it
+    "get_commits_by_day", "get_file_stats",
+]
+
+def _shared_helper_hash():
+    parts = []
+    for name in _SHARED_HELPER_NAMES:
+        fn = globals().get(name)
+        if fn is None:
+            continue
+        try:
+            parts.append(inspect.getsource(fn))
+        except (OSError, TypeError):
+            pass
+    return hashlib.sha1("".join(parts).encode("utf-8")).hexdigest()[:12]
+
+_BUILD_CACHE_FILE = OUT_DIR / ".build_cache.json"
+
+def _load_cache():
+    if not _BUILD_CACHE_FILE.exists():
+        return {}
+    try:
+        return json.loads(_BUILD_CACHE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+def _save_cache(c):
+    _BUILD_CACHE_FILE.write_text(json.dumps(c, indent=2), encoding="utf-8")
+
+def cached(func, *outputs, force=False):
+    """Skip func() if its source hash matches cache and all outputs exist."""
+    paths = [Path(o) for o in outputs]
+    src = inspect.getsource(func)
+    h = hashlib.sha1((_SHARED_H + src).encode("utf-8")).hexdigest()[:16]
+    name = func.__name__
+    if (not force
+            and _CACHE.get(name) == h
+            and all(p.exists() for p in paths)):
+        print(f"[cache] hit  {name}")
+        return
+    print(f"[cache] miss {name}")
+    func()
+    _CACHE[name] = h
+    _save_cache(_CACHE)
+
 if __name__ == "__main__":
-    build_commit_chart()
-    build_files_breakdown()
-    build_biggest_files()
-    build_daily_views()
-    build_hype_curve()
-    build_workflow_diagram()
-    build_art_grid_cover()
-    build_timeline_13days()
+    force = "--force" in sys.argv
+    _SHARED_H = _shared_helper_hash()
+    _CACHE = _load_cache()
+
+    cached(build_commit_chart,        OUT_DIR / "commits_chart.png",          force=force)
+    cached(build_files_breakdown,     OUT_DIR / "files_breakdown.png",        force=force)
+    cached(build_biggest_files,       OUT_DIR / "biggest_files.png",          force=force)
+    cached(build_daily_views,         OUT_DIR / "daily_views.png",            force=force)
+    cached(build_hype_curve,          OUT_DIR / "hype_curve.png",             force=force)
+    cached(build_workflow_diagram,    OUT_DIR / "workflow_diagram.png",       force=force)
+    cached(build_art_grid_cover,      OUT_DIR / "art_grid_cover.png",         force=force)
+    cached(build_timeline_13days,     OUT_DIR / "timeline_13days.png",        force=force)
     print("Building animated infographics...")
-    build_commits_chart_anim()
-    build_daily_views_anim()
-    build_workflow_anim()
-    build_timeline_anim()
-    build_hype_curve_anim()
-    build_day1_progression()
-    build_worlds_collage()
-    build_playtime_infographic()
+    cached(build_commits_chart_anim,  OUT_DIR / "commits_chart_anim.mp4",     force=force)
+    cached(build_daily_views_anim,    OUT_DIR / "daily_views_anim.mp4",       force=force)
+    cached(build_workflow_anim,       OUT_DIR / "workflow_diagram_anim.mp4",  force=force)
+    cached(build_timeline_anim,       OUT_DIR / "timeline_13days_anim.mp4",   force=force)
+    cached(build_hype_curve_anim,     OUT_DIR / "hype_curve_anim.mp4",        force=force)
+    cached(build_day1_progression,    OUT_DIR / "day1_progression.png",       force=force)
+    cached(build_worlds_collage,      OUT_DIR / "worlds_collage.png",         force=force)
+    cached(build_playtime_infographic, OUT_DIR / "playtime_clock.png",        force=force)
