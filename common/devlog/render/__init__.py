@@ -9,4 +9,11 @@ from .overlay import make_overlay_badge, overlay_label
 from .image import make_image_clip
 from .effects import vignette
 from .text import has_cyrillic, pick_font
-from .compose import compose
+
+# Legacy MoviePy-based composer. Kept for fallback (--engine moviepy) but
+# optional — the default ffmpeg engine doesn't need it, and CI shouldn't have
+# to install the heavy moviepy stack just to import this package.
+try:
+    from .compose import compose                            # noqa: F401
+except ImportError:
+    compose = None                                          # type: ignore[assignment]
