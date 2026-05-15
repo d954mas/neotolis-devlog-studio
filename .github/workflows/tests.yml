@@ -27,10 +27,11 @@ jobs:
           pip install numpy pillow pytest
 
       - name: Run pure unit tests
-        # Skip test_visual_regression — that one needs rendered MP4s from the
-        # trolley project repo and is meant to run locally before commits.
-        # Pure tests: types, cache, scene merging, xfade math, scene inputs,
-        # chunk-aware review detection. 36 tests total.
+        # Skip test_visual_regression — that one needs rendered MP4s from
+        # data/finalize/ which aren't checked into the repo. It's meant to
+        # run locally after rendering. Pure tests: types, cache, scene
+        # merging, xfade math, scene inputs, chunk-aware review. 36 total.
+        working-directory: common
         env:
           PYTHONPATH: .
         run: pytest tests/ -v --ignore=tests/test_visual_regression.py
