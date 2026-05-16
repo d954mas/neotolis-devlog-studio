@@ -17,7 +17,9 @@ from __future__ import annotations
 import http.server
 import importlib
 import json
+import os
 import socketserver
+import subprocess
 import sys
 import urllib.parse
 from dataclasses import asdict, is_dataclass
@@ -89,6 +91,49 @@ def _status_to_dict(edit: Edit, root: Path) -> dict:
         "warnings": sum(1 for i in issues if i.severity == "warning"),
         "issues": [asdict(i) for i in issues],
         "beats": [asdict(b) for b in beats],
+    }
+
+
+def _devlog_env() -> dict[str, str]:
+    env = os.environ.copy()
+    common_root = Path(__file__).resolve().parents[2]
+    workspace_root = common_root.parent
+    extra = [str(common_root), str(workspace_root)]
+    if env.get("PYTHONPATH"):
+        extra.append(env["PYTHONPATH"])
+    env["PYTHONPATH"] = os.pathsep.join(extra)
+    return env
+
+
+def _workspace_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
+def _run_iter_render(edit_path: str, beat_id: str) -> dict:
+    cmd = [
+        sys.executable,
+        "-m",
+        "devlog.cli",
+        "iter",
+        edit_path,
+        "--beat",
+        beat_id,
+        "--no-concat",
+    ]
+    proc = subprocess.run(
+        cmd,
+        cwd=str(_workspace_root()),
+        env=_devlog_env(),
+        text=True,
+        capture_output=True,
+        timeout=60 * 60,
+    )
+    return {
+        "ok": proc.returncode == 0,
+        "returncode": proc.returncode,
+        "cmd": cmd,
+        "stdout": proc.stdout,
+        "stderr": proc.stderr,
     }
 
 
@@ -209,6 +254,21 @@ def build_handler_class(edit: Edit, root: Path, edit_path: str | None = None):
             if path == "/api/actions/check":
                 current = _reload_edit(edit_path) if edit_path else edit
                 return self._send_json(200, _status_to_dict(current, root))
+
+            if path.startswith("/api/actions/render/"):
+                bid = _safe_filename(path[len("/api/actions/render/"):])
+                if not bid:
+                    return self._send_json(400, {"error": "bad beat id"})
+                if not edit_path:
+                    return self._send_json(400, {"error": "serve must be started with an edit module path"})
+                current = _reload_edit(edit_path)
+                if bid not in current.beats:
+                    return self._send_json(404, {"error": f"unknown beat: {bid}"})
+                try:
+                    result = _run_iter_render(edit_path, bid)
+                except subprocess.TimeoutExpired:
+                    return self._send_json(500, {"ok": False, "error": "render timed out"})
+                return self._send_json(200 if result["ok"] else 500, result)
 
             if path.startswith("/api/feedback/"):
                 bid = _safe_filename(path[len("/api/feedback/"):])

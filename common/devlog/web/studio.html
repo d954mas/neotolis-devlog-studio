@@ -79,6 +79,8 @@
   .panel-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px;
     padding-bottom: 12px; border-bottom: 1px solid var(--line); }
   .panel-head .title { font-size: 22px; font-weight: 700; flex: 1; }
+  .panel-head .btn { padding: 7px 12px; font-size: 12px; border-radius: 4px; }
+  .panel-head .action-status { font-size: 11px; color: var(--ink-dim); min-width: 90px; }
   .panel-head .face { font-size: 11px; padding: 2px 10px; border-radius: 10px;
     background: var(--yellow); color: var(--ink); font-weight: 700;
     text-transform: uppercase; letter-spacing: 0.04em; }
@@ -197,6 +199,8 @@
   <section class="pane">
     <div class="panel-head">
       <span class="title" id="beat-title">Select a beat</span>
+      <button class="btn secondary" id="render-beat-btn" type="button" disabled>Render 540p</button>
+      <span class="action-status" id="action-status"></span>
       <span class="face" id="beat-face"></span>
     </div>
 
@@ -352,6 +356,32 @@ async function runCheck() {
   }
 }
 
+async function renderActiveBeat() {
+  if (!ACTIVE) return;
+  const btn = document.getElementById('render-beat-btn');
+  const status = document.getElementById('action-status');
+  btn.disabled = true;
+  btn.textContent = 'Rendering';
+  status.textContent = ACTIVE;
+  try {
+    const r = await fetch(`/api/actions/render/${encodeURIComponent(ACTIVE)}`, { method: 'POST' });
+    const result = await r.json();
+    if (!result.ok) {
+      console.error('render:', result);
+      status.textContent = 'failed';
+    } else {
+      status.textContent = 'done';
+      await loadStatus();
+    }
+  } catch (e) {
+    console.error('render:', e);
+    status.textContent = 'failed';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Render 540p';
+  }
+}
+
 // ───────────────────────────────────────────────────────────────
 // Beat list
 // ───────────────────────────────────────────────────────────────
@@ -406,6 +436,8 @@ function selectBeat(bid) {
   const beat = PROJECT.beats[bid];
   document.getElementById('beat-title').textContent = beat.title || bid;
   document.getElementById('beat-face').textContent = beat.face;
+  document.getElementById('render-beat-btn').disabled = false;
+  document.getElementById('action-status').textContent = '';
 
   // Script tab
   renderScript(beat);
@@ -715,6 +747,7 @@ document.querySelectorAll('header .tab').forEach(t => {
 document.getElementById('record-btn').addEventListener('click', toggleRecord);
 document.getElementById('play-last-btn').addEventListener('click', playLast);
 document.getElementById('run-check-btn').addEventListener('click', runCheck);
+document.getElementById('render-beat-btn').addEventListener('click', renderActiveBeat);
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, ch => ({

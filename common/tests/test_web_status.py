@@ -1,5 +1,6 @@
 import json
 import threading
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -55,3 +56,26 @@ def test_check_action_returns_status_json(tmp_path: Path):
 
     assert status["errors"] >= 1
     assert status["beats"][0]["beat_id"] == "a"
+
+
+def test_render_action_requires_edit_path(tmp_path: Path):
+    edit = _edit_with_missing_assets(tmp_path)
+    handler = build_handler_class(edit, tmp_path)
+
+    with _ThreadedServer(("127.0.0.1", 0), handler) as server:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            url = f"http://127.0.0.1:{server.server_port}/api/actions/render/a"
+            req = urllib.request.Request(url, method="POST")
+            try:
+                urllib.request.urlopen(req, timeout=5)
+            except urllib.error.HTTPError as exc:
+                payload = json.loads(exc.read().decode("utf-8"))
+                code = exc.code
+        finally:
+            server.shutdown()
+            thread.join(timeout=5)
+
+    assert code == 400
+    assert "edit module path" in payload["error"]
