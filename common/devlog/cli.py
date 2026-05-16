@@ -663,6 +663,17 @@ def cmd_shotlist(args):
     _write_or_print(shotlist_markdown(edit), args.out)
 
 
+def cmd_import_script(args):
+    """Convert a draft script into a starter beats.py."""
+    from devlog.script_import import parse_script_beats, render_beats_py
+
+    text = Path(args.script).read_text(encoding="utf-8")
+    beats = parse_script_beats(text, prefix=args.prefix)
+    content = render_beats_py(beats, output=args.output)
+    _write_or_print(content, args.out)
+    print(f"[devlog] imported {len(beats)} beats")
+
+
 def _py_ident(value: str, what: str) -> str:
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", value):
         raise SystemExit(f"{what} must be a valid Python identifier, got {value!r}")
@@ -947,6 +958,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_shotlist.add_argument("edit", nargs="?")
     p_shotlist.add_argument("--out", help="Write markdown to this path instead of stdout")
     p_shotlist.set_defaults(func=cmd_shotlist)
+
+    p_import_script = sub.add_parser("import-script", help="Convert a draft script into beats.py")
+    p_import_script.add_argument("script", help="Text or Markdown script file")
+    p_import_script.add_argument("--out", help="Write beats.py to this path instead of stdout")
+    p_import_script.add_argument("--prefix", default="b", help="Fallback beat id prefix")
+    p_import_script.add_argument("--output", default="data/finalize/iter01.mp4",
+                                 help="OUTPUT value for generated beats.py")
+    p_import_script.set_defaults(func=cmd_import_script)
 
     p_new = sub.add_parser("new", help="Create a new devlog project scaffold")
     p_new.add_argument("project", help="Python package name for the project")
