@@ -30,8 +30,8 @@ common/devlog/                  ← reusable engine (this folder)
 ## Quickstart for a new project
 
 ```powershell
-# 1) Copy an existing project as template
-xcopy /E /I trolley\ newproject\
+# 1) Create a clean project scaffold
+dl.bat new newproject
 
 # 2) Update the brand palette if desired
 # Edit: newproject\shared\palette.py
@@ -43,28 +43,69 @@ xcopy /E /I trolley\ newproject\
 #   - set OUTPUT filename
 
 # 4) Record VO, process audio
-dl.bat audio newproject.edits.youtube a0-1 my_take1.webm
-dl.bat audio newproject.edits.youtube a0-2 my_take2.webm
+dl.bat audio newproject.edits.youtube intro my_take1.webm
 
-# 5) Render
-dl.bat render newproject.edits.youtube
+# 5) Validate and render
+dl.bat check newproject.edits.youtube
+dl.bat render newproject.edits.youtube --width 540p --quality draft -j 6
 
 # Or render one beat at a time
-dl.bat compose newproject.edits.youtube a0-1
+dl.bat compose newproject.edits.youtube intro
 ```
 
 ## CLI reference
 
 | Command | What it does |
 |---|---|
-| `dl render <edit>` | Render every beat in `edit.order`, then concat to `edit.output` |
+| `dl render [edit]` | Render every beat in `edit.order`, then concat to `edit.output` |
 | `dl render <edit> --beat <id>` | Render one beat, skip concat |
-| `dl compose <edit> <id>` | Same as `render --beat <id>` (alias) |
-| `dl concat <edit>` | Concat already-rendered beat videos into `edit.output` |
+| `dl compose [edit] <id>` | Same as `render --beat <id>` (alias); `dl compose b4` uses default edit |
+| `dl concat [edit]` | Concat already-rendered beat videos into `edit.output` |
+| `dl check [edit]` | Validate assets, words JSON, chunk ranges, and scenes before rendering |
+| `dl doctor` | Check local FFmpeg/Python dependencies |
+| `dl beats [edit]` | Show beat durations, chunk counts, and render status |
+| `dl assets [edit]` | Show used, missing, unused, and low-resolution assets |
+| `dl smoke` | Run unit tests + `check` + `beats` as a fast self-test |
+| `dl cache-info` | Show render cache entry count and size |
+| `dl cache-prune --older-than-days N` | Remove old render cache entries |
+| `dl script [edit]` | Export voiceover script as Markdown |
+| `dl shotlist [edit]` | Export chunk/scene shotlist as Markdown |
+| `dl new <project>` | Create a clean project scaffold |
 | `dl audio <edit> <id> <recording>` | Preprocess + loudnorm + Whisper a take |
 | `dl transcribe <wav> <out.json>` | Standalone Whisper run |
 | `dl serve <edit> [--port 8080]` | Local server: recorder + preview + `/api/project` |
 | `dl cut <video> <range> --out <path> [--reframe MODE]` | Clip range from a video, optional reframe for reels |
+
+Useful validation/transcription options:
+
+```powershell
+dl check <edit> --deep                  # also ffprobe video durations / offsets
+dl check                                # uses default_edit from devlog.toml
+dl render                               # uses default width/quality/parallel from devlog.toml
+dl render --final                       # uses [final] settings from devlog.toml
+dl compose b4                           # render one beat from the default edit
+dl watch --beat b4                      # check + rerender one beat on source changes
+dl smoke                                # tests + check + beats
+dl smoke --skip-tests                   # faster check + beats only
+dl assets --width 4k                    # missing/unused/low-res asset report
+dl cache-info                           # render cache size
+dl cache-prune --older-than-days 14     # clean old cache entries
+dl script --out data/review/script.md   # VO script export
+dl shotlist --out data/review/shotlist.md
+dl doctor --with-whisper                # include Whisper import check
+dl beats <edit> --width 540p --quality draft --missing-only
+dl audio <edit> <beat> <take.webm> --language en --model small
+dl transcribe data/audio.wav data/words.json --language ru --model medium
+```
+
+Render quality presets:
+
+| Preset | Typical use |
+|---|---|
+| `--quality draft` | Fast 540p iteration, ultrafast encode |
+| `--quality preview` | Reviewable intermediate render |
+| `--quality upload` | YouTube upload render with higher audio bitrate |
+| `--quality master` | Slower archival/high-quality H.264 render |
 
 Edit path is a Python dotted module like `trolley.edits.youtube`. The CLI
 auto-detects project root from the module location and runs each command
@@ -143,6 +184,9 @@ EDIT = Edit(name="reel_30k", design=DESIGN, beats=BEATS, order=CONCAT_ORDER, out
 ```
 
 Then `dl render trolley.edits.reel_30k`.
+
+`dl new <project>` also copies `trolley/.claude/agents/vo-reviewer.md` and
+`video-reviewer.md` into the new project when those template files exist.
 
 ## Beat / Chunk reference
 

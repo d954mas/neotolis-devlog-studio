@@ -24,8 +24,20 @@ import sys
 import os
 import argparse
 import importlib
+import re
+import shutil
 import subprocess
 from pathlib import Path
+
+from devlog.config import DevlogConfig, load_config
+
+
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 
 
 # ─── Edit loading ────────────────────────────────────────────────
@@ -61,6 +73,45 @@ _WIDTH_PRESETS = {
     "4k":    3840,
 }
 
+_QUALITY_PRESETS = ("draft", "preview", "upload", "master")
+
+
+def _resolve_edit(edit_arg: str | None, config: DevlogConfig) -> str:
+    edit = edit_arg or config.default_edit
+    if not edit:
+        raise SystemExit("Edit module is required. Pass it explicitly or set default_edit in devlog.toml.")
+    return edit
+
+
+def _apply_render_defaults(args, config: DevlogConfig, *, for_watch: bool = False) -> None:
+    """Fill omitted width/quality/parallel/audio defaults from devlog.toml."""
+    defaults = config.watch if for_watch and config.watch else config.defaults
+    if getattr(args, "final", False):
+        final = config.final
+        if getattr(args, "width", None) is None:
+            args.width = final.get("width", "4k")
+        if getattr(args, "quality", None) is None and not getattr(args, "draft", False):
+            args.quality = final.get("quality", "upload")
+        if getattr(args, "parallel", None) is None:
+            args.parallel = int(final.get("parallel", defaults.get("parallel", 1)))
+        if final.get("gpu") and not getattr(args, "gpu", False):
+            args.gpu = True
+        return
+
+    if getattr(args, "width", None) is None:
+        args.width = defaults.get("width")
+    if getattr(args, "quality", None) is None and not getattr(args, "draft", False):
+        args.quality = defaults.get("quality")
+    if hasattr(args, "parallel") and getattr(args, "parallel", None) is None:
+        args.parallel = int(defaults.get("parallel", 1))
+
+
+def _apply_audio_defaults(args, config: DevlogConfig) -> None:
+    if getattr(args, "language", None) is None:
+        args.language = config.defaults.get("language", "ru")
+    if getattr(args, "model", None) is None:
+        args.model = config.defaults.get("model", "medium")
+
 
 def _resize_design(design, width_spec: str | None):
     """Override design.resolution to match `width_spec`, preserving aspect.
@@ -90,24 +141,36 @@ def _resize_design(design, width_spec: str | None):
 
 def cmd_compose(args):
     """Render a single beat from the edit."""
-    edit, root = _load_edit(args.edit)
+    config = load_config()
+    if args.beat_id is None:
+        edit_path = _resolve_edit(None, config)
+        beat_id = args.edit_or_beat
+    else:
+        edit_path = _resolve_edit(args.edit_or_beat, config)
+        beat_id = args.beat_id
+    _apply_render_defaults(args, config)
+    edit, root = _load_edit(edit_path)
     _project_chdir(root)
-    if args.beat_id not in edit.beats:
-        raise SystemExit(f"Beat {args.beat_id!r} not in edit {edit.name!r}. "
+    if beat_id not in edit.beats:
+        raise SystemExit(f"Beat {beat_id!r} not in edit {edit.name!r}. "
                          f"Available: {list(edit.beats)}")
     design = _resize_design(edit.design, args.width)
-    beat = edit.beats[args.beat_id]
+    beat = edit.beats[beat_id]
     suffix = _render_suffix(args)
-    out_path = f"data/finalize/{args.beat_id}{suffix}.mp4"
+    out_path = f"data/finalize/{beat_id}{suffix}.mp4"
     engine = getattr(args, "engine", "ffmpeg")
+    quality = _effective_quality(args)
+    draft = _effective_draft(args)
     print(f"[devlog] resolution {design.resolution}  fps {design.fps}"
-          f"{' DRAFT' if args.draft else ''}{' GPU' if args.gpu else ''}  engine={engine}")
+          f"{' DRAFT' if draft else ''}{' GPU' if args.gpu else ''}"
+          f"{' quality=' + quality if quality else ''}  engine={engine}")
     if engine == "moviepy":
         from devlog.render import compose
-        compose(beat, design, out_path, draft=args.draft, gpu=args.gpu, no_cache=args.no_cache)
+        compose(beat, design, out_path, draft=draft, gpu=args.gpu, no_cache=args.no_cache)
     else:
         from devlog.render.compose_ffmpeg import compose_ffmpeg
-        compose_ffmpeg(beat, design, out_path, draft=args.draft, gpu=args.gpu, no_cache=args.no_cache)
+        compose_ffmpeg(beat, design, out_path, draft=draft, gpu=args.gpu,
+                       no_cache=args.no_cache, quality=quality)
 
 
 def cmd_render(args):
@@ -117,26 +180,32 @@ def cmd_render(args):
     --draft uses ultrafast x264 preset (4-6x faster, slightly larger files).
     --engine selects ffmpeg (default, fast) or moviepy (legacy fallback).
     """
+    config = load_config()
+    args.edit = _resolve_edit(args.edit, config)
+    _apply_render_defaults(args, config)
     edit, root = _load_edit(args.edit)
     _project_chdir(root)
     design = _resize_design(edit.design, args.width)
     suffix = _render_suffix(args)
     engine = getattr(args, "engine", "ffmpeg")
+    quality = _effective_quality(args)
+    draft = _effective_draft(args)
     print(f"[devlog] resolution {design.resolution}  fps {design.fps}"
-          f"{' DRAFT' if args.draft else ''}"
+          f"{' DRAFT' if draft else ''}"
           f"{' parallel=' + str(args.parallel) if args.parallel > 1 else ''}"
+          f"{' quality=' + quality if quality else ''}"
           f"  engine={engine}")
     targets = [args.beat] if args.beat else edit.order
 
     if args.parallel > 1 and len(targets) > 1:
-        _render_parallel(edit, design, targets, suffix, args.draft, args.gpu,
-                         args.no_cache, args.parallel, engine)
+        _render_parallel(edit, design, targets, suffix, draft, args.gpu,
+                         args.no_cache, args.parallel, engine, quality)
     else:
         for bid in targets:
             out_path = f"data/finalize/{bid}{suffix}.mp4"
             print(f"\n[devlog] rendering {bid} -> {out_path}")
-            _render_one(edit.beats[bid], design, out_path, args.draft, args.gpu,
-                        args.no_cache, engine)
+            _render_one(edit.beats[bid], design, out_path, draft, args.gpu,
+                        args.no_cache, engine, quality)
 
     if not args.no_concat and not args.beat:
         _concat(edit, root, suffix=suffix)
@@ -165,33 +234,52 @@ def cmd_render(args):
                     print(f"  ✓ {len(verdicts)}/{len(verdicts)} chunks render correctly")
 
 
+def _effective_quality(args) -> str | None:
+    if getattr(args, "draft", False) and getattr(args, "quality", None) not in (None, "draft"):
+        raise SystemExit("--draft conflicts with --quality; use --quality draft instead")
+    q = getattr(args, "quality", None)
+    if q:
+        return q
+    if getattr(args, "draft", False):
+        return "draft"
+    return None
+
+
+def _effective_draft(args) -> bool:
+    return bool(getattr(args, "draft", False) or getattr(args, "quality", None) == "draft")
+
+
 def _render_suffix(args) -> str:
     """Derive output filename suffix from width / draft flags."""
+    quality = _effective_quality(args)
     parts = []
     if args.width:
         parts.append(f"_{_WIDTH_PRESETS.get(args.width, args.width)}w")
-    if args.draft:
+    if _effective_draft(args):
         parts.append("_draft")
+    elif quality:
+        parts.append(f"_{quality}")
     if not parts:
         return "_video_1080p"
     return "".join(parts)
 
 
 def _render_one(beat, design, out_path: str, draft: bool, gpu: bool,
-                no_cache: bool, engine: str = "ffmpeg"):
+                no_cache: bool, engine: str = "ffmpeg", quality: str | None = None):
     """Single beat render — engine-aware. Top-level (picklable for Windows spawn)."""
     if engine == "moviepy":
         from devlog.render import compose
         compose(beat, design, out_path, draft=draft, gpu=gpu, no_cache=no_cache)
     else:
         from devlog.render.compose_ffmpeg import compose_ffmpeg
-        compose_ffmpeg(beat, design, out_path, draft=draft, gpu=gpu, no_cache=no_cache)
+        compose_ffmpeg(beat, design, out_path, draft=draft, gpu=gpu,
+                       no_cache=no_cache, quality=quality)
     return out_path
 
 
 def _render_parallel(edit, design, targets: list[str], suffix: str,
                      draft: bool, gpu: bool, no_cache: bool, n_workers: int,
-                     engine: str = "ffmpeg"):
+                     engine: str = "ffmpeg", quality: str | None = None):
     """Run beat renders concurrently. Each worker is its own Python process."""
     from concurrent.futures import ProcessPoolExecutor, as_completed
     print(f"[devlog] launching {n_workers} workers for {len(targets)} beats (engine={engine})")
@@ -200,7 +288,7 @@ def _render_parallel(edit, design, targets: list[str], suffix: str,
         for bid in targets:
             out_path = f"data/finalize/{bid}{suffix}.mp4"
             fut = pool.submit(_render_one, edit.beats[bid], design, out_path,
-                              draft, gpu, no_cache, engine)
+                              draft, gpu, no_cache, engine, quality)
             futures[fut] = bid
         for fut in as_completed(futures):
             bid = futures[fut]
@@ -214,9 +302,12 @@ def _render_parallel(edit, design, targets: list[str], suffix: str,
 
 def cmd_concat(args):
     """Concatenate per-beat videos into edit.output."""
+    config = load_config()
+    args.edit = _resolve_edit(args.edit, config)
+    _apply_render_defaults(args, config)
     edit, root = _load_edit(args.edit)
     _project_chdir(root)
-    suffix = f"_{_WIDTH_PRESETS.get(args.width, args.width)}w" if args.width else "_video_1080p"
+    suffix = _render_suffix(args)
     _concat(edit, root, suffix=suffix)
 
 
@@ -269,24 +360,40 @@ def _concat(edit, root: Path, suffix: str = "_video_1080p"):
 
 def cmd_audio(args):
     """Process a raw recording -> normalized wav + words.json for a beat."""
+    config = load_config()
+    args.edit = _resolve_edit(args.edit, config)
+    _apply_audio_defaults(args, config)
     edit, root = _load_edit(args.edit)
     _project_chdir(root)
     from devlog.audio.process import process_beat_audio
-    process_beat_audio(args.beat_id, args.recording_filename)
+    process_beat_audio(
+        args.beat_id,
+        args.recording_filename,
+        whisper_model=args.model,
+        language=args.language,
+        insecure_ssl=args.insecure_ssl,
+    )
 
 
 def cmd_transcribe(args):
     """Standalone whisper transcription (no beat context required)."""
+    config = load_config()
+    _apply_audio_defaults(args, config)
     from devlog.audio.transcribe import transcribe
-    transcribe(args.audio_path, args.output_json, model_size=args.model)
+    transcribe(args.audio_path, args.output_json,
+               model_size=args.model,
+               language=args.language,
+               insecure_ssl=args.insecure_ssl)
 
 
 def cmd_serve(args):
     """Start local web server for recorder + preview."""
+    config = load_config()
+    args.edit = _resolve_edit(args.edit, config)
     edit, root = _load_edit(args.edit)
     _project_chdir(root)
     from devlog.web.serve import serve
-    serve(edit, port=args.port)
+    serve(edit, port=args.port, edit_path=args.edit)
 
 
 def cmd_cut(args):
@@ -296,23 +403,53 @@ def cmd_cut(args):
 
 
 def cmd_watch(args):
-    """Auto-rerender on beats.py change. Polls mtime; on change spawns a
-    fresh `render` subprocess (clean module reimport). Cache makes
+    """Auto-rerender on source changes. Polls mtimes; on change spawns a
+    fresh `check` + `render` subprocess (clean module reimport). Cache makes
     unchanged beats nearly instant.
     """
     import time
     import subprocess
     import importlib
+    config = load_config()
+    args.edit = _resolve_edit(args.edit, config)
+    _apply_render_defaults(args, config, for_watch=True)
     edit, root = _load_edit(args.edit)
     _project_chdir(root)
-    mod = importlib.import_module(args.edit + ".beats")
-    beats_file = Path(mod.__file__).resolve()
-    print(f"[watch] watching {beats_file}")
+    beats_mod = importlib.import_module(args.edit + ".beats")
+    design_mod = importlib.import_module(args.edit + ".design")
+    common_root = Path(__file__).parent
+    watched = [
+        Path(beats_mod.__file__).resolve(),
+        Path(design_mod.__file__).resolve(),
+        common_root / "types.py",
+        common_root / "render" / "compose_ffmpeg.py",
+        common_root / "render" / "plate.py",
+        common_root / "render" / "overlay.py",
+        common_root / "render" / "image.py",
+        common_root / "render" / "text.py",
+        common_root / "render" / "effects.py",
+    ]
+    watched = [p for p in watched if p.exists()]
+    print("[watch] watching:")
+    for p in watched:
+        print(f"  {p}")
 
     def run_render():
+        if not args.no_check:
+            check_cmd = [sys.executable, "-m", "devlog", "check", args.edit]
+            if args.deep_check:
+                check_cmd.append("--deep")
+            check_result = subprocess.run(check_cmd, check=False)
+            if check_result.returncode != 0:
+                print("[watch] check failed; skipping render")
+                return
+
         cmd = [sys.executable, "-m", "devlog", "render", args.edit,
-               "--width", args.width or "540p"]
+               "--width", args.width]
+        if args.beat:
+            cmd += ["--beat", args.beat]
         if args.draft: cmd.append("--draft")
+        if args.quality: cmd += ["--quality", args.quality]
         if args.gpu: cmd.append("--gpu")
         if args.parallel > 1: cmd += ["-j", str(args.parallel)]
         cmd.append("--no-concat")
@@ -320,25 +457,32 @@ def cmd_watch(args):
 
     print("[watch] initial render...")
     run_render()
-    last_mtime = beats_file.stat().st_mtime
-    print(f"[watch] ready — edit {beats_file.name} to trigger rebuild. Ctrl+C to stop.")
+    last_mtimes = {p: p.stat().st_mtime for p in watched}
+    print("[watch] ready — edit watched files to trigger rebuild. Ctrl+C to stop.")
     try:
         while True:
             time.sleep(1)
-            try:
-                m = beats_file.stat().st_mtime
-            except OSError:
-                continue
-            if m != last_mtime:
-                print(f"\n[watch] {beats_file.name} changed — rebuilding")
+            changed = []
+            for p in watched:
+                try:
+                    m = p.stat().st_mtime
+                except OSError:
+                    continue
+                if m != last_mtimes[p]:
+                    changed.append(p)
+                    last_mtimes[p] = m
+            if changed:
+                names = ", ".join(p.name for p in changed)
+                print(f"\n[watch] changed: {names} — rebuilding")
                 run_render()
-                last_mtime = m
     except KeyboardInterrupt:
         print("\n[watch] stopped")
 
 
 def cmd_cache_clear(args):
     """Wipe the render cache (data/finalize/.cache/)."""
+    config = load_config()
+    args.edit = _resolve_edit(args.edit, config)
     edit, root = _load_edit(args.edit)
     _project_chdir(root)
     from devlog.cache import clear_cache
@@ -346,8 +490,43 @@ def cmd_cache_clear(args):
     print(f"[devlog] cleared {n} cache entries")
 
 
+def _format_bytes(n: int) -> str:
+    units = ["B", "KB", "MB", "GB"]
+    value = float(n)
+    for unit in units:
+        if value < 1024 or unit == units[-1]:
+            return f"{value:.1f} {unit}" if unit != "B" else f"{int(value)} B"
+        value /= 1024
+    return f"{n} B"
+
+
+def cmd_cache_info(args):
+    """Show render cache size and entry count."""
+    config = load_config()
+    args.edit = _resolve_edit(args.edit, config)
+    edit, root = _load_edit(args.edit)
+    _project_chdir(root)
+    from devlog.cache import cache_info
+    info = cache_info()
+    print(f"cache entries: {info.entries}")
+    print(f"cache size: {_format_bytes(info.total_bytes)}")
+
+
+def cmd_cache_prune(args):
+    """Remove old render cache entries."""
+    config = load_config()
+    args.edit = _resolve_edit(args.edit, config)
+    edit, root = _load_edit(args.edit)
+    _project_chdir(root)
+    from devlog.cache import prune_cache
+    removed = prune_cache(args.older_than_days)
+    print(f"[devlog] pruned {removed} cache entries older than {args.older_than_days:g} days")
+
+
 def cmd_review(args):
     """Chunk-aware visual review of a rendered video."""
+    config = load_config()
+    args.edit = _resolve_edit(args.edit, config)
     edit, root = _load_edit(args.edit)
     _project_chdir(root)
     from devlog.review import review_video
@@ -356,6 +535,225 @@ def cmd_review(args):
     fails = sum(1 for v in verdicts if not v.passed)
     if args.strict and fails:
         raise SystemExit(1)
+
+
+def cmd_check(args):
+    """Validate an edit before rendering."""
+    config = load_config()
+    args.edit = _resolve_edit(args.edit, config)
+    edit, root = _load_edit(args.edit)
+    _project_chdir(root)
+    from devlog.check import check_edit, format_issues
+    issues = check_edit(edit, root, deep=args.deep)
+    print(format_issues(issues))
+    errors = [i for i in issues if i.severity == "error"]
+    warnings = [i for i in issues if i.severity == "warning"]
+    print(f"[devlog] check: {len(errors)} errors, {len(warnings)} warnings")
+    if errors or (warnings and args.warnings_as_errors):
+        raise SystemExit(1)
+
+
+def cmd_doctor(args):
+    """Check local dependencies needed by the pipeline."""
+    from devlog.doctor import format_doctor, run_doctor
+    checks = run_doctor(with_whisper=args.with_whisper)
+    print(format_doctor(checks))
+    failed = [c for c in checks if c.required and not c.ok]
+    if failed:
+        raise SystemExit(1)
+
+
+def cmd_beats(args):
+    """Print beat durations and render status for an edit."""
+    config = load_config()
+    args.edit = _resolve_edit(args.edit, config)
+    _apply_render_defaults(args, config)
+    edit, root = _load_edit(args.edit)
+    _project_chdir(root)
+    from devlog.timeline import format_summaries, summarize_edit
+    suffix = _render_suffix(args)
+    summaries = summarize_edit(edit, root, suffix=suffix)
+    print(format_summaries(summaries))
+    if args.missing_only:
+        missing = [s.output for s in summaries if not s.rendered]
+        if missing:
+            print("\nmissing renders:")
+            for path in missing:
+                print(f"  {path}")
+
+
+def cmd_smoke(args):
+    """Run a fast workspace self-test."""
+    from devlog.smoke import format_smoke, run_smoke
+    config = load_config()
+    steps = run_smoke(config, skip_tests=args.skip_tests, deep_check=args.deep_check)
+    print(format_smoke(steps))
+    if any(step.returncode != 0 for step in steps):
+        raise SystemExit(1)
+
+
+def cmd_assets(args):
+    """Show used/missing/unused assets for an edit."""
+    config = load_config()
+    args.edit = _resolve_edit(args.edit, config)
+    edit, root = _load_edit(args.edit)
+    _project_chdir(root)
+    from devlog.assets import asset_report, format_asset_report
+    design = _resize_design(edit.design, args.width)
+    report = asset_report(edit, root, target_width=design.W)
+    print(format_asset_report(report, show_used=args.show_used, show_unused=args.show_unused))
+    if report.missing and args.strict:
+        raise SystemExit(1)
+
+
+def _write_or_print(text: str, out_path: str | None) -> None:
+    if out_path:
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(out_path).write_text(text, encoding="utf-8")
+        print(f"[devlog] wrote {out_path}")
+    else:
+        try:
+            sys.stdout.write(text)
+        except BrokenPipeError:
+            pass
+
+
+def cmd_script(args):
+    """Export voiceover script as Markdown."""
+    config = load_config()
+    args.edit = _resolve_edit(args.edit, config)
+    edit, root = _load_edit(args.edit)
+    _project_chdir(root)
+    from devlog.export import script_markdown
+    _write_or_print(script_markdown(edit), args.out)
+
+
+def cmd_shotlist(args):
+    """Export chunk/scene shotlist as Markdown."""
+    config = load_config()
+    args.edit = _resolve_edit(args.edit, config)
+    edit, root = _load_edit(args.edit)
+    _project_chdir(root)
+    from devlog.export import shotlist_markdown
+    _write_or_print(shotlist_markdown(edit), args.out)
+
+
+def _py_ident(value: str, what: str) -> str:
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", value):
+        raise SystemExit(f"{what} must be a valid Python identifier, got {value!r}")
+    return value
+
+
+def _write_file(path: Path, content: str, force: bool) -> None:
+    if path.exists() and not force:
+        raise SystemExit(f"Refusing to overwrite existing file: {path}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+def cmd_new(args):
+    """Create a minimal new devlog project scaffold."""
+    project = _py_ident(args.project, "project")
+    edit_name = _py_ident(args.edit, "edit")
+    root = Path.cwd() / project
+    if root.exists() and any(root.iterdir()) and not args.force:
+        raise SystemExit(f"{root} already exists. Use --force to overwrite template files.")
+
+    const_prefix = re.sub(r"[^A-Za-z0-9_]", "_", project).upper()
+    for d in [
+        root / "data" / "finalize",
+        root / "data" / "recordings",
+        root / "data" / "review",
+        root / "shared",
+        root / "edits" / edit_name,
+    ]:
+        d.mkdir(parents=True, exist_ok=True)
+
+    _write_file(root / "__init__.py", '"""Devlog project package."""\n', args.force)
+    _write_file(root / "shared" / "__init__.py", "", args.force)
+    _write_file(root / "edits" / "__init__.py", "", args.force)
+    _write_file(root / "shared" / "palette.py", f'''"""Brand palette and fonts for {project}."""
+from devlog.types import Palette, Fonts
+
+
+{const_prefix}_PALETTE = Palette(
+    bg=(26, 22, 18),
+    gold=(232, 182, 71),
+    gold_dim=(224, 174, 69),
+    red=(192, 57, 43),
+    fg_dim=(180, 170, 150),
+)
+
+{const_prefix}_FONTS = Fonts(
+    display="C:/Windows/Fonts/bahnschrift.ttf",
+    text="C:/Windows/Fonts/tahomabd.ttf",
+    mono="C:/Windows/Fonts/consolab.ttf",
+    emoji="C:/Windows/Fonts/seguiemj.ttf",
+)
+''', args.force)
+    _write_file(root / "edits" / edit_name / "design.py", f'''"""Design for the {edit_name} edit."""
+from devlog.types import Design
+from {project}.shared.palette import {const_prefix}_PALETTE, {const_prefix}_FONTS
+
+
+DESIGN = Design(
+    resolution=(1920, 1080),
+    fps=30,
+    palette={const_prefix}_PALETTE,
+    fonts={const_prefix}_FONTS,
+)
+''', args.force)
+    _write_file(root / "edits" / edit_name / "beats.py", '''"""Beat plan for this edit."""
+from devlog.types import Beat, Chunk
+
+
+BEATS: dict[str, Beat] = {
+    "intro": Beat(
+        title="Intro",
+        vo="Replace this with your recorded voiceover text.",
+        stage="Record this take in the studio, then run dl audio.",
+        audio="data/finalize/intro_audio_final.wav",
+        words="data/finalize/intro_words.json",
+        chunks=[
+            Chunk(words=(0, 4), kind="plate", text="INTRO", size=260, red_underline=True),
+        ],
+        face="none",
+    ),
+}
+
+CONCAT_ORDER: list[str] = ["intro"]
+OUTPUT = "data/finalize/iter01.mp4"
+''', args.force)
+    _write_file(root / "edits" / edit_name / "__init__.py", f'''from devlog.types import Edit
+from .design import DESIGN
+from .beats import BEATS, CONCAT_ORDER, OUTPUT
+
+
+EDIT = Edit(name="{edit_name}", design=DESIGN, beats=BEATS, order=CONCAT_ORDER, output=OUTPUT)
+''', args.force)
+    _write_file(root / "README.md", f'''# {project}
+
+New devlog project scaffold.
+
+Next steps:
+
+1. Record voiceover with `dl serve {project}.edits.{edit_name}`.
+2. Process a take with `dl audio {project}.edits.{edit_name} intro <take>.webm`.
+3. Replace chunks in `{project}/edits/{edit_name}/beats.py`.
+4. Run `dl check {project}.edits.{edit_name}` before rendering.
+5. Render drafts with `dl render {project}.edits.{edit_name} --width 540p --quality draft -j 6`.
+''', args.force)
+    source_agents = Path.cwd() / "trolley" / ".claude" / "agents"
+    target_agents = root / ".claude" / "agents"
+    if source_agents.exists():
+        target_agents.mkdir(parents=True, exist_ok=True)
+        for agent_name in ("vo-reviewer.md", "video-reviewer.md"):
+            src = source_agents / agent_name
+            dst = target_agents / agent_name
+            if src.exists() and (args.force or not dst.exists()):
+                shutil.copyfile(src, dst)
+    print(f"[devlog] created {root}")
+    print(f"[devlog] edit module: {project}.edits.{edit_name}")
 
 
 # ─── Argparse setup ──────────────────────────────────────────────
@@ -367,16 +765,18 @@ def build_parser() -> argparse.ArgumentParser:
     width_help = ("Override render width (preset 540p/720p/1080p/4k or raw int). "
                   "Use 540p for fast iteration, 4k for final.")
     draft_help = "Use libx264 ultrafast preset + CRF 28 (4-6x faster encode, slightly larger file)"
+    quality_help = "Render quality preset: draft, preview, upload, or master"
     gpu_help = "Use h264_nvenc (NVIDIA GPU) instead of libx264 — 5-10x faster encode on RTX/etc"
     nocache_help = "Force re-render even if content hash matches a cached file"
     parallel_help = ("Render N beats concurrently via multiprocessing. "
                      "Recommended 4-6 on 8-core CPU.")
 
     p_compose = sub.add_parser("compose", help="Render one beat")
-    p_compose.add_argument("edit", help="Edit module path (e.g. trolley.edits.youtube)")
-    p_compose.add_argument("beat_id")
+    p_compose.add_argument("edit_or_beat", help="Beat id, or edit module path when beat_id is also provided")
+    p_compose.add_argument("beat_id", nargs="?")
     p_compose.add_argument("--width", help=width_help)
     p_compose.add_argument("--draft", action="store_true", help=draft_help)
+    p_compose.add_argument("--quality", choices=_QUALITY_PRESETS, help=quality_help)
     p_compose.add_argument("--gpu", action="store_true", help=gpu_help)
     p_compose.add_argument("--no-cache", action="store_true", help=nocache_help)
     p_compose.add_argument("--engine", choices=["ffmpeg", "moviepy"], default="ffmpeg",
@@ -384,14 +784,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_compose.set_defaults(func=cmd_compose)
 
     p_render = sub.add_parser("render", help="Render all beats and concat")
-    p_render.add_argument("edit")
+    p_render.add_argument("edit", nargs="?")
     p_render.add_argument("--beat", help="Render only this single beat (skips concat)")
     p_render.add_argument("--no-concat", action="store_true", help="Skip final concat step")
     p_render.add_argument("--width", help=width_help)
     p_render.add_argument("--draft", action="store_true", help=draft_help)
+    p_render.add_argument("--quality", choices=_QUALITY_PRESETS, help=quality_help)
+    p_render.add_argument("--final", action="store_true",
+                          help="Use final render defaults from devlog.toml")
     p_render.add_argument("--gpu", action="store_true", help=gpu_help)
     p_render.add_argument("--no-cache", action="store_true", help=nocache_help)
-    p_render.add_argument("--parallel", "-j", type=int, default=1, help=parallel_help)
+    p_render.add_argument("--parallel", "-j", type=int, default=None, help=parallel_help)
     p_render.add_argument("--engine", choices=["ffmpeg", "moviepy"], default="ffmpeg",
                            help="Render engine: ffmpeg (default, fast) or moviepy (legacy)")
     p_render.add_argument("--no-review", action="store_true",
@@ -403,24 +806,33 @@ def build_parser() -> argparse.ArgumentParser:
     p_render.set_defaults(func=cmd_render)
 
     p_concat = sub.add_parser("concat", help="Concat existing rendered beats into edit.output")
-    p_concat.add_argument("edit")
+    p_concat.add_argument("edit", nargs="?")
     p_concat.add_argument("--width", help="Match suffix of beat videos to concat (e.g. 540p)")
+    p_concat.add_argument("--quality", choices=_QUALITY_PRESETS, help="Match quality suffix of beat videos")
+    p_concat.add_argument("--draft", action="store_true", help="Match draft suffix")
     p_concat.set_defaults(func=cmd_concat)
 
     p_audio = sub.add_parser("audio", help="Process a recording -> wav + words.json")
     p_audio.add_argument("edit")
     p_audio.add_argument("beat_id")
     p_audio.add_argument("recording_filename", help="Filename inside data/recordings/")
+    p_audio.add_argument("--model", help="Whisper model size")
+    p_audio.add_argument("--language", help="Whisper language code")
+    p_audio.add_argument("--insecure-ssl", action="store_true",
+                         help="Disable SSL verification for first-time Whisper model download")
     p_audio.set_defaults(func=cmd_audio)
 
     p_transcribe = sub.add_parser("transcribe", help="Standalone whisper transcription")
     p_transcribe.add_argument("audio_path")
     p_transcribe.add_argument("output_json")
-    p_transcribe.add_argument("--model", default="medium", help="Whisper model size")
+    p_transcribe.add_argument("--model", help="Whisper model size")
+    p_transcribe.add_argument("--language", help="Whisper language code")
+    p_transcribe.add_argument("--insecure-ssl", action="store_true",
+                              help="Disable SSL verification for first-time Whisper model download")
     p_transcribe.set_defaults(func=cmd_transcribe)
 
     p_serve = sub.add_parser("serve", help="Run local web server (recorder + preview)")
-    p_serve.add_argument("edit")
+    p_serve.add_argument("edit", nargs="?")
     p_serve.add_argument("--port", type=int, default=8080)
     p_serve.set_defaults(func=cmd_serve)
 
@@ -433,16 +845,29 @@ def build_parser() -> argparse.ArgumentParser:
     p_cut.set_defaults(func=cmd_cut)
 
     p_watch = sub.add_parser("watch", help="Auto-rebuild on beats.py change (uses cache for speed)")
-    p_watch.add_argument("edit")
-    p_watch.add_argument("--width", default="540p", help=width_help)
+    p_watch.add_argument("edit", nargs="?")
+    p_watch.add_argument("--beat", help="Render only this beat on changes")
+    p_watch.add_argument("--width", help=width_help)
     p_watch.add_argument("--draft", action="store_true", help=draft_help)
+    p_watch.add_argument("--quality", choices=_QUALITY_PRESETS, help=quality_help)
     p_watch.add_argument("--gpu", action="store_true", help=gpu_help)
-    p_watch.add_argument("--parallel", "-j", type=int, default=4, help=parallel_help)
+    p_watch.add_argument("--parallel", "-j", type=int, default=None, help=parallel_help)
+    p_watch.add_argument("--no-check", action="store_true", help="Skip check before rendering")
+    p_watch.add_argument("--deep-check", action="store_true", help="Run `check --deep` before rendering")
     p_watch.set_defaults(func=cmd_watch)
 
     p_cc = sub.add_parser("cache-clear", help="Wipe the render cache")
-    p_cc.add_argument("edit")
+    p_cc.add_argument("edit", nargs="?")
     p_cc.set_defaults(func=cmd_cache_clear)
+
+    p_ci = sub.add_parser("cache-info", help="Show render cache size")
+    p_ci.add_argument("edit", nargs="?")
+    p_ci.set_defaults(func=cmd_cache_info)
+
+    p_cp = sub.add_parser("cache-prune", help="Remove old render cache entries")
+    p_cp.add_argument("edit", nargs="?")
+    p_cp.add_argument("--older-than-days", type=float, required=True)
+    p_cp.set_defaults(func=cmd_cache_prune)
 
     p_review = sub.add_parser("review", help="Chunk-aware visual review of rendered video")
     p_review.add_argument("edit", help="Edit module path (e.g. trolley.edits.youtube)")
@@ -452,6 +877,55 @@ def build_parser() -> argparse.ArgumentParser:
     p_review.add_argument("--strict", action="store_true",
                           help="Exit 1 on any FAIL (for CI gates)")
     p_review.set_defaults(func=cmd_review)
+
+    p_check = sub.add_parser("check", help="Validate an edit before rendering")
+    p_check.add_argument("edit", nargs="?")
+    p_check.add_argument("--deep", action="store_true",
+                         help="Also ffprobe video durations to catch offsets past EOF")
+    p_check.add_argument("--warnings-as-errors", action="store_true")
+    p_check.set_defaults(func=cmd_check)
+
+    p_doctor = sub.add_parser("doctor", help="Check local ffmpeg/python dependencies")
+    p_doctor.add_argument("--with-whisper", action="store_true",
+                          help="Also check that the Whisper package is importable")
+    p_doctor.set_defaults(func=cmd_doctor)
+
+    p_beats = sub.add_parser("beats", help="Show beat durations and render status")
+    p_beats.add_argument("edit", nargs="?")
+    p_beats.add_argument("--width", help="Match render suffix width (e.g. 540p)")
+    p_beats.add_argument("--quality", choices=_QUALITY_PRESETS, help="Match render suffix quality")
+    p_beats.add_argument("--draft", action="store_true", help="Match draft suffix")
+    p_beats.add_argument("--missing-only", action="store_true", help="Also list missing rendered files")
+    p_beats.set_defaults(func=cmd_beats)
+
+    p_smoke = sub.add_parser("smoke", help="Run tests + check + beats for quick self-test")
+    p_smoke.add_argument("--skip-tests", action="store_true", help="Only run check and beats")
+    p_smoke.add_argument("--deep-check", action="store_true", help="Run check --deep")
+    p_smoke.set_defaults(func=cmd_smoke)
+
+    p_assets = sub.add_parser("assets", help="Show used/missing/unused assets")
+    p_assets.add_argument("edit", nargs="?")
+    p_assets.add_argument("--width", help="Target width for low-res image warnings")
+    p_assets.add_argument("--show-used", action="store_true")
+    p_assets.add_argument("--show-unused", action="store_true")
+    p_assets.add_argument("--strict", action="store_true", help="Exit 1 when assets are missing")
+    p_assets.set_defaults(func=cmd_assets)
+
+    p_script = sub.add_parser("script", help="Export VO script markdown")
+    p_script.add_argument("edit", nargs="?")
+    p_script.add_argument("--out", help="Write markdown to this path instead of stdout")
+    p_script.set_defaults(func=cmd_script)
+
+    p_shotlist = sub.add_parser("shotlist", help="Export chunk/scene shotlist markdown")
+    p_shotlist.add_argument("edit", nargs="?")
+    p_shotlist.add_argument("--out", help="Write markdown to this path instead of stdout")
+    p_shotlist.set_defaults(func=cmd_shotlist)
+
+    p_new = sub.add_parser("new", help="Create a new devlog project scaffold")
+    p_new.add_argument("project", help="Python package name for the project")
+    p_new.add_argument("--edit", default="youtube", help="Initial edit folder/module name")
+    p_new.add_argument("--force", action="store_true", help="Overwrite template files if they exist")
+    p_new.set_defaults(func=cmd_new)
 
     return parser
 

@@ -1,0 +1,49 @@
+import argparse
+from pathlib import Path
+
+import pytest
+
+from devlog import cli
+
+
+def test_render_suffix_supports_quality_presets():
+    assert cli._render_suffix(argparse.Namespace(width=None, draft=False, quality=None)) == "_video_1080p"
+    assert cli._render_suffix(argparse.Namespace(width="540p", draft=False, quality="preview")) == "_960w_preview"
+    assert cli._render_suffix(argparse.Namespace(width=None, draft=False, quality="upload")) == "_upload"
+    assert cli._render_suffix(argparse.Namespace(width=None, draft=False, quality="draft")) == "_draft"
+
+
+def test_draft_flag_conflicts_with_non_draft_quality():
+    with pytest.raises(SystemExit):
+        cli._render_suffix(argparse.Namespace(width=None, draft=True, quality="preview"))
+
+
+def test_beats_suffix_uses_existing_render_suffix_logic():
+    args = argparse.Namespace(width="1080p", draft=False, quality="upload")
+    assert cli._render_suffix(args) == "_1920w_upload"
+
+
+def test_resolve_edit_requires_default_when_missing():
+    with pytest.raises(SystemExit):
+        cli._resolve_edit(None, cli.DevlogConfig())
+
+
+def test_resolve_edit_prefers_explicit_value():
+    cfg = cli.DevlogConfig(default_edit="demo.edits.youtube")
+    assert cli._resolve_edit("other.edits.youtube", cfg) == "other.edits.youtube"
+    assert cli._resolve_edit(None, cfg) == "demo.edits.youtube"
+
+
+def test_new_scaffold_creates_importable_project_shape(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    agents = tmp_path / "trolley/.claude/agents"
+    agents.mkdir(parents=True)
+    (agents / "vo-reviewer.md").write_text("vo", encoding="utf-8")
+    (agents / "video-reviewer.md").write_text("video", encoding="utf-8")
+    cli.cmd_new(argparse.Namespace(project="sampledevlog", edit="youtube", force=False))
+    root = tmp_path / "sampledevlog"
+    assert (root / "shared/palette.py").exists()
+    assert (root / "edits/youtube/beats.py").exists()
+    assert (root / "edits/youtube/design.py").exists()
+    assert (root / "edits/youtube/__init__.py").exists()
+    assert (root / ".claude/agents/vo-reviewer.md").read_text(encoding="utf-8") == "vo"

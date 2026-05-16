@@ -6,7 +6,9 @@
 Uses unittest.mock to avoid real ffprobe calls.
 """
 from unittest.mock import patch
+import subprocess
 from devlog.types import Scene
+from devlog.render import compose_ffmpeg
 from devlog.render.compose_ffmpeg import _scene_input_args
 
 
@@ -91,3 +93,17 @@ def test_video_loop_flag_uses_stream_loop():
     idx = args.index("-stream_loop")
     assert args[idx + 1] == "-1"
     assert pad == 0.0
+
+
+def test_probe_duration_is_cached(monkeypatch):
+    calls = []
+
+    def fake_run(cmd, capture_output, text):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="12.5\n", stderr="")
+
+    compose_ffmpeg._duration_cache.clear()
+    monkeypatch.setattr(compose_ffmpeg.subprocess, "run", fake_run)
+    assert compose_ffmpeg._probe_duration("same.mp4") == 12.5
+    assert compose_ffmpeg._probe_duration("same.mp4") == 12.5
+    assert len(calls) == 1

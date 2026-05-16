@@ -78,14 +78,35 @@ that didn't converge, something deeper is wrong — show the state to the user.
 
 ```powershell
 # Fast iteration (use during improve loop) — cache makes unchanged beats ~instant
-dl render <edit> --width 540p --draft -j 6
+dl check <edit>
+dl render <edit> --width 540p --quality draft -j 6
+
+# If devlog.toml has default_edit/render defaults, the short form is preferred:
+dl check
+dl render
+dl compose <bid>
+dl watch --beat <bid>
+
+# Deeper preflight when scene offsets/assets changed
+dl check <edit> --deep
+
+# Quick project status
+dl doctor
+dl beats <edit> --missing-only
+dl assets <edit> --width 4k
+dl cache-info
+dl script <edit>
+dl shotlist <edit>
+dl smoke --skip-tests
 
 # Mid-quality preview
-dl render <edit> --width 1080p --draft -j 4
+dl render <edit> --width 1080p --quality preview -j 4
 
 # Final delivery
-dl render <edit>                       # default 1080p, medium preset
-dl render <edit> --width 4k --gpu      # 3840x2160 final, NVENC GPU encode (5-10x)
+dl render <edit> --quality upload             # explicit upload preset
+dl render --final                             # default final preset from devlog.toml
+dl render <edit> --width 4k --quality upload --gpu
+dl render <edit> --width 4k --quality master  # slower archival/high-quality render
 
 # Single beat (after applying a fix)
 dl compose <edit> <bid> --width 540p --draft
@@ -97,7 +118,7 @@ dl watch <edit>                        # default 540p draft, --j 4
 dl cache-clear <edit>
 
 # Audio pipeline (after a new recording)
-dl audio <edit> <bid> <recording_filename>
+dl audio <edit> <bid> <recording_filename> --language ru --model medium
 
 # Clip + reframe (for reels)
 dl cut data/finalize/iter86.mp4 2:55-3:18 --reframe crop_center \

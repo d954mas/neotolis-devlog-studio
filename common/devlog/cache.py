@@ -6,7 +6,7 @@ A rendered beat is a pure function of:
   - the mtime of every asset path referenced (audio, words, images, video)
   - draft / gpu flags
   - **the source code of the render engine itself** — if plate.py / overlay.py
-    / image.py / compose.py / effects.py / text.py / types.py change, the
+    / image.py / compose.py / compose_ffmpeg.py / effects.py / text.py / types.py change, the
     cache key changes too, so engine improvements automatically invalidate
     stale renders. No manual `cache-clear` after pulling engine updates.
 
@@ -28,13 +28,23 @@ import hashlib
 import json
 import os
 import shutil
+import time
 from dataclasses import asdict
+from dataclasses import dataclass
 from pathlib import Path
 
 from devlog.types import Beat, Design
 
 
 CACHE_DIR = Path("data/finalize/.cache")
+
+
+@dataclass(frozen=True)
+class CacheInfo:
+    entries: int
+    total_bytes: int
+    oldest_mtime: float | None
+    newest_mtime: float | None
 
 # Engine source files that affect render output. If any of these change,
 # all cached entries are considered stale. Files not in this list (cli.py,
@@ -45,6 +55,7 @@ _ENGINE_FILES = [
     "render/overlay.py",
     "render/image.py",
     "render/compose.py",
+    "render/compose_ffmpeg.py",
     "render/effects.py",
     "render/text.py",
 ]
@@ -84,7 +95,13 @@ def _walk_asset_paths(beat: Beat) -> list[str]:
     return paths
 
 
-def beat_hash(beat: Beat, design: Design, draft: bool = False, gpu: bool = False) -> str:
+def beat_hash(
+    beat: Beat,
+    design: Design,
+    draft: bool = False,
+    gpu: bool = False,
+    quality: str | None = None,
+) -> str:
     """Stable content hash that changes iff render output would change."""
     h = hashlib.sha1()
     # Engine source — invalidates everything when the renderer changes
@@ -94,7 +111,8 @@ def beat_hash(beat: Beat, design: Design, draft: bool = False, gpu: bool = False
     # Design spec
     h.update(json.dumps(asdict(design), default=str, sort_keys=True).encode("utf-8"))
     # Render flags that affect output
-    h.update(f"draft={draft};gpu={gpu}".encode("utf-8"))
+    quality_key = quality or ("draft" if draft else "standard")
+    h.update(f"draft={draft};gpu={gpu};quality={quality_key}".encode("utf-8"))
     # Asset mtimes — only existing paths; missing assets produce different hash too
     for p in _walk_asset_paths(beat):
         h.update(p.encode("utf-8"))
@@ -110,13 +128,14 @@ def cache_path(key: str) -> Path:
 
 
 def get_cached(beat: Beat, design: Design, out_path: str,
-               draft: bool = False, gpu: bool = False) -> bool:
+               draft: bool = False, gpu: bool = False,
+               quality: str | None = None) -> bool:
     """If a cached render exists, copy it to out_path and return True.
 
     Returns False on cache miss — caller should render normally and call
     `put_cached` to populate the cache.
     """
-    key = beat_hash(beat, design, draft=draft, gpu=gpu)
+    key = beat_hash(beat, design, draft=draft, gpu=gpu, quality=quality)
     cp = cache_path(key)
     if cp.exists():
         Path(out_path).parent.mkdir(parents=True, exist_ok=True)
@@ -127,9 +146,10 @@ def get_cached(beat: Beat, design: Design, out_path: str,
 
 
 def put_cached(beat: Beat, design: Design, out_path: str,
-               draft: bool = False, gpu: bool = False) -> None:
+               draft: bool = False, gpu: bool = False,
+               quality: str | None = None) -> None:
     """Save a successfully rendered file into the cache under its content hash."""
-    key = beat_hash(beat, design, draft=draft, gpu=gpu)
+    key = beat_hash(beat, design, draft=draft, gpu=gpu, quality=quality)
     cp = cache_path(key)
     cp.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(out_path, cp)
@@ -144,3 +164,31 @@ def clear_cache() -> int:
     for f in files:
         f.unlink()
     return len(files)
+
+
+def cache_info() -> CacheInfo:
+    if not CACHE_DIR.exists():
+        return CacheInfo(entries=0, total_bytes=0, oldest_mtime=None, newest_mtime=None)
+    files = list(CACHE_DIR.glob("*.mp4"))
+    mtimes = [f.stat().st_mtime for f in files]
+    total = sum(f.stat().st_size for f in files)
+    return CacheInfo(
+        entries=len(files),
+        total_bytes=total,
+        oldest_mtime=min(mtimes) if mtimes else None,
+        newest_mtime=max(mtimes) if mtimes else None,
+    )
+
+
+def prune_cache(older_than_days: float) -> int:
+    if older_than_days < 0:
+        raise ValueError("older_than_days must be >= 0")
+    if not CACHE_DIR.exists():
+        return 0
+    cutoff = time.time() - older_than_days * 86400
+    removed = 0
+    for path in CACHE_DIR.glob("*.mp4"):
+        if path.stat().st_mtime < cutoff:
+            path.unlink()
+            removed += 1
+    return removed

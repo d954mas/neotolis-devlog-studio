@@ -28,7 +28,19 @@ devlogs/
 
 ```powershell
 # Render a project (uses cache; second run is ~instant)
-.\dl.bat render trolley.edits.youtube --width 540p --draft -j 6
+.\dl.bat render
+
+# Validate before rendering expensive outputs
+.\dl.bat check
+.\dl.bat check --deep
+
+# Inspect environment and beat status
+.\dl.bat doctor
+.\dl.bat beats --missing-only
+.\dl.bat assets --width 4k
+.\dl.bat cache-info
+.\dl.bat script --out trolley\data\review\script.md
+.\dl.bat smoke --skip-tests
 
 # Web studio (script + structure + record + reviewer feedback)
 .\dl.bat serve trolley.edits.youtube
@@ -36,6 +48,7 @@ devlogs/
 
 # Watch mode — auto-rerender on beats.py change
 .\dl.bat watch trolley.edits.youtube
+.\dl.bat watch --beat b4
 
 # Run tests
 PYTHONPATH=common python -m pytest common/tests/ -v
@@ -62,8 +75,8 @@ See `.gitignore` for the full list.
 ## Adding a new project
 
 ```powershell
-# 1. Copy trolley as a template
-xcopy /E /I trolley\ newproject\
+# 1. Create a clean scaffold
+.\dl.bat new newproject
 
 # 2. Customize
 #    - newproject\shared\palette.py    (brand if different)
@@ -71,5 +84,6 @@ xcopy /E /I trolley\ newproject\
 #    - newproject\.claude\agents\           (project-specific reviewer rules)
 
 # 3. Render
-.\dl.bat render newproject.edits.youtube
+.\dl.bat check newproject.edits.youtube
+.\dl.bat render newproject.edits.youtube --width 540p --quality draft -j 6
 ```

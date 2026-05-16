@@ -40,6 +40,10 @@
   header .api { font-size: 11px; color: var(--ink-dim); }
   header .api.ok b { color: var(--green); }
   header .api.bad b { color: var(--accent); }
+  header .statusline { font-size: 11px; color: var(--ink-dim); }
+  header .statusline.ok b { color: var(--green); }
+  header .statusline.warn b { color: var(--yellow); }
+  header .statusline.bad b { color: var(--accent); }
 
   /* MAIN GRID */
   main { display: grid; grid-template-columns: 220px 1fr; overflow: hidden; }
@@ -171,6 +175,7 @@
   <h1><span class="accent">·</span> Devlog Studio <span id="edit-name" class="stat">…</span></h1>
   <span class="stat"><b id="beat-count">0</b> beats</span>
   <span class="stat" id="design-info"></span>
+  <span class="statusline" id="project-status">status: <b>…</b></span>
   <div class="tabs">
     <div class="tab active" data-tab="script">Script</div>
     <div class="tab" data-tab="structure">Structure</div>
@@ -258,6 +263,7 @@
 let PROJECT = null;
 let RECORDINGS = [];
 let FEEDBACK = {};
+let STATUS = null;
 let RENDERED = new Set();        // beat ids with rendered MP4 (best-effort detect)
 let ACTIVE = null;
 let ACTIVE_TAB = 'script';
@@ -309,6 +315,20 @@ async function loadFeedback() {
     FEEDBACK = await r.json();
     if (ACTIVE) renderReview();
   } catch (e) { console.error('feedback:', e); }
+}
+
+async function loadStatus() {
+  try {
+    const r = await fetch('/api/status');
+    STATUS = await r.json();
+    RENDERED = new Set((STATUS.beats || []).filter(b => b.rendered).map(b => b.beat_id));
+    const el = document.getElementById('project-status');
+    const missing = (STATUS.beats || []).filter(b => !b.rendered).length;
+    const cls = STATUS.errors ? 'bad' : (STATUS.warnings || missing ? 'warn' : 'ok');
+    el.className = 'statusline ' + cls;
+    el.innerHTML = `status: <b>${STATUS.errors} errors · ${STATUS.warnings} warnings · ${missing} missing renders</b>`;
+    renderBeatList();
+  } catch (e) { console.error('status:', e); }
 }
 
 // ───────────────────────────────────────────────────────────────
@@ -683,10 +703,12 @@ function escapeHtml(s) {
 loadProject();
 loadRecordings();
 loadFeedback();
+loadStatus();
 setupMic();
 
 // Refresh feedback periodically — agents write asynchronously
 setInterval(loadFeedback, 5000);
+setInterval(loadStatus, 10000);
 </script>
 
 </body>

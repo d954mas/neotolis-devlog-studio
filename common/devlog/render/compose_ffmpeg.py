@@ -130,17 +130,24 @@ class _Graph:
         return ";".join(self.parts)
 
 
+_duration_cache: dict[str, float] = {}
+
+
 def _probe_duration(src: str) -> float:
     """Get duration in seconds of a video/image (image returns 0)."""
+    if src in _duration_cache:
+        return _duration_cache[src]
     r = subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries", "format=duration",
          "-of", "csv=p=0", src],
         capture_output=True, text=True,
     )
     try:
-        return float(r.stdout.strip())
+        duration = float(r.stdout.strip())
     except ValueError:
-        return 0.0
+        duration = 0.0
+    _duration_cache[src] = duration
+    return duration
 
 
 def _scene_input_args(scene: Scene, eff_dur: float) -> tuple[list[str], float]:
@@ -328,15 +335,54 @@ def _chunk_overlay_filter(bg_label: str, chunk_input_idx: int,
 
 # ─── Main entry ────────────────────────────────────────────────────
 
+def _codec_args(gpu: bool, draft: bool, quality: str | None) -> tuple[list[str], str]:
+    """Return (video codec args, audio bitrate) for a render quality preset."""
+    q = quality or ("draft" if draft else "standard")
+    if q == "draft":
+        return ([
+            "-c:v", "h264_nvenc" if gpu else "libx264",
+            "-preset", "p1" if gpu else "ultrafast",
+            *([] if not gpu else ["-rc", "vbr"]),
+            *("-cq 28".split() if gpu else "-crf 28".split()),
+            "-pix_fmt", "yuv420p",
+        ], "160k")
+    if q == "preview":
+        return ([
+            "-c:v", "h264_nvenc" if gpu else "libx264",
+            "-preset", "p3" if gpu else "veryfast",
+            *([] if not gpu else ["-rc", "vbr"]),
+            *("-cq 24".split() if gpu else "-crf 22".split()),
+            "-pix_fmt", "yuv420p",
+        ], "192k")
+    if q == "master":
+        return ([
+            "-c:v", "h264_nvenc" if gpu else "libx264",
+            "-preset", "p5" if gpu else "slow",
+            *([] if not gpu else ["-rc", "vbr"]),
+            *("-cq 16".split() if gpu else "-crf 16".split()),
+            "-pix_fmt", "yuv420p",
+        ], "320k")
+    # standard/upload: preserve the old non-draft baseline unless upload is
+    # explicitly requested, in which case audio gets a little more headroom.
+    return ([
+        "-c:v", "h264_nvenc" if gpu else "libx264",
+        "-preset", "p4" if gpu else "medium",
+        *([] if not gpu else ["-rc", "vbr"]),
+        *("-cq 20".split() if gpu else "-crf 18".split()),
+        "-pix_fmt", "yuv420p",
+    ], "256k" if q == "upload" else "192k")
+
+
 def compose_ffmpeg(beat: Beat, design: Design, out_path: str,
                    draft: bool = False, gpu: bool = False,
-                   no_cache: bool = False) -> None:
+                   no_cache: bool = False,
+                   quality: str | None = None) -> None:
     """Render one beat via direct ffmpeg filter graph.
 
     Same signature + semantics as compose() in compose.py — drop-in replacement.
     """
     # Cache short-circuit
-    if not no_cache and get_cached(beat, design, out_path, draft=draft, gpu=gpu):
+    if not no_cache and get_cached(beat, design, out_path, draft=draft, gpu=gpu, quality=quality):
         return
 
     # Load audio duration
@@ -509,21 +555,7 @@ def compose_ffmpeg(beat: Beat, design: Design, out_path: str,
         filter_complex = ";".join(filter_parts)
 
         # ── Codec args ──
-        if gpu:
-            codec_args = [
-                "-c:v", "h264_nvenc",
-                "-preset", "p1" if draft else "p4",
-                "-cq", "28" if draft else "20",
-                "-rc", "vbr",
-                "-pix_fmt", "yuv420p",
-            ]
-        else:
-            codec_args = [
-                "-c:v", "libx264",
-                "-preset", "ultrafast" if draft else "medium",
-                "-crf", "28" if draft else "18",
-                "-pix_fmt", "yuv420p",
-            ]
+        codec_args, audio_bitrate = _codec_args(gpu=gpu, draft=draft, quality=quality)
 
         # ── Final command ──
         Path(out_path).parent.mkdir(parents=True, exist_ok=True)
@@ -542,7 +574,9 @@ def compose_ffmpeg(beat: Beat, design: Design, out_path: str,
             # Force 48kHz audio output — otherwise mismatched sample rates
             # across beats (e.g. outro processed at 96kHz) break demuxer
             # concat downstream by introducing inconsistent packet timing.
-            "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+            "-c:a", "aac", "-b:a", audio_bitrate, "-ar", "48000",
+            "-movflags", "+faststart",
+            "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709",
             "-t", f"{audio_dur:.3f}",
             # NOTE: NO `-shortest`. Each chunk PNG is `-loop 1 -t chunk_dur`
             # which is shorter than the audio. With -shortest, overlay's EOF
@@ -565,7 +599,7 @@ def compose_ffmpeg(beat: Beat, design: Design, out_path: str,
 
         print(f"[ff-compose] done -> {out_path}")
         if not no_cache:
-            put_cached(beat, design, out_path, draft=draft, gpu=gpu)
+            put_cached(beat, design, out_path, draft=draft, gpu=gpu, quality=quality)
     finally:
         # Cleanup tmp PNG dir
         import shutil

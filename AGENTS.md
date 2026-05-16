@@ -35,9 +35,23 @@ devlogs/                   ← workspace root, git repo, contains common/ + proj
 
 2. **Cache is correct and on by default.** Hash includes engine source, design, asset mtimes, draft/gpu flags. Engine code changes auto-invalidate. Don't pass `--no-cache` unless debugging cache itself.
 
-3. **Resolution is a runtime flag, not a code constant.** `--width 540p` for iteration, `--width 4k` for final. Engine is resolution-independent via `design.px()` — same `beats.py` renders correctly at any resolution.
+3. **Resolution and quality are runtime flags, not code constants.** `--width 540p --quality draft` for iteration, `--width 4k --quality upload` for final. Engine is resolution-independent via `design.px()` — same `beats.py` renders correctly at any resolution.
 
 4. **Parallel render** (`-j 4..8`) is safe and useful when rendering many beats. Each worker is its own Python process. Per-worker cache writes are atomic.
+
+5. **Run `dl check` before expensive renders.** Use plain `dl check` during normal iteration and `dl check --deep` after changing video assets or scene offsets. These use `default_edit` from `devlog.toml`.
+
+6. **Use `dl doctor` and `dl beats` for triage.** `dl doctor` verifies local dependencies; `dl beats <edit> --missing-only` shows durations and missing rendered beat files.
+
+7. **Prefer targeted watch for one-beat iteration.** `dl watch --beat <id>` runs `check` and re-renders only that beat when `beats.py`, `design.py`, or renderer files change.
+
+8. **Use `dl smoke` after engine changes.** `dl smoke` runs tests plus `check` and `beats`; `dl smoke --skip-tests` is the faster sanity pass.
+
+9. **Use `dl assets --width 4k` before final render.** Missing assets are blockers; low-res warnings are quality notes, not automatic blockers.
+
+10. **Inspect cache before clearing it.** Prefer `dl cache-info`; use `dl cache-prune --older-than-days N` for old entries. Full `cache-clear` is still a rare debugging action.
+
+11. **Use `dl script` and `dl shotlist` for planning/review.** They export the VO script and chunk/scene plan from `beats.py`, keeping `beats.py` as the source of truth.
 
 5. **Per-chunk fade-in/out is currently disabled in ffmpeg engine** — known interaction with overlay alpha that broke text bands. Plates and overlay bands pop in/out abruptly. Don't try to "fix" the missing fade with hacks unless you have a verified ffmpeg alpha-fade approach. Crossfade between scenes (xfade) works fine.
 

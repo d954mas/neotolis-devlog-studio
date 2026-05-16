@@ -1,0 +1,21 @@
+# Workspace defaults for fast local iteration.
+
+default_edit = "trolley.edits.youtube"
+
+[defaults]
+width = "540p"
+quality = "draft"
+parallel = 6
+language = "ru"
+model = "medium"
+
+[final]
+width = "4k"
+quality = "upload"
+parallel = 4
+gpu = false
+
+[watch]
+width = "540p"
+quality = "draft"
+parallel = 4

@@ -9,12 +9,13 @@ Endpoints:
     DELETE /api/file/<name>                 delete a recording
 
 Started via `devlog serve <edit_module>`. Run from project root so static
-paths resolve correctly. The Edit object is loaded lazily on /api/project
-so the server picks up beats.py edits without restart (for static-served
-HTML — recorder/preview pages need a refresh).
+paths resolve correctly. If the edit module path is provided, /api/project
+reloads the edit package on each request so beats.py edits appear without a
+server restart (HTML pages still need a refresh).
 """
 from __future__ import annotations
 import http.server
+import importlib
 import json
 import socketserver
 import sys
@@ -23,6 +24,16 @@ from dataclasses import asdict, is_dataclass
 from pathlib import Path
 
 from devlog.types import Edit
+
+
+def _reload_edit(edit_path: str) -> Edit:
+    """Reload the edit package and common submodules likely to change."""
+    importlib.invalidate_caches()
+    for name in (f"{edit_path}.design", f"{edit_path}.beats", edit_path):
+        if name in sys.modules:
+            importlib.reload(sys.modules[name])
+    mod = importlib.import_module(edit_path)
+    return mod.EDIT
 
 
 def _safe_filename(name: str) -> str | None:
@@ -68,7 +79,20 @@ def _edit_to_dict(edit: Edit) -> dict:
     return out
 
 
-def build_handler_class(edit: Edit, root: Path):
+def _status_to_dict(edit: Edit, root: Path) -> dict:
+    from devlog.check import check_edit
+    from devlog.timeline import summarize_edit
+    issues = check_edit(edit, root)
+    beats = summarize_edit(edit, root)
+    return {
+        "errors": sum(1 for i in issues if i.severity == "error"),
+        "warnings": sum(1 for i in issues if i.severity == "warning"),
+        "issues": [asdict(i) for i in issues],
+        "beats": [asdict(b) for b in beats],
+    }
+
+
+def build_handler_class(edit: Edit, root: Path, edit_path: str | None = None):
     """Closure over (edit, root) — needed because Handler is constructed per request."""
 
     class Handler(http.server.SimpleHTTPRequestHandler):
@@ -128,7 +152,12 @@ def build_handler_class(edit: Edit, root: Path):
                 return
 
             if path == "/api/project":
-                return self._send_json(200, _edit_to_dict(edit))
+                current = _reload_edit(edit_path) if edit_path else edit
+                return self._send_json(200, _edit_to_dict(current))
+
+            if path == "/api/status":
+                current = _reload_edit(edit_path) if edit_path else edit
+                return self._send_json(200, _status_to_dict(current, root))
 
             if path == "/api/feedback":
                 fb_path = root / "data" / "review" / "feedback.json"
@@ -237,10 +266,10 @@ class _ThreadedServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
 
 
-def serve(edit: Edit, port: int = 8080) -> None:
+def serve(edit: Edit, port: int = 8080, edit_path: str | None = None) -> None:
     """Start the local server for the given Edit. Blocks until Ctrl+C."""
     root = Path.cwd()
-    Handler = build_handler_class(edit, root)
+    Handler = build_handler_class(edit, root, edit_path=edit_path)
     print(f"Devlog server — edit: {edit.name}")
     print(f"  Root:       {root}")
     print(f"  Recorder:   http://localhost:{port}/devlog/recorder.html")

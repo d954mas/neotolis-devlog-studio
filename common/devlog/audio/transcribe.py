@@ -9,11 +9,7 @@ needs; future projects can override per-call.
 """
 from __future__ import annotations
 import json
-import ssl
 from pathlib import Path
-
-# Whisper needs network access for first-time model download; relax SSL for some env setups
-ssl._create_default_https_context = ssl._create_unverified_context
 
 
 def transcribe(
@@ -21,6 +17,7 @@ def transcribe(
     output_json: str,
     model_size: str = "medium",
     language: str = "ru",
+    insecure_ssl: bool = False,
 ) -> None:
     """Transcribe audio to per-word timestamps and write JSON.
 
@@ -29,6 +26,10 @@ def transcribe(
           "text": <full transcript>,
           "words": [{ "word": str, "start": float, "end": float, "prob": float }] }
     """
+    if insecure_ssl:
+        import ssl
+        ssl._create_default_https_context = ssl._create_unverified_context
+
     import whisper
 
     print(f"[whisper] loading model '{model_size}'...")

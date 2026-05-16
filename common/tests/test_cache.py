@@ -1,7 +1,7 @@
 """Cache key stability: same beat → same hash, mtime change → new hash."""
 import time
 from devlog.types import Palette, Fonts, Design, Scene, Chunk, Beat
-from devlog.cache import beat_hash, _walk_asset_paths
+from devlog.cache import CACHE_DIR, beat_hash, cache_info, prune_cache, _walk_asset_paths
 
 
 def _make_beat(audio_path: str, words_path: str):
@@ -74,3 +74,22 @@ def test_hash_changes_on_draft_flag(tmp_path):
     b = _make_beat(str(audio), str(words))
     d = _make_design()
     assert beat_hash(b, d, draft=False) != beat_hash(b, d, draft=True)
+
+
+def test_cache_info_and_prune(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    CACHE_DIR.mkdir(parents=True)
+    old = CACHE_DIR / "old.mp4"
+    new = CACHE_DIR / "new.mp4"
+    old.write_bytes(b"1" * 10)
+    new.write_bytes(b"2" * 20)
+    import os, time
+    old_time = time.time() - 10 * 86400
+    os.utime(old, (old_time, old_time))
+
+    info = cache_info()
+    assert info.entries == 2
+    assert info.total_bytes == 30
+    assert prune_cache(older_than_days=5) == 1
+    assert not old.exists()
+    assert new.exists()
