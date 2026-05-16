@@ -81,6 +81,11 @@
   .panel-head .title { font-size: 22px; font-weight: 700; flex: 1; }
   .panel-head .btn { padding: 7px 12px; font-size: 12px; border-radius: 4px; }
   .panel-head .action-status { font-size: 11px; color: var(--ink-dim); min-width: 90px; }
+  .workflow-status { display: flex; gap: 5px; align-items: center; }
+  .workflow-status .pill { font-size: 10px; padding: 2px 6px; border-radius: 3px;
+    border: 1px solid var(--line); color: var(--ink-dim); background: var(--bg-panel); }
+  .workflow-status .pill.done { color: white; background: var(--green); border-color: var(--green); }
+  .workflow-status .pill.missing { color: white; background: var(--accent); border-color: var(--accent); }
   .panel-head .face { font-size: 11px; padding: 2px 10px; border-radius: 10px;
     background: var(--yellow); color: var(--ink); font-weight: 700;
     text-transform: uppercase; letter-spacing: 0.04em; }
@@ -202,6 +207,7 @@
   <section class="pane">
     <div class="panel-head">
       <span class="title" id="beat-title">Select a beat</span>
+      <span class="workflow-status" id="workflow-status"></span>
       <button class="btn secondary" id="render-beat-btn" type="button" disabled>Render 540p</button>
       <span class="action-status" id="action-status"></span>
       <span class="face" id="beat-face"></span>
@@ -317,6 +323,7 @@ async function loadRecordings() {
     const r = await fetch('/api/list');
     RECORDINGS = await r.json();
     renderBeatList();
+    renderWorkflowStatus();
     if (ACTIVE) renderTakes();
   } catch (e) { console.error('list:', e); }
 }
@@ -340,6 +347,7 @@ async function loadStatus() {
     el.className = 'statusline ' + cls;
     el.innerHTML = `status: <b>${STATUS.errors} errors · ${STATUS.warnings} warnings · ${missing} missing renders</b>`;
     renderBeatList();
+    renderWorkflowStatus();
   } catch (e) { console.error('status:', e); }
 }
 
@@ -441,6 +449,7 @@ function selectBeat(bid) {
   document.getElementById('beat-face').textContent = beat.face;
   document.getElementById('render-beat-btn').disabled = false;
   document.getElementById('action-status').textContent = '';
+  renderWorkflowStatus();
 
   // Script tab
   renderScript(beat);
@@ -452,6 +461,25 @@ function selectBeat(bid) {
   renderReview();
 
   renderBeatList();
+}
+
+function renderWorkflowStatus() {
+  const el = document.getElementById('workflow-status');
+  if (!el) return;
+  if (!ACTIVE || !PROJECT) {
+    el.innerHTML = '';
+    return;
+  }
+  const summary = (STATUS?.beats || []).find(b => b.beat_id === ACTIVE);
+  const hasTake = RECORDINGS.some(r => r.name.includes(`_${ACTIVE}_`));
+  const processed = !!summary && summary.words !== null && summary.words !== undefined;
+  const rendered = !!summary && summary.rendered;
+  const pill = (label, ok) => `<span class="pill ${ok ? 'done' : 'missing'}">${label}</span>`;
+  el.innerHTML = [
+    pill('take', hasTake),
+    pill('audio', processed),
+    pill('render', rendered),
+  ].join('');
 }
 
 // ───────────────────────────────────────────────────────────────
