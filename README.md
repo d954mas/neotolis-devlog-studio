@@ -28,7 +28,9 @@ devlogs/
 
 ```powershell
 # Render a project (uses cache; second run is ~instant)
+.\dl.bat iter
 .\dl.bat render
+.\dl.bat render --final
 
 # Validate before rendering expensive outputs
 .\dl.bat check
@@ -40,6 +42,7 @@ devlogs/
 .\dl.bat assets --width 4k
 .\dl.bat cache-info
 .\dl.bat script --out trolley\data\review\script.md
+.\dl.bat import-script script.md --out trolley\edits\youtube\beats.py
 .\dl.bat smoke --skip-tests
 
 # Web studio (script + structure + record + reviewer feedback)
@@ -85,5 +88,6 @@ See `.gitignore` for the full list.
 
 # 3. Render
 .\dl.bat check newproject.edits.youtube
-.\dl.bat render newproject.edits.youtube --width 540p --quality draft -j 6
+.\dl.bat iter newproject.edits.youtube -j 6
+.\dl.bat render newproject.edits.youtube --final
 ```

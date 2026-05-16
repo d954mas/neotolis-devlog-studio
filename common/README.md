@@ -36,7 +36,10 @@ dl.bat new newproject
 # 2) Update the brand palette if desired
 # Edit: newproject\shared\palette.py
 
-# 3) Replace beats for your new video
+# 3) Convert a rough script into starter beats, then edit the result
+dl.bat import-script script.md --out newproject\edits\youtube\beats.py
+
+# Or replace beats manually
 # Edit: newproject\edits\youtube\beats.py
 #   - update audio/words paths under newproject\data\finalize\
 #   - rewrite chunks for your content
@@ -47,7 +50,8 @@ dl.bat audio newproject.edits.youtube intro my_take1.webm
 
 # 5) Validate and render
 dl.bat check newproject.edits.youtube
-dl.bat render newproject.edits.youtube --width 540p --quality draft -j 6
+dl.bat iter newproject.edits.youtube -j 6
+dl.bat render newproject.edits.youtube --final
 
 # Or render one beat at a time
 dl.bat compose newproject.edits.youtube intro
@@ -59,6 +63,7 @@ dl.bat compose newproject.edits.youtube intro
 |---|---|
 | `dl render [edit]` | Render every beat in `edit.order`, then concat to `edit.output` |
 | `dl render <edit> --beat <id>` | Render one beat, skip concat |
+| `dl iter [edit]` | Fast draft render shortcut: 540p, draft quality, cache-aware |
 | `dl compose [edit] <id>` | Same as `render --beat <id>` (alias); `dl compose b4` uses default edit |
 | `dl concat [edit]` | Concat already-rendered beat videos into `edit.output` |
 | `dl check [edit]` | Validate assets, words JSON, chunk ranges, and scenes before rendering |
@@ -70,6 +75,7 @@ dl.bat compose newproject.edits.youtube intro
 | `dl cache-prune --older-than-days N` | Remove old render cache entries |
 | `dl script [edit]` | Export voiceover script as Markdown |
 | `dl shotlist [edit]` | Export chunk/scene shotlist as Markdown |
+| `dl import-script <file> --out <beats.py>` | Convert rough text/Markdown into starter `beats.py` |
 | `dl new <project>` | Create a clean project scaffold |
 | `dl audio <edit> <id> <recording>` | Preprocess + loudnorm + Whisper a take |
 | `dl transcribe <wav> <out.json>` | Standalone Whisper run |
@@ -81,8 +87,10 @@ Useful validation/transcription options:
 ```powershell
 dl check <edit> --deep                  # also ffprobe video durations / offsets
 dl check                                # uses default_edit from devlog.toml
+dl iter                                 # 540p draft render shortcut
+dl iter --beat b4                       # quick single-beat iteration
 dl render                               # uses default width/quality/parallel from devlog.toml
-dl render --final                       # uses [final] settings from devlog.toml
+dl render --final                       # [final] settings + final preflight
 dl compose b4                           # render one beat from the default edit
 dl watch --beat b4                      # check + rerender one beat on source changes
 dl smoke                                # tests + check + beats
@@ -92,6 +100,7 @@ dl cache-info                           # render cache size
 dl cache-prune --older-than-days 14     # clean old cache entries
 dl script --out data/review/script.md   # VO script export
 dl shotlist --out data/review/shotlist.md
+dl import-script script.md --out edits/youtube/beats.py
 dl doctor --with-whisper                # include Whisper import check
 dl beats <edit> --width 540p --quality draft --missing-only
 dl audio <edit> <beat> <take.webm> --language en --model small

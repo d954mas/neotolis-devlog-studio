@@ -79,10 +79,11 @@ that didn't converge, something deeper is wrong — show the state to the user.
 ```powershell
 # Fast iteration (use during improve loop) — cache makes unchanged beats ~instant
 dl check <edit>
-dl render <edit> --width 540p --quality draft -j 6
+dl iter <edit> -j 6
 
 # If devlog.toml has default_edit/render defaults, the short form is preferred:
 dl check
+dl iter
 dl render
 dl compose <bid>
 dl watch --beat <bid>
@@ -97,6 +98,7 @@ dl assets <edit> --width 4k
 dl cache-info
 dl script <edit>
 dl shotlist <edit>
+dl import-script script.md --out edits/youtube/beats.py
 dl smoke --skip-tests
 
 # Mid-quality preview
@@ -104,7 +106,7 @@ dl render <edit> --width 1080p --quality preview -j 4
 
 # Final delivery
 dl render <edit> --quality upload             # explicit upload preset
-dl render --final                             # default final preset from devlog.toml
+dl render --final                             # final preset + preflight from devlog.toml
 dl render <edit> --width 4k --quality upload --gpu
 dl render <edit> --width 4k --quality master  # slower archival/high-quality render
 
