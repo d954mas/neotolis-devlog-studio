@@ -186,6 +186,8 @@ def cmd_render(args):
     edit, root = _load_edit(args.edit)
     _project_chdir(root)
     design = _resize_design(edit.design, args.width)
+    if args.final and not args.skip_final_preflight:
+        _run_final_preflight(edit, root, design.W)
     suffix = _render_suffix(args)
     engine = getattr(args, "engine", "ffmpeg")
     quality = _effective_quality(args)
@@ -232,6 +234,29 @@ def cmd_render(args):
                         raise SystemExit(1)
                 else:
                     print(f"  ✓ {len(verdicts)}/{len(verdicts)} chunks render correctly")
+
+
+def _run_final_preflight(edit, root: Path, target_width: int) -> None:
+    """Block final renders on structural errors or missing assets."""
+    from devlog.assets import asset_report
+    from devlog.check import check_edit
+
+    issues = check_edit(edit, root, deep=True)
+    errors = [i for i in issues if i.severity == "error"]
+    warnings = [i for i in issues if i.severity == "warning"]
+    report = asset_report(edit, root, target_width=target_width)
+    print(f"[final] preflight: {len(errors)} errors, {len(warnings)} warnings, "
+          f"{len(report.missing)} missing assets, {len(report.low_res)} low-res images")
+    if report.low_res:
+        print("[final] low-res images are quality warnings; render may still continue.")
+    if errors:
+        for issue in errors[:10]:
+            print(f"[final] ERROR {issue.code}: {issue.message}")
+    if report.missing:
+        for path in report.missing[:10]:
+            print(f"[final] MISSING {path}")
+    if errors or report.missing:
+        raise SystemExit("Final preflight failed. Fix errors/missing assets or pass --skip-final-preflight.")
 
 
 def _effective_quality(args) -> str | None:
@@ -792,6 +817,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_render.add_argument("--quality", choices=_QUALITY_PRESETS, help=quality_help)
     p_render.add_argument("--final", action="store_true",
                           help="Use final render defaults from devlog.toml")
+    p_render.add_argument("--skip-final-preflight", action="store_true",
+                          help="Skip check --deep and asset preflight for --final")
     p_render.add_argument("--gpu", action="store_true", help=gpu_help)
     p_render.add_argument("--no-cache", action="store_true", help=nocache_help)
     p_render.add_argument("--parallel", "-j", type=int, default=None, help=parallel_help)

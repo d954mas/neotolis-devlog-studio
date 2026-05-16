@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from devlog import cli
+from devlog.types import Beat, Chunk, Design, Edit, Fonts, Palette
 
 
 def test_render_suffix_supports_quality_presets():
@@ -47,3 +48,30 @@ def test_new_scaffold_creates_importable_project_shape(tmp_path: Path, monkeypat
     assert (root / "edits/youtube/design.py").exists()
     assert (root / "edits/youtube/__init__.py").exists()
     assert (root / ".claude/agents/vo-reviewer.md").read_text(encoding="utf-8") == "vo"
+
+
+def test_final_preflight_blocks_missing_assets(tmp_path: Path):
+    pal = Palette(bg=(0, 0, 0), gold=(1, 1, 1), gold_dim=(2, 2, 2), red=(3, 3, 3))
+    fonts = Fonts(display=str(tmp_path / "display.ttf"), text=str(tmp_path / "text.ttf"))
+    (tmp_path / "display.ttf").write_bytes(b"font")
+    (tmp_path / "text.ttf").write_bytes(b"font")
+    (tmp_path / "data/finalize").mkdir(parents=True)
+    (tmp_path / "data/finalize/a_words.json").write_text(
+        '{"words":[{"word":"one","start":0,"end":0.5}]}',
+        encoding="utf-8",
+    )
+    edit = Edit(
+        name="youtube",
+        design=Design(resolution=(1920, 1080), fps=30, palette=pal, fonts=fonts),
+        output="data/finalize/out.mp4",
+        order=["a"],
+        beats={
+            "a": Beat(
+                audio="data/finalize/missing.wav",
+                words="data/finalize/a_words.json",
+                chunks=[Chunk(words=(0, 0), kind="image", src="data/missing.png")],
+            )
+        },
+    )
+    with pytest.raises(SystemExit):
+        cli._run_final_preflight(edit, tmp_path, 3840)
