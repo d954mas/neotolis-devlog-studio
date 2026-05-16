@@ -709,7 +709,7 @@ def cmd_import_script(args):
 
     text = Path(args.script).read_text(encoding="utf-8")
     beats = parse_script_beats(text, prefix=args.prefix)
-    content = render_beats_py(beats, output=args.output)
+    content = render_beats_py(beats, output=args.output, max_chunk_words=args.max_chunk_words)
     _write_or_print(content, args.out)
     print(f"[devlog] imported {len(beats)} beats")
 
@@ -1039,6 +1039,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_import_script.add_argument("--prefix", default="b", help="Fallback beat id prefix")
     p_import_script.add_argument("--output", default="data/finalize/iter01.mp4",
                                  help="OUTPUT value for generated beats.py")
+    p_import_script.add_argument("--max-chunk-words", type=int, default=18,
+                                 help="Approximate maximum words per generated starter chunk")
     p_import_script.set_defaults(func=cmd_import_script)
 
     p_new = sub.add_parser("new", help="Create a new devlog project scaffold")

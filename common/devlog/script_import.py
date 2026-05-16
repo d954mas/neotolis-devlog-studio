@@ -12,6 +12,13 @@ class ScriptBeat:
     vo: str
 
 
+@dataclass(frozen=True)
+class ScriptChunk:
+    text: str
+    start_word: int
+    end_word: int
+
+
 def _slug(value: str, fallback: str) -> str:
     slug = re.sub(r"[^A-Za-z0-9]+", "_", value.strip().lower()).strip("_")
     if not slug or not re.match(r"[A-Za-z_]", slug):
@@ -76,7 +83,52 @@ def _word_count(value: str) -> int:
     return len(re.findall(r"\S+", value))
 
 
-def render_beats_py(beats: list[ScriptBeat], *, output: str = "data/finalize/iter01.mp4") -> str:
+def _split_sentences(value: str) -> list[str]:
+    compact = re.sub(r"\s+", " ", value).strip()
+    if not compact:
+        return []
+    parts = re.split(r"(?<=[.!?])\s+", compact)
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _split_words(value: str) -> list[str]:
+    return re.findall(r"\S+", value)
+
+
+def chunk_script_text(value: str, *, max_words: int = 18) -> list[ScriptChunk]:
+    """Build starter chunk ranges from sentences and long phrase splits."""
+    if max_words < 4:
+        raise ValueError("max_words must be >= 4")
+
+    chunks: list[ScriptChunk] = []
+    word_cursor = 0
+    sentences = _split_sentences(value)
+    if not sentences:
+        return []
+
+    for sentence in sentences:
+        words = _split_words(sentence)
+        if not words:
+            continue
+        for start in range(0, len(words), max_words):
+            group = words[start:start + max_words]
+            chunk_start = word_cursor + start
+            chunk_end = chunk_start + len(group) - 1
+            chunks.append(ScriptChunk(
+                text=" ".join(group),
+                start_word=chunk_start,
+                end_word=chunk_end,
+            ))
+        word_cursor += len(words)
+    return chunks
+
+
+def render_beats_py(
+    beats: list[ScriptBeat],
+    *,
+    output: str = "data/finalize/iter01.mp4",
+    max_chunk_words: int = 18,
+) -> str:
     if not beats:
         raise ValueError("script produced no beats")
 
@@ -88,17 +140,28 @@ def render_beats_py(beats: list[ScriptBeat], *, output: str = "data/finalize/ite
         "BEATS: dict[str, Beat] = {",
     ]
     for beat in beats:
-        last_word = max(0, _word_count(beat.vo) - 1)
-        title_text = beat.title.upper()
+        chunks = chunk_script_text(beat.vo, max_words=max_chunk_words)
+        if not chunks:
+            chunks = [ScriptChunk(text=beat.title, start_word=0, end_word=max(0, _word_count(beat.vo) - 1))]
         lines.extend([
             f"    {_py_string(beat.beat_id)}: Beat(",
             f"        title={_py_string(beat.title)},",
             f"        vo={_py_string(beat.vo)},",
-            "        stage=\"Record this take in the studio, then run dl audio.\",",
+            "        stage=\"Record this take in the studio, run dl audio, then review chunk word ranges.\",",
             f"        audio=\"data/finalize/{beat.beat_id}_audio_final.wav\",",
             f"        words=\"data/finalize/{beat.beat_id}_words.json\",",
             "        chunks=[",
-            f"            Chunk(words=(0, {last_word}), kind=\"plate\", text={_py_string(title_text)}, size=170, red_underline=True),",
+        ])
+        for idx, chunk in enumerate(chunks):
+            if idx == 0:
+                kind_args = "size=170, red_underline=True"
+            else:
+                kind_args = "size=120"
+            lines.append(
+                f"            Chunk(words=({chunk.start_word}, {chunk.end_word}), "
+                f"kind=\"plate\", text={_py_string(chunk.text.upper())}, {kind_args}),"
+            )
+        lines.extend([
             "        ],",
             "        face=\"none\",",
             "    ),",
