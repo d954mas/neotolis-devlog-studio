@@ -206,6 +206,10 @@ def build_handler_class(edit: Edit, root: Path, edit_path: str | None = None):
         def do_POST(self):
             path = urllib.parse.unquote(self.path.split("?", 1)[0])
 
+            if path == "/api/actions/check":
+                current = _reload_edit(edit_path) if edit_path else edit
+                return self._send_json(200, _status_to_dict(current, root))
+
             if path.startswith("/api/feedback/"):
                 bid = _safe_filename(path[len("/api/feedback/"):])
                 if not bid:

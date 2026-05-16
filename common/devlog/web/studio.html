@@ -44,6 +44,10 @@
   header .statusline.ok b { color: var(--green); }
   header .statusline.warn b { color: var(--yellow); }
   header .statusline.bad b { color: var(--accent); }
+  header .tool-btn { border: 1px solid var(--line); background: var(--bg-panel);
+    color: var(--ink); border-radius: 4px; padding: 5px 10px; font-size: 12px;
+    cursor: pointer; }
+  header .tool-btn:disabled { opacity: 0.5; cursor: wait; }
 
   /* MAIN GRID */
   main { display: grid; grid-template-columns: 220px 1fr; overflow: hidden; }
@@ -176,6 +180,7 @@
   <span class="stat"><b id="beat-count">0</b> beats</span>
   <span class="stat" id="design-info"></span>
   <span class="statusline" id="project-status">status: <b>…</b></span>
+  <button class="tool-btn" id="run-check-btn" type="button">Check</button>
   <div class="tabs">
     <div class="tab active" data-tab="script">Script</div>
     <div class="tab" data-tab="structure">Structure</div>
@@ -329,6 +334,22 @@ async function loadStatus() {
     el.innerHTML = `status: <b>${STATUS.errors} errors · ${STATUS.warnings} warnings · ${missing} missing renders</b>`;
     renderBeatList();
   } catch (e) { console.error('status:', e); }
+}
+
+async function runCheck() {
+  const btn = document.getElementById('run-check-btn');
+  btn.disabled = true;
+  btn.textContent = 'Checking';
+  try {
+    const r = await fetch('/api/actions/check', { method: 'POST' });
+    STATUS = await r.json();
+    await loadStatus();
+  } catch (e) {
+    console.error('check:', e);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Check';
+  }
 }
 
 // ───────────────────────────────────────────────────────────────
@@ -693,6 +714,7 @@ document.querySelectorAll('header .tab').forEach(t => {
 // ───────────────────────────────────────────────────────────────
 document.getElementById('record-btn').addEventListener('click', toggleRecord);
 document.getElementById('play-last-btn').addEventListener('click', playLast);
+document.getElementById('run-check-btn').addEventListener('click', runCheck);
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, ch => ({
