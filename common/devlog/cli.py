@@ -647,6 +647,34 @@ def cmd_beats(args):
                 print(f"  {path}")
 
 
+def _edit_source_paths(edit_path: str) -> list[Path]:
+    paths: list[Path] = []
+    for module_name in (edit_path, f"{edit_path}.beats", f"{edit_path}.design"):
+        try:
+            mod = importlib.import_module(module_name)
+        except Exception:
+            continue
+        file = getattr(mod, "__file__", None)
+        if file:
+            paths.append(Path(file))
+    return paths
+
+
+def cmd_stale(args):
+    """Show beat renders that are missing or older than inputs."""
+    config = load_config()
+    args.edit = _resolve_edit(args.edit, config)
+    _apply_render_defaults(args, config)
+    edit, root = _load_edit(args.edit)
+    _project_chdir(root)
+    from devlog.stale import format_stale, stale_beats
+    suffix = _render_suffix(args)
+    stale = stale_beats(edit, root, suffix=suffix, source_paths=_edit_source_paths(args.edit))
+    print(format_stale(stale))
+    if stale and args.strict:
+        raise SystemExit(1)
+
+
 def cmd_smoke(args):
     """Run a fast workspace self-test."""
     from devlog.smoke import format_smoke, run_smoke
@@ -1009,6 +1037,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_beats.add_argument("--draft", action="store_true", help="Match draft suffix")
     p_beats.add_argument("--missing-only", action="store_true", help="Also list missing rendered files")
     p_beats.set_defaults(func=cmd_beats)
+
+    p_stale = sub.add_parser("stale", help="Show missing or stale beat renders")
+    p_stale.add_argument("edit", nargs="?")
+    p_stale.add_argument("--width", help="Match render suffix width (e.g. 540p)")
+    p_stale.add_argument("--quality", choices=_QUALITY_PRESETS, help="Match render suffix quality")
+    p_stale.add_argument("--draft", action="store_true", help="Match draft suffix")
+    p_stale.add_argument("--strict", action="store_true", help="Exit 1 if any beat is stale")
+    p_stale.set_defaults(func=cmd_stale)
 
     p_smoke = sub.add_parser("smoke", help="Run tests + check + beats for quick self-test")
     p_smoke.add_argument("--skip-tests", action="store_true", help="Only run check and beats")
