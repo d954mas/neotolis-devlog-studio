@@ -94,6 +94,7 @@ dl check <edit> --deep
 # Quick project status
 dl doctor
 dl beats <edit> --missing-only
+dl stale <edit> --width 540p --quality draft
 dl assets <edit> --width 4k
 dl cache-info
 dl script <edit>

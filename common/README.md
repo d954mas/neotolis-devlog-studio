@@ -70,6 +70,7 @@ dl.bat compose newproject.edits.youtube intro
 | `dl check [edit]` | Validate assets, words JSON, chunk ranges, and scenes before rendering |
 | `dl doctor` | Check local FFmpeg/Python dependencies |
 | `dl beats [edit]` | Show beat durations, chunk counts, and render status |
+| `dl stale [edit]` | Show missing renders or renders older than inputs |
 | `dl assets [edit]` | Show used, missing, unused, and low-resolution assets |
 | `dl smoke` | Run unit tests + `check` + `beats` as a fast self-test |
 | `dl cache-info` | Show render cache entry count and size |
@@ -97,6 +98,7 @@ dl compose b4                           # render one beat from the default edit
 dl watch --beat b4                      # check + rerender one beat on source changes
 dl smoke                                # tests + check + beats
 dl smoke --skip-tests                   # faster check + beats only
+dl stale --width 540p --quality draft   # what needs rerendering
 dl assets --width 4k                    # missing/unused/low-res asset report
 dl cache-info                           # render cache size
 dl cache-prune --older-than-days 14     # clean old cache entries
@@ -223,11 +225,11 @@ shared scene by setting per-chunk offsets).
 
 ## Web tools
 
-The recorder lives at `/devlog/recorder.html` and loads beats from
-`/api/project`. The page is intentionally minimal — beat sidebar, VO
-teleprompter, record button, takes list. Projects with more elaborate
-needs (karaoke sync, audio meter, multi-take A/B) can fork the file into
-`<project>/web/recorder.html` and customize.
+The Studio lives at `/devlog/studio.html` and loads beats from
+`/api/project`. It combines script view, structure view, recording,
+take processing, quick 540p beat render, and reviewer feedback display.
+The simpler recorder remains at `/devlog/recorder.html` for focused VO
+capture.
 
 ## Migrating from scripts/ (one-time)
 

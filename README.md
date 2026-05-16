@@ -39,6 +39,7 @@ devlogs/
 # Inspect environment and beat status
 .\dl.bat doctor
 .\dl.bat beats --missing-only
+.\dl.bat stale --width 540p --quality draft
 .\dl.bat assets --width 4k
 .\dl.bat cache-info
 .\dl.bat script --out trolley\data\review\script.md
