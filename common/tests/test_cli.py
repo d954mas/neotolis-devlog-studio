@@ -35,6 +35,18 @@ def test_resolve_edit_prefers_explicit_value():
     assert cli._resolve_edit(None, cfg) == "demo.edits.youtube"
 
 
+def test_iter_shortcut_defaults_to_fast_draft_render():
+    args = cli.build_parser().parse_args(["iter", "--beat", "intro"])
+
+    cli._apply_iter_shortcut_defaults(args)
+
+    assert args.width == "540p"
+    assert args.quality == "draft"
+    assert args.beat == "intro"
+    assert args.no_review is True
+    assert args.final is False
+
+
 def test_new_scaffold_creates_importable_project_shape(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     agents = tmp_path / "trolley/.claude/agents"

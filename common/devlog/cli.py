@@ -113,6 +113,20 @@ def _apply_audio_defaults(args, config: DevlogConfig) -> None:
         args.model = config.defaults.get("model", "medium")
 
 
+def _apply_iter_shortcut_defaults(args) -> None:
+    """Force fast render defaults for the `iter` shortcut."""
+    if getattr(args, "width", None) is None:
+        args.width = "540p"
+    if getattr(args, "quality", None) is None:
+        args.quality = "draft"
+    args.draft = False
+    args.final = False
+    args.skip_final_preflight = True
+    args.no_review = True
+    args.strict_review = False
+    args.review_threshold = 35.0
+
+
 def _resize_design(design, width_spec: str | None):
     """Override design.resolution to match `width_spec`, preserving aspect.
 
@@ -234,6 +248,12 @@ def cmd_render(args):
                         raise SystemExit(1)
                 else:
                     print(f"  ✓ {len(verdicts)}/{len(verdicts)} chunks render correctly")
+
+
+def cmd_iter(args):
+    """Fast draft render shortcut for day-to-day beat iteration."""
+    _apply_iter_shortcut_defaults(args)
+    cmd_render(args)
 
 
 def _run_final_preflight(edit, root: Path, target_width: int) -> None:
@@ -842,6 +862,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_render.add_argument("--review-threshold", type=float, default=35.0,
                           help="Max diff for chunk to count as rendered correctly (default 35)")
     p_render.set_defaults(func=cmd_render)
+
+    p_iter = sub.add_parser("iter", help="Fast draft render shortcut (540p, draft, cache-aware)")
+    p_iter.add_argument("edit", nargs="?")
+    p_iter.add_argument("--beat", help="Render only this single beat (skips concat)")
+    p_iter.add_argument("--no-concat", action="store_true", help="Skip final concat step")
+    p_iter.add_argument("--width", help=width_help)
+    p_iter.add_argument("--quality", choices=_QUALITY_PRESETS, help=quality_help)
+    p_iter.add_argument("--gpu", action="store_true", help=gpu_help)
+    p_iter.add_argument("--no-cache", action="store_true", help=nocache_help)
+    p_iter.add_argument("--parallel", "-j", type=int, default=None, help=parallel_help)
+    p_iter.add_argument("--engine", choices=["ffmpeg", "moviepy"], default="ffmpeg",
+                        help="Render engine: ffmpeg (default, fast) or moviepy (legacy)")
+    p_iter.set_defaults(func=cmd_iter)
 
     p_concat = sub.add_parser("concat", help="Concat existing rendered beats into edit.output")
     p_concat.add_argument("edit", nargs="?")
