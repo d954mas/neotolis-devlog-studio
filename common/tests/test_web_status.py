@@ -1,11 +1,12 @@
 import json
+import os
 import threading
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 from devlog.types import Beat, Chunk, Design, Edit, Fonts, Palette
-from devlog.web.serve import _ThreadedServer, _status_to_dict, build_handler_class
+from devlog.web.serve import _ThreadedServer, _latest_recording_for_beat, _status_to_dict, build_handler_class
 
 
 def _edit_with_missing_assets(tmp_path: Path) -> Edit:
@@ -105,3 +106,45 @@ def test_audio_action_requires_edit_path(tmp_path: Path):
 
     assert code == 400
     assert "edit module path" in payload["error"]
+
+
+def test_process_render_action_requires_edit_path(tmp_path: Path):
+    edit = _edit_with_missing_assets(tmp_path)
+    rec_dir = tmp_path / "data" / "recordings"
+    rec_dir.mkdir(parents=True)
+    (rec_dir / "take_a_001.webm").write_bytes(b"fake")
+    handler = build_handler_class(edit, tmp_path)
+
+    with _ThreadedServer(("127.0.0.1", 0), handler) as server:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            url = f"http://127.0.0.1:{server.server_port}/api/actions/process-render/a"
+            req = urllib.request.Request(url, method="POST")
+            try:
+                urllib.request.urlopen(req, timeout=5)
+            except urllib.error.HTTPError as exc:
+                payload = json.loads(exc.read().decode("utf-8"))
+                code = exc.code
+        finally:
+            server.shutdown()
+            thread.join(timeout=5)
+
+    assert code == 400
+    assert "edit module path" in payload["error"]
+
+
+def test_latest_recording_for_beat_picks_newest_matching_take(tmp_path: Path):
+    rec_dir = tmp_path / "data" / "recordings"
+    rec_dir.mkdir(parents=True)
+    old = rec_dir / "take_a_001.webm"
+    new = rec_dir / "take_a_002.webm"
+    other = rec_dir / "take_b_001.webm"
+    old.write_bytes(b"old")
+    new.write_bytes(b"new")
+    other.write_bytes(b"other")
+    os.utime(old, (1, 1))
+    os.utime(new, (2, 2))
+    os.utime(other, (3, 3))
+
+    assert _latest_recording_for_beat(tmp_path, "a") == "take_a_002.webm"

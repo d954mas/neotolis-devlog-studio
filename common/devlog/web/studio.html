@@ -208,6 +208,7 @@
     <div class="panel-head">
       <span class="title" id="beat-title">Select a beat</span>
       <span class="workflow-status" id="workflow-status"></span>
+      <button class="btn secondary" id="process-render-btn" type="button" disabled>Process + Render</button>
       <button class="btn secondary" id="render-beat-btn" type="button" disabled>Render 540p</button>
       <span class="action-status" id="action-status"></span>
       <span class="face" id="beat-face"></span>
@@ -393,6 +394,36 @@ async function renderActiveBeat() {
   }
 }
 
+async function processLatestAndRender() {
+  if (!ACTIVE) return;
+  const btn = document.getElementById('process-render-btn');
+  const renderBtn = document.getElementById('render-beat-btn');
+  const status = document.getElementById('action-status');
+  btn.disabled = true;
+  renderBtn.disabled = true;
+  btn.textContent = 'Processing';
+  status.textContent = ACTIVE;
+  try {
+    const r = await fetch(`/api/actions/process-render/${encodeURIComponent(ACTIVE)}`, { method: 'POST' });
+    const result = await r.json();
+    if (!result.ok) {
+      console.error('process-render:', result);
+      status.textContent = result.stage ? `failed: ${result.stage}` : 'failed';
+    } else {
+      status.textContent = 'done';
+      await loadRecordings();
+      await loadStatus();
+    }
+  } catch (e) {
+    console.error('process-render:', e);
+    status.textContent = 'failed';
+  } finally {
+    btn.disabled = false;
+    renderBtn.disabled = false;
+    btn.textContent = 'Process + Render';
+  }
+}
+
 // ───────────────────────────────────────────────────────────────
 // Beat list
 // ───────────────────────────────────────────────────────────────
@@ -447,6 +478,7 @@ function selectBeat(bid) {
   const beat = PROJECT.beats[bid];
   document.getElementById('beat-title').textContent = beat.title || bid;
   document.getElementById('beat-face').textContent = beat.face;
+  document.getElementById('process-render-btn').disabled = false;
   document.getElementById('render-beat-btn').disabled = false;
   document.getElementById('action-status').textContent = '';
   renderWorkflowStatus();
@@ -811,6 +843,7 @@ document.querySelectorAll('header .tab').forEach(t => {
 document.getElementById('record-btn').addEventListener('click', toggleRecord);
 document.getElementById('play-last-btn').addEventListener('click', playLast);
 document.getElementById('run-check-btn').addEventListener('click', runCheck);
+document.getElementById('process-render-btn').addEventListener('click', processLatestAndRender);
 document.getElementById('render-beat-btn').addEventListener('click', renderActiveBeat);
 
 function escapeHtml(s) {
