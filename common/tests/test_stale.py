@@ -2,6 +2,7 @@ import os
 import time
 from pathlib import Path
 
+from devlog.cache import beat_hash, cache_path
 from devlog.stale import format_stale, stale_beats
 from devlog.types import Beat, Chunk, Design, Edit, Fonts, Palette
 
@@ -49,3 +50,25 @@ def test_stale_beats_reports_newer_source(tmp_path: Path):
 
     assert stale[0].reason == "source newer: beats.py"
     assert "source newer" in format_stale(stale)
+
+
+def test_stale_beats_trusts_current_content_cache(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    edit = _edit()
+    (tmp_path / "data/finalize").mkdir(parents=True)
+    (tmp_path / "data/finalize/a.wav").write_bytes(b"audio")
+    (tmp_path / "data/finalize/a.json").write_text("{}", encoding="utf-8")
+    output = tmp_path / "data/finalize/a_video_1080p.mp4"
+    source = tmp_path / "beats.py"
+    output.write_bytes(b"video")
+    source.write_text("newer", encoding="utf-8")
+    old = time.time() - 10
+    os.utime(output, (old, old))
+    key = beat_hash(edit.beats["a"], edit.design)
+    current_cache = tmp_path / cache_path(key)
+    current_cache.parent.mkdir(parents=True)
+    current_cache.write_bytes(b"cached")
+
+    stale = stale_beats(edit, tmp_path, source_paths=[source])
+
+    assert stale == []

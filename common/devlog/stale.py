@@ -4,8 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from devlog.cache import _walk_asset_paths
-from devlog.types import Edit
+from devlog.cache import _walk_asset_paths, beat_hash, cache_path
+from devlog.types import Design, Edit
 
 
 @dataclass(frozen=True)
@@ -26,8 +26,13 @@ def stale_beats(
     *,
     suffix: str = "_video_1080p",
     source_paths: list[Path] | None = None,
+    design: Design | None = None,
+    draft: bool = False,
+    gpu: bool = False,
+    quality: str | None = None,
 ) -> list[StaleBeat]:
     source_paths = source_paths or []
+    design = design or edit.design
     out: list[StaleBeat] = []
     for beat_id in edit.order:
         beat = edit.beats[beat_id]
@@ -35,6 +40,10 @@ def stale_beats(
         output_path = _resolve(root, output)
         if not output_path.exists():
             out.append(StaleBeat(beat_id=beat_id, output=output, reason="missing render"))
+            continue
+
+        current_cache = root / cache_path(beat_hash(beat, design, draft=draft, gpu=gpu, quality=quality))
+        if current_cache.exists():
             continue
 
         output_mtime = output_path.stat().st_mtime

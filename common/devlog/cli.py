@@ -669,7 +669,17 @@ def cmd_stale(args):
     _project_chdir(root)
     from devlog.stale import format_stale, stale_beats
     suffix = _render_suffix(args)
-    stale = stale_beats(edit, root, suffix=suffix, source_paths=_edit_source_paths(args.edit))
+    design = _resize_design(edit.design, args.width)
+    stale = stale_beats(
+        edit,
+        root,
+        suffix=suffix,
+        source_paths=_edit_source_paths(args.edit),
+        design=design,
+        draft=_effective_draft(args),
+        gpu=getattr(args, "gpu", False),
+        quality=_effective_quality(args),
+    )
     print(format_stale(stale))
     if stale and args.strict:
         raise SystemExit(1)
