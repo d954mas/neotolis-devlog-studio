@@ -54,6 +54,8 @@ def test_asset_report_finds_missing_unused_and_low_res(tmp_path: Path):
     assert "missing:" in text
     assert "unused:" in text
     assert "2.70x upscale" in text
+    assert "beats: a" in text
+    assert "action: replace source" in text
 
 
 def test_asset_report_does_not_warn_for_contained_vertical_image(tmp_path: Path):
@@ -108,3 +110,36 @@ def test_asset_report_sorts_low_res_by_severity(tmp_path: Path):
 
     assert report.low_res[0].startswith("high: data/tiny.png")
     assert report.low_res[1].startswith("low: data/okish.png")
+    assert "action: usually acceptable" in report.low_res[1]
+
+
+def test_asset_report_groups_low_res_usage_by_beat(tmp_path: Path):
+    (tmp_path / "data/finalize").mkdir(parents=True)
+    (tmp_path / "data/finalize/a.wav").write_bytes(b"fake")
+    (tmp_path / "data/finalize/a.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "data/finalize/b.wav").write_bytes(b"fake")
+    (tmp_path / "data/finalize/b.json").write_text("{}", encoding="utf-8")
+    Image.new("RGB", (640, 360)).save(tmp_path / "data/shared.png")
+    edit = Edit(
+        name="youtube",
+        design=_design(),
+        output="data/finalize/out.mp4",
+        order=["a", "b"],
+        beats={
+            "a": Beat(
+                audio="data/finalize/a.wav",
+                words="data/finalize/a.json",
+                chunks=[Chunk(words=(0, 1), kind="image", src="data/shared.png")],
+            ),
+            "b": Beat(
+                audio="data/finalize/b.wav",
+                words="data/finalize/b.json",
+                chunks=[Chunk(words=(0, 1), kind="image", src="data/shared.png")],
+            ),
+        },
+    )
+
+    report = asset_report(edit, tmp_path, target_width=1920)
+
+    assert len(report.low_res) == 1
+    assert "beats: a,b" in report.low_res[0]

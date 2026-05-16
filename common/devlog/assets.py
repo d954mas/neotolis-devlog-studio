@@ -78,25 +78,25 @@ def _target_size(edit: Edit, target_width: int | None) -> tuple[int, int]:
     return target_width, int(round(target_width * edit.design.H / edit.design.W))
 
 
-def _image_uses(edit: Edit, target_width: int | None) -> list[tuple[str, str, int, int]]:
+def _image_uses(edit: Edit, target_width: int | None) -> list[tuple[str, str, int, int, str]]:
     target_w, target_h = _target_size(edit, target_width)
-    uses: list[tuple[str, str, int, int]] = []
+    uses: list[tuple[str, str, int, int, str]] = []
     for bid in edit.order:
         beat = edit.beats[bid]
         if beat.scene:
-            uses.append((beat.scene.src, beat.scene.fit, target_w, target_h))
+            uses.append((beat.scene.src, beat.scene.fit, target_w, target_h, bid))
         for ch in beat.chunks:
             if ch.src:
                 if ch.framed_card:
                     card_w = int(target_w * 0.78)
                     card_h = int(card_w * 9 / 16)
-                    uses.append((ch.src, "cover", card_w, card_h))
+                    uses.append((ch.src, "cover", card_w, card_h, bid))
                 else:
-                    uses.append((ch.src, ch.fit, target_w, target_h))
+                    uses.append((ch.src, ch.fit, target_w, target_h, bid))
             if ch.bg_image:
-                uses.append((ch.bg_image, "cover", target_w, target_h))
+                uses.append((ch.bg_image, "cover", target_w, target_h, bid))
             if ch.scene:
-                uses.append((ch.scene.src, ch.scene.fit, target_w, target_h))
+                uses.append((ch.scene.src, ch.scene.fit, target_w, target_h, bid))
     return uses
 
 
@@ -120,6 +120,14 @@ def _low_res_severity(scale: float) -> str:
     return "low"
 
 
+def _low_res_action(severity: str) -> str:
+    if severity == "high":
+        return "replace source or regenerate/upscale before final"
+    if severity == "medium":
+        return "prefer higher-res source or upscale for 4K"
+    return "usually acceptable; replace only if visible full-screen"
+
+
 def asset_report(edit: Edit, root: Path, target_width: int | None = None) -> AssetReport:
     used_raw = collect_used_assets(edit)
     used_abs = {_resolve(root, p).resolve() for p in used_raw}
@@ -130,9 +138,14 @@ def asset_report(edit: Edit, root: Path, target_width: int | None = None) -> Ass
         if path.resolve() not in used_abs:
             unused.append(_rel(root, path))
 
+    image_uses = _image_uses(edit, target_width)
+    use_beats: dict[str, set[str]] = {}
+    for raw, _, _, _, bid in image_uses:
+        use_beats.setdefault(raw, set()).add(bid)
+
     low_res_items: list[tuple[int, float, str]] = []
     seen_low_res: set[str] = set()
-    for raw, fit, target_w, target_h in _image_uses(edit, target_width):
+    for raw, fit, target_w, target_h, _bid in image_uses:
         if raw in seen_low_res:
             continue
         path = _resolve(root, raw)
@@ -146,11 +159,14 @@ def asset_report(edit: Edit, root: Path, target_width: int | None = None) -> Ass
         if _would_upscale(w, h, fit, target_w, target_h):
             scale = _scale_factor(w, h, fit, target_w, target_h)
             severity = _low_res_severity(scale)
+            action = _low_res_action(severity)
             rank = {"high": 0, "medium": 1, "low": 2}[severity]
+            beats = ",".join(sorted(use_beats.get(raw, set())))
             low_res_items.append((
                 rank,
                 scale,
-                f"{severity}: {raw} ({w}x{h} -> {fit} {target_w}x{target_h}, {scale:.2f}x upscale)",
+                f"{severity}: {raw} ({w}x{h} -> {fit} {target_w}x{target_h}, "
+                f"{scale:.2f}x upscale; beats: {beats}; action: {action})",
             ))
             seen_low_res.add(raw)
     low_res = [item for _, _, item in sorted(low_res_items, key=lambda x: (x[0], -x[1], x[2]))]
