@@ -33,6 +33,9 @@ common/devlog/                  ← reusable engine (this folder)
 # 1) Create a clean project scaffold
 dl.bat new newproject
 
+# Or create it directly from a rough script
+dl.bat new-video newproject --script script.md
+
 # 2) Update the brand palette if desired
 # Edit: newproject\shared\palette.py
 
@@ -79,6 +82,7 @@ dl.bat compose newproject.edits.youtube intro
 | `dl shotlist [edit]` | Export chunk/scene shotlist as Markdown |
 | `dl import-script <file> --out <beats.py>` | Convert rough text/Markdown into starter `beats.py` |
 | `dl new <project>` | Create a clean project scaffold |
+| `dl new-video <project> --script <file>` | Create a scaffold and import script into `beats.py` |
 | `dl audio <edit> <id> <recording>` | Preprocess + loudnorm + Whisper a take |
 | `dl transcribe <wav> <out.json>` | Standalone Whisper run |
 | `dl serve <edit> [--port 8080]` | Local server: recorder + preview + `/api/project` |

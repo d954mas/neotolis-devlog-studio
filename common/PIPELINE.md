@@ -100,6 +100,7 @@ dl cache-info
 dl script <edit>
 dl shotlist <edit>
 dl import-script script.md --out edits/youtube/beats.py
+dl new-video newproject --script script.md
 dl smoke --skip-tests
 
 # Mid-quality preview

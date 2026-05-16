@@ -81,6 +81,8 @@ See `.gitignore` for the full list.
 ```powershell
 # 1. Create a clean scaffold
 .\dl.bat new newproject
+# Or start from a rough script
+.\dl.bat new-video newproject --script script.md
 
 # 2. Customize
 #    - newproject\shared\palette.py    (brand if different)
