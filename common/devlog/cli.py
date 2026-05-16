@@ -870,6 +870,22 @@ Next steps:
     print(f"[devlog] edit module: {project}.edits.{edit_name}")
 
 
+def cmd_new_video(args):
+    """Create a new project scaffold and import a draft script into beats.py."""
+    cmd_new(argparse.Namespace(project=args.project, edit=args.edit, force=args.force))
+    project = _py_ident(args.project, "project")
+    edit_name = _py_ident(args.edit, "edit")
+    root = Path.cwd() / project
+    from devlog.script_import import parse_script_beats, render_beats_py
+
+    text = Path(args.script).read_text(encoding="utf-8")
+    beats = parse_script_beats(text, prefix=args.prefix)
+    content = render_beats_py(beats, output=args.output, max_chunk_words=args.max_chunk_words)
+    beats_path = root / "edits" / edit_name / "beats.py"
+    beats_path.write_text(content, encoding="utf-8")
+    print(f"[devlog] imported {len(beats)} beats -> {beats_path}")
+
+
 # ─── Argparse setup ──────────────────────────────────────────────
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1094,6 +1110,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_new.add_argument("--edit", default="youtube", help="Initial edit folder/module name")
     p_new.add_argument("--force", action="store_true", help="Overwrite template files if they exist")
     p_new.set_defaults(func=cmd_new)
+
+    p_new_video = sub.add_parser("new-video", help="Create a project scaffold from a draft script")
+    p_new_video.add_argument("project", help="Python package name for the project")
+    p_new_video.add_argument("--script", required=True, help="Text or Markdown script file")
+    p_new_video.add_argument("--edit", default="youtube", help="Initial edit folder/module name")
+    p_new_video.add_argument("--force", action="store_true", help="Overwrite template files if they exist")
+    p_new_video.add_argument("--prefix", default="b", help="Fallback beat id prefix")
+    p_new_video.add_argument("--output", default="data/finalize/iter01.mp4",
+                             help="OUTPUT value for generated beats.py")
+    p_new_video.add_argument("--max-chunk-words", type=int, default=18,
+                             help="Approximate maximum words per generated starter chunk")
+    p_new_video.set_defaults(func=cmd_new_video)
 
     return parser
 

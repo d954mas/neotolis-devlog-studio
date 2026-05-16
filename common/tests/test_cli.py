@@ -72,6 +72,28 @@ def test_new_scaffold_creates_importable_project_shape(tmp_path: Path, monkeypat
     assert (root / ".claude/agents/vo-reviewer.md").read_text(encoding="utf-8") == "vo"
 
 
+def test_new_video_imports_script_into_scaffold(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    script = tmp_path / "script.md"
+    script.write_text("# Hook\nHello world.\n\n# Proof\nSecond beat.", encoding="utf-8")
+
+    cli.cmd_new_video(argparse.Namespace(
+        project="samplevideo",
+        edit="youtube",
+        script=str(script),
+        force=False,
+        prefix="b",
+        output="data/finalize/iter01.mp4",
+        max_chunk_words=18,
+    ))
+
+    beats_py = tmp_path / "samplevideo/edits/youtube/beats.py"
+    text = beats_py.read_text(encoding="utf-8")
+    assert "'hook': Beat(" in text
+    assert "'proof': Beat(" in text
+    assert 'Replace this with your recorded voiceover text.' not in text
+
+
 def test_final_preflight_blocks_missing_assets(tmp_path: Path):
     pal = Palette(bg=(0, 0, 0), gold=(1, 1, 1), gold_dim=(2, 2, 2), red=(3, 3, 3))
     fonts = Fonts(display=str(tmp_path / "display.ttf"), text=str(tmp_path / "text.ttf"))
