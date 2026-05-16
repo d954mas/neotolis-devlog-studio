@@ -107,6 +107,7 @@ dl render <edit> --width 1080p --quality preview -j 4
 # Final delivery
 dl render <edit> --quality upload             # explicit upload preset
 dl render --final                             # final preset + preflight from devlog.toml
+dl final <edit>                               # same final path, shorter
 dl render <edit> --width 4k --quality upload --gpu
 dl render <edit> --width 4k --quality master  # slower archival/high-quality render
 

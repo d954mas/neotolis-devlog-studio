@@ -47,6 +47,16 @@ def test_iter_shortcut_defaults_to_fast_draft_render():
     assert args.final is False
 
 
+def test_final_shortcut_enables_final_preflight():
+    args = cli.build_parser().parse_args(["final"])
+
+    cli._apply_final_shortcut_defaults(args)
+
+    assert args.final is True
+    assert args.draft is False
+    assert args.skip_final_preflight is False
+
+
 def test_new_scaffold_creates_importable_project_shape(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     agents = tmp_path / "trolley/.claude/agents"

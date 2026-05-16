@@ -127,6 +127,20 @@ def _apply_iter_shortcut_defaults(args) -> None:
     args.review_threshold = 35.0
 
 
+def _apply_final_shortcut_defaults(args) -> None:
+    """Force final render defaults for the `final` shortcut."""
+    args.final = True
+    args.draft = False
+    if not hasattr(args, "skip_final_preflight"):
+        args.skip_final_preflight = False
+    if not hasattr(args, "no_review"):
+        args.no_review = False
+    if not hasattr(args, "strict_review"):
+        args.strict_review = False
+    if not hasattr(args, "review_threshold"):
+        args.review_threshold = 35.0
+
+
 def _resize_design(design, width_spec: str | None):
     """Override design.resolution to match `width_spec`, preserving aspect.
 
@@ -253,6 +267,12 @@ def cmd_render(args):
 def cmd_iter(args):
     """Fast draft render shortcut for day-to-day beat iteration."""
     _apply_iter_shortcut_defaults(args)
+    cmd_render(args)
+
+
+def cmd_final(args):
+    """Final render shortcut with preflight enabled."""
+    _apply_final_shortcut_defaults(args)
     cmd_render(args)
 
 
@@ -875,6 +895,27 @@ def build_parser() -> argparse.ArgumentParser:
     p_iter.add_argument("--engine", choices=["ffmpeg", "moviepy"], default="ffmpeg",
                         help="Render engine: ffmpeg (default, fast) or moviepy (legacy)")
     p_iter.set_defaults(func=cmd_iter)
+
+    p_final = sub.add_parser("final", help="Final render shortcut (uses [final] defaults + preflight)")
+    p_final.add_argument("edit", nargs="?")
+    p_final.add_argument("--beat", help="Render only this single beat (skips concat)")
+    p_final.add_argument("--no-concat", action="store_true", help="Skip final concat step")
+    p_final.add_argument("--width", help=width_help)
+    p_final.add_argument("--quality", choices=_QUALITY_PRESETS, help=quality_help)
+    p_final.add_argument("--gpu", action="store_true", help=gpu_help)
+    p_final.add_argument("--no-cache", action="store_true", help=nocache_help)
+    p_final.add_argument("--parallel", "-j", type=int, default=None, help=parallel_help)
+    p_final.add_argument("--engine", choices=["ffmpeg", "moviepy"], default="ffmpeg",
+                         help="Render engine: ffmpeg (default, fast) or moviepy (legacy)")
+    p_final.add_argument("--skip-final-preflight", action="store_true",
+                         help="Skip check --deep and asset preflight")
+    p_final.add_argument("--no-review", action="store_true",
+                         help="Skip chunk-aware visual review of the concatenated output")
+    p_final.add_argument("--strict-review", action="store_true",
+                         help="Exit 1 if any chunk fails visual review (for CI gates)")
+    p_final.add_argument("--review-threshold", type=float, default=35.0,
+                         help="Max diff for chunk to count as rendered correctly (default 35)")
+    p_final.set_defaults(func=cmd_final)
 
     p_concat = sub.add_parser("concat", help="Concat existing rendered beats into edit.output")
     p_concat.add_argument("edit", nargs="?")

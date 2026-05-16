@@ -64,6 +64,7 @@ dl.bat compose newproject.edits.youtube intro
 | `dl render [edit]` | Render every beat in `edit.order`, then concat to `edit.output` |
 | `dl render <edit> --beat <id>` | Render one beat, skip concat |
 | `dl iter [edit]` | Fast draft render shortcut: 540p, draft quality, cache-aware |
+| `dl final [edit]` | Final render shortcut: `[final]` config, deep preflight, asset warnings |
 | `dl compose [edit] <id>` | Same as `render --beat <id>` (alias); `dl compose b4` uses default edit |
 | `dl concat [edit]` | Concat already-rendered beat videos into `edit.output` |
 | `dl check [edit]` | Validate assets, words JSON, chunk ranges, and scenes before rendering |
@@ -91,6 +92,7 @@ dl iter                                 # 540p draft render shortcut
 dl iter --beat b4                       # quick single-beat iteration
 dl render                               # uses default width/quality/parallel from devlog.toml
 dl render --final                       # [final] settings + final preflight
+dl final                                # same final path, shorter
 dl compose b4                           # render one beat from the default edit
 dl watch --beat b4                      # check + rerender one beat on source changes
 dl smoke                                # tests + check + beats

@@ -30,7 +30,7 @@ devlogs/
 # Render a project (uses cache; second run is ~instant)
 .\dl.bat iter
 .\dl.bat render
-.\dl.bat render --final
+.\dl.bat final
 
 # Validate before rendering expensive outputs
 .\dl.bat check
@@ -89,5 +89,5 @@ See `.gitignore` for the full list.
 # 3. Render
 .\dl.bat check newproject.edits.youtube
 .\dl.bat iter newproject.edits.youtube -j 6
-.\dl.bat render newproject.edits.youtube --final
+.\dl.bat final newproject.edits.youtube
 ```
