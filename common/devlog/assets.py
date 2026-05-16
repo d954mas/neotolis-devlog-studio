@@ -106,6 +106,20 @@ def _would_upscale(src_w: int, src_h: int, fit: str, target_w: int, target_h: in
     return src_w < target_w or src_h < target_h
 
 
+def _scale_factor(src_w: int, src_h: int, fit: str, target_w: int, target_h: int) -> float:
+    if fit == "contain":
+        return min(target_w / src_w, target_h / src_h)
+    return max(target_w / src_w, target_h / src_h)
+
+
+def _low_res_severity(scale: float) -> str:
+    if scale >= 2.0:
+        return "high"
+    if scale >= 1.35:
+        return "medium"
+    return "low"
+
+
 def asset_report(edit: Edit, root: Path, target_width: int | None = None) -> AssetReport:
     used_raw = collect_used_assets(edit)
     used_abs = {_resolve(root, p).resolve() for p in used_raw}
@@ -116,7 +130,7 @@ def asset_report(edit: Edit, root: Path, target_width: int | None = None) -> Ass
         if path.resolve() not in used_abs:
             unused.append(_rel(root, path))
 
-    low_res = []
+    low_res_items: list[tuple[int, float, str]] = []
     seen_low_res: set[str] = set()
     for raw, fit, target_w, target_h in _image_uses(edit, target_width):
         if raw in seen_low_res:
@@ -130,8 +144,16 @@ def asset_report(edit: Edit, root: Path, target_width: int | None = None) -> Ass
         except Exception:
             continue
         if _would_upscale(w, h, fit, target_w, target_h):
-            low_res.append(f"{raw} ({w}x{h} upscales for {fit} {target_w}x{target_h})")
+            scale = _scale_factor(w, h, fit, target_w, target_h)
+            severity = _low_res_severity(scale)
+            rank = {"high": 0, "medium": 1, "low": 2}[severity]
+            low_res_items.append((
+                rank,
+                scale,
+                f"{severity}: {raw} ({w}x{h} -> {fit} {target_w}x{target_h}, {scale:.2f}x upscale)",
+            ))
             seen_low_res.add(raw)
+    low_res = [item for _, _, item in sorted(low_res_items, key=lambda x: (x[0], -x[1], x[2]))]
 
     return AssetReport(
         used=used_raw,
