@@ -16,6 +16,12 @@ MEDIA_SUFFIXES = {
     ".json",
 }
 
+GENERATED_DATA_DIRS = (
+    "data/finalize/",
+    "data/recordings/",
+    "data/review/",
+)
+
 
 @dataclass(frozen=True)
 class AssetReport:
@@ -55,11 +61,49 @@ def _iter_data_files(root: Path) -> list[Path]:
         if not path.is_file():
             continue
         rel = path.relative_to(root).as_posix()
-        if "/.cache/" in rel or rel.endswith("_ffmpeg_error.txt"):
+        if (
+            "/.cache/" in rel
+            or rel.endswith("_ffmpeg_error.txt")
+            or any(rel.startswith(prefix) for prefix in GENERATED_DATA_DIRS)
+        ):
             continue
         if path.suffix.lower() in MEDIA_SUFFIXES:
             out.append(path)
     return out
+
+
+def _target_size(edit: Edit, target_width: int | None) -> tuple[int, int]:
+    if not target_width:
+        return edit.design.W, edit.design.H
+    return target_width, int(round(target_width * edit.design.H / edit.design.W))
+
+
+def _image_uses(edit: Edit, target_width: int | None) -> list[tuple[str, str, int, int]]:
+    target_w, target_h = _target_size(edit, target_width)
+    uses: list[tuple[str, str, int, int]] = []
+    for bid in edit.order:
+        beat = edit.beats[bid]
+        if beat.scene:
+            uses.append((beat.scene.src, beat.scene.fit, target_w, target_h))
+        for ch in beat.chunks:
+            if ch.src:
+                if ch.framed_card:
+                    card_w = int(target_w * 0.78)
+                    card_h = int(card_w * 9 / 16)
+                    uses.append((ch.src, "cover", card_w, card_h))
+                else:
+                    uses.append((ch.src, ch.fit, target_w, target_h))
+            if ch.bg_image:
+                uses.append((ch.bg_image, "cover", target_w, target_h))
+            if ch.scene:
+                uses.append((ch.scene.src, ch.scene.fit, target_w, target_h))
+    return uses
+
+
+def _would_upscale(src_w: int, src_h: int, fit: str, target_w: int, target_h: int) -> bool:
+    if fit == "contain":
+        return src_w < target_w and src_h < target_h
+    return src_w < target_w or src_h < target_h
 
 
 def asset_report(edit: Edit, root: Path, target_width: int | None = None) -> AssetReport:
@@ -73,8 +117,10 @@ def asset_report(edit: Edit, root: Path, target_width: int | None = None) -> Ass
             unused.append(_rel(root, path))
 
     low_res = []
-    min_width = target_width or edit.design.W
-    for raw in used_raw:
+    seen_low_res: set[str] = set()
+    for raw, fit, target_w, target_h in _image_uses(edit, target_width):
+        if raw in seen_low_res:
+            continue
         path = _resolve(root, raw)
         if path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"} or not path.exists():
             continue
@@ -83,8 +129,9 @@ def asset_report(edit: Edit, root: Path, target_width: int | None = None) -> Ass
                 w, h = img.size
         except Exception:
             continue
-        if w < min_width:
-            low_res.append(f"{raw} ({w}x{h} < {min_width}px wide)")
+        if _would_upscale(w, h, fit, target_w, target_h):
+            low_res.append(f"{raw} ({w}x{h} upscales for {fit} {target_w}x{target_h})")
+            seen_low_res.add(raw)
 
     return AssetReport(
         used=used_raw,

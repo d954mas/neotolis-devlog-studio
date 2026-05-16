@@ -41,13 +41,40 @@ def test_asset_report_finds_missing_unused_and_low_res(tmp_path: Path):
     (tmp_path / "data/finalize").mkdir(parents=True)
     (tmp_path / "data/finalize/a.wav").write_bytes(b"fake")
     (tmp_path / "data/finalize/a.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "data/finalize/old_render.mp4").write_bytes(b"generated")
     Image.new("RGB", (800, 400)).save(tmp_path / "data/bg.png")
     Image.new("RGB", (2000, 1000)).save(tmp_path / "data/unused.png")
 
     report = asset_report(_edit(), tmp_path, target_width=1920)
     assert "data/card.png" in report.missing
     assert "data/unused.png" in report.unused
+    assert "data/finalize/old_render.mp4" not in report.unused
     assert any("data/bg.png" in item for item in report.low_res)
     text = format_asset_report(report, show_unused=True)
     assert "missing:" in text
     assert "unused:" in text
+
+
+def test_asset_report_does_not_warn_for_contained_vertical_image(tmp_path: Path):
+    (tmp_path / "data/finalize").mkdir(parents=True)
+    (tmp_path / "data/finalize/a.wav").write_bytes(b"fake")
+    (tmp_path / "data/finalize/a.json").write_text("{}", encoding="utf-8")
+    Image.new("RGB", (1080, 1920)).save(tmp_path / "data/vertical.png")
+    edit = Edit(
+        name="youtube",
+        design=_design(),
+        output="data/finalize/out.mp4",
+        order=["a"],
+        beats={
+            "a": Beat(
+                audio="data/finalize/a.wav",
+                words="data/finalize/a.json",
+                scene=Scene(kind="image", src="data/vertical.png", fit="contain"),
+                chunks=[],
+            )
+        },
+    )
+
+    report = asset_report(edit, tmp_path, target_width=1920)
+
+    assert report.low_res == []
