@@ -137,6 +137,33 @@ def _run_iter_render(edit_path: str, beat_id: str) -> dict:
     }
 
 
+def _run_audio_process(edit_path: str, beat_id: str, recording_name: str) -> dict:
+    cmd = [
+        sys.executable,
+        "-m",
+        "devlog.cli",
+        "audio",
+        edit_path,
+        beat_id,
+        recording_name,
+    ]
+    proc = subprocess.run(
+        cmd,
+        cwd=str(_workspace_root()),
+        env=_devlog_env(),
+        text=True,
+        capture_output=True,
+        timeout=2 * 60 * 60,
+    )
+    return {
+        "ok": proc.returncode == 0,
+        "returncode": proc.returncode,
+        "cmd": cmd,
+        "stdout": proc.stdout,
+        "stderr": proc.stderr,
+    }
+
+
 def build_handler_class(edit: Edit, root: Path, edit_path: str | None = None):
     """Closure over (edit, root) — needed because Handler is constructed per request."""
 
@@ -268,6 +295,30 @@ def build_handler_class(edit: Edit, root: Path, edit_path: str | None = None):
                     result = _run_iter_render(edit_path, bid)
                 except subprocess.TimeoutExpired:
                     return self._send_json(500, {"ok": False, "error": "render timed out"})
+                return self._send_json(200 if result["ok"] else 500, result)
+
+            if path.startswith("/api/actions/audio/"):
+                rest = path[len("/api/actions/audio/"):]
+                try:
+                    bid_raw, recording_raw = rest.split("/", 1)
+                except ValueError:
+                    return self._send_json(400, {"error": "expected beat id and recording filename"})
+                bid = _safe_filename(bid_raw)
+                recording_name = _safe_filename(recording_raw)
+                if not bid or not recording_name:
+                    return self._send_json(400, {"error": "bad beat id or recording filename"})
+                if not edit_path:
+                    return self._send_json(400, {"error": "serve must be started with an edit module path"})
+                current = _reload_edit(edit_path)
+                if bid not in current.beats:
+                    return self._send_json(404, {"error": f"unknown beat: {bid}"})
+                recording_path = root / "data" / "recordings" / recording_name
+                if not recording_path.is_file():
+                    return self._send_json(404, {"error": f"recording not found: {recording_name}"})
+                try:
+                    result = _run_audio_process(edit_path, bid, recording_name)
+                except subprocess.TimeoutExpired:
+                    return self._send_json(500, {"ok": False, "error": "audio processing timed out"})
                 return self._send_json(200 if result["ok"] else 500, result)
 
             if path.startswith("/api/feedback/"):

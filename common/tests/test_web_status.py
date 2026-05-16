@@ -79,3 +79,29 @@ def test_render_action_requires_edit_path(tmp_path: Path):
 
     assert code == 400
     assert "edit module path" in payload["error"]
+
+
+def test_audio_action_requires_edit_path(tmp_path: Path):
+    edit = _edit_with_missing_assets(tmp_path)
+    rec_dir = tmp_path / "data" / "recordings"
+    rec_dir.mkdir(parents=True)
+    (rec_dir / "take.webm").write_bytes(b"fake")
+    handler = build_handler_class(edit, tmp_path)
+
+    with _ThreadedServer(("127.0.0.1", 0), handler) as server:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            url = f"http://127.0.0.1:{server.server_port}/api/actions/audio/a/take.webm"
+            req = urllib.request.Request(url, method="POST")
+            try:
+                urllib.request.urlopen(req, timeout=5)
+            except urllib.error.HTTPError as exc:
+                payload = json.loads(exc.read().decode("utf-8"))
+                code = exc.code
+        finally:
+            server.shutdown()
+            thread.join(timeout=5)
+
+    assert code == 400
+    assert "edit module path" in payload["error"]
