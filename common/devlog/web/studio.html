@@ -104,6 +104,10 @@
   .stage-note::before { content: "🎙 "; color: var(--accent); font-weight: 700; }
 
   /* TAB CONTENT — structure */
+  .render-preview { max-width: 800px; margin: 0 0 18px; }
+  .render-preview video { width: 100%; max-height: 420px; background: #000; border: 1px solid var(--line); }
+  .render-preview .meta { font-size: 11px; color: var(--ink-dim); margin-top: 4px; }
+
   .structure { max-width: 1000px; }
   .chunk-row { display: grid; grid-template-columns: 32px 60px 80px 1fr 1fr 100px;
     gap: 8px; align-items: center; padding: 6px 8px; border-radius: 4px;
@@ -217,6 +221,7 @@
     <!-- TAB: Script -->
     <div class="tab-content" data-tab="script" style="display: block">
       <div class="stage-note" id="stage-note" style="display: none"></div>
+      <div class="render-preview" id="render-preview" style="display: none"></div>
       <div class="vo-text" id="vo-text">Pick a beat from the left.</div>
     </div>
 
@@ -341,7 +346,7 @@ async function loadStatus() {
   try {
     const r = await fetch('/api/status');
     STATUS = await r.json();
-    RENDERED = new Set((STATUS.beats || []).filter(b => b.rendered).map(b => b.beat_id));
+    RENDERED = new Set((STATUS.beats || []).filter(b => b.rendered || b.draft_rendered).map(b => b.beat_id));
     const el = document.getElementById('project-status');
     const missing = (STATUS.beats || []).filter(b => !b.rendered).length;
     const cls = STATUS.errors ? 'bad' : (STATUS.warnings || missing ? 'warn' : 'ok');
@@ -349,6 +354,7 @@ async function loadStatus() {
     el.innerHTML = `status: <b>${STATUS.errors} errors · ${STATUS.warnings} warnings · ${missing} missing renders</b>`;
     renderBeatList();
     renderWorkflowStatus();
+    renderPreview();
   } catch (e) { console.error('status:', e); }
 }
 
@@ -384,6 +390,7 @@ async function renderActiveBeat() {
     } else {
       status.textContent = 'done';
       await loadStatus();
+      renderPreview();
     }
   } catch (e) {
     console.error('render:', e);
@@ -413,6 +420,7 @@ async function processLatestAndRender() {
       status.textContent = 'done';
       await loadRecordings();
       await loadStatus();
+      renderPreview();
     }
   } catch (e) {
     console.error('process-render:', e);
@@ -485,6 +493,7 @@ function selectBeat(bid) {
 
   // Script tab
   renderScript(beat);
+  renderPreview();
   // Structure tab
   renderStructure(beat);
   // Record tab
@@ -505,7 +514,7 @@ function renderWorkflowStatus() {
   const summary = (STATUS?.beats || []).find(b => b.beat_id === ACTIVE);
   const hasTake = RECORDINGS.some(r => r.name.includes(`_${ACTIVE}_`));
   const processed = !!summary && summary.words !== null && summary.words !== undefined;
-  const rendered = !!summary && summary.rendered;
+  const rendered = !!summary && (summary.rendered || summary.draft_rendered);
   const pill = (label, ok) => `<span class="pill ${ok ? 'done' : 'missing'}">${label}</span>`;
   el.innerHTML = [
     pill('take', hasTake),
@@ -515,6 +524,23 @@ function renderWorkflowStatus() {
 }
 
 // ───────────────────────────────────────────────────────────────
+function renderPreview() {
+  const el = document.getElementById('render-preview');
+  if (!el) return;
+  const summary = (STATUS?.beats || []).find(b => b.beat_id === ACTIVE);
+  if (!ACTIVE || !summary || !summary.draft_rendered) {
+    el.style.display = 'none';
+    el.innerHTML = '';
+    return;
+  }
+  el.style.display = 'block';
+  const src = '/' + summary.draft_output;
+  el.innerHTML = `
+    <video controls preload="metadata" src="${src}?t=${Date.now()}"></video>
+    <div class="meta">${escapeHtml(summary.draft_output)}</div>
+  `;
+}
+
 // Script tab
 // ───────────────────────────────────────────────────────────────
 function renderScript(beat) {

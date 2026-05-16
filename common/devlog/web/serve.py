@@ -86,11 +86,18 @@ def _status_to_dict(edit: Edit, root: Path) -> dict:
     from devlog.timeline import summarize_edit
     issues = check_edit(edit, root)
     beats = summarize_edit(edit, root)
+    beat_dicts = []
+    for beat in beats:
+        item = asdict(beat)
+        draft_output = f"data/finalize/{beat.beat_id}_960w_draft.mp4"
+        item["draft_output"] = draft_output
+        item["draft_rendered"] = (root / draft_output).exists()
+        beat_dicts.append(item)
     return {
         "errors": sum(1 for i in issues if i.severity == "error"),
         "warnings": sum(1 for i in issues if i.severity == "warning"),
         "issues": [asdict(i) for i in issues],
-        "beats": [asdict(b) for b in beats],
+        "beats": beat_dicts,
     }
 
 

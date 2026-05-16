@@ -34,9 +34,13 @@ def _edit_with_missing_assets(tmp_path: Path) -> Edit:
 
 def test_status_to_dict_reports_errors_and_beats(tmp_path: Path):
     edit = _edit_with_missing_assets(tmp_path)
+    (tmp_path / "data/finalize").mkdir(parents=True)
+    (tmp_path / "data/finalize/a_960w_draft.mp4").write_bytes(b"fake")
     status = _status_to_dict(edit, tmp_path)
     assert status["errors"] >= 1
     assert status["beats"][0]["beat_id"] == "a"
+    assert status["beats"][0]["draft_output"] == "data/finalize/a_960w_draft.mp4"
+    assert status["beats"][0]["draft_rendered"] is True
 
 
 def test_check_action_returns_status_json(tmp_path: Path):
