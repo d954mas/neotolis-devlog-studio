@@ -21,7 +21,7 @@ devlogs/                   ← workspace root, git repo, contains common/ + proj
 
 | When user wants | Default action | Skill |
 |---|---|---|
-| Quick result from beats.py edit | `dl iter [edit] -j 4..8` | CLI |
+| Quick result from beats.py edit | `dl iter --stale -j 4..8` | CLI |
 | One-beat iteration | `dl iter --beat <id>` or Studio `Render 540p` | CLI/Studio |
 | Record → process → render beat | Studio `Process + Render` on selected beat | Studio |
 | Auto-rebuild on save | `dl watch --beat <id>` for targeted work | CLI |
@@ -38,7 +38,7 @@ devlogs/                   ← workspace root, git repo, contains common/ + proj
 
 2. **Cache is correct and on by default.** Hash includes engine source, design, asset mtimes, draft/gpu flags. Engine code changes auto-invalidate. Don't pass `--no-cache` unless debugging cache itself.
 
-3. **Resolution and quality are runtime flags, not code constants.** Use `dl iter` for 540p draft iteration and `dl final` for upload-ready renders. Engine is resolution-independent via `design.px()` — same `beats.py` renders correctly at any resolution.
+3. **Resolution and quality are runtime flags, not code constants.** Use `dl iter --stale` for 540p draft iteration and `dl final` for upload-ready renders. Engine is resolution-independent via `design.px()` — same `beats.py` renders correctly at any resolution.
 
 4. **Parallel render** (`-j 4..8`) is safe and useful when rendering many beats. Each worker is its own Python process. Per-worker cache writes are atomic.
 

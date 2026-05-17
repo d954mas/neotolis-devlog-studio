@@ -84,6 +84,7 @@ dl iter <edit> -j 6
 # If devlog.toml has default_edit/render defaults, the short form is preferred:
 dl check
 dl iter
+dl iter --stale
 dl render
 dl compose <bid>
 dl watch --beat <bid>

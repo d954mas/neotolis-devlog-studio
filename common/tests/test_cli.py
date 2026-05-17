@@ -47,6 +47,16 @@ def test_iter_shortcut_defaults_to_fast_draft_render():
     assert args.final is False
 
 
+def test_iter_shortcut_accepts_stale_flag():
+    args = cli.build_parser().parse_args(["iter", "--stale"])
+
+    cli._apply_iter_shortcut_defaults(args)
+
+    assert args.stale is True
+    assert args.width == "540p"
+    assert args.quality == "draft"
+
+
 def test_final_shortcut_enables_final_preflight():
     args = cli.build_parser().parse_args(["final"])
 

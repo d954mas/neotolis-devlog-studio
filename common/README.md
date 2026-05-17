@@ -95,6 +95,7 @@ dl check <edit> --deep                  # also ffprobe video durations / offsets
 dl check                                # uses default_edit from devlog.toml
 dl iter                                 # 540p draft render shortcut
 dl iter --beat b4                       # quick single-beat iteration
+dl iter --stale                         # render only stale 540p draft beats
 dl render                               # uses default width/quality/parallel from devlog.toml
 dl render --final                       # [final] settings + final preflight
 dl final                                # same final path, shorter

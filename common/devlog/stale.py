@@ -30,6 +30,7 @@ def stale_beats(
     draft: bool = False,
     gpu: bool = False,
     quality: str | None = None,
+    trust_cache: bool = True,
 ) -> list[StaleBeat]:
     source_paths = source_paths or []
     design = design or edit.design
@@ -43,7 +44,7 @@ def stale_beats(
             continue
 
         current_cache = root / cache_path(beat_hash(beat, design, draft=draft, gpu=gpu, quality=quality))
-        if current_cache.exists():
+        if trust_cache and current_cache.exists():
             continue
 
         output_mtime = output_path.stat().st_mtime

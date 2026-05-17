@@ -225,7 +225,13 @@ def cmd_render(args):
           f"{' parallel=' + str(args.parallel) if args.parallel > 1 else ''}"
           f"{' quality=' + quality if quality else ''}"
           f"  engine={engine}")
-    targets = [args.beat] if args.beat else edit.order
+    if getattr(args, "stale", False):
+        targets = _iter_stale_targets(args, edit, root, design, suffix, draft, quality)
+        if not targets:
+            print("[devlog] no stale renders")
+            return
+    else:
+        targets = [args.beat] if args.beat else edit.order
 
     if args.parallel > 1 and len(targets) > 1:
         _render_parallel(edit, design, targets, suffix, draft, args.gpu,
@@ -268,6 +274,30 @@ def cmd_iter(args):
     """Fast draft render shortcut for day-to-day beat iteration."""
     _apply_iter_shortcut_defaults(args)
     cmd_render(args)
+
+
+def _iter_stale_targets(args, edit, root: Path, design, suffix: str, draft: bool, quality: str | None) -> list[str]:
+    """Return stale beat ids for `dl iter --stale`, respecting --beat."""
+    from devlog.stale import stale_beats
+
+    stale = stale_beats(
+        edit,
+        root,
+        suffix=suffix,
+        source_paths=_edit_source_paths(args.edit),
+        design=design,
+        draft=draft,
+        gpu=getattr(args, "gpu", False),
+        quality=quality,
+        trust_cache=not getattr(args, "no_cache", False),
+    )
+    if args.beat:
+        stale = [item for item in stale if item.beat_id == args.beat]
+    if stale:
+        print(f"[devlog] stale renders: {len(stale)}")
+        for item in stale:
+            print(f"  {item.beat_id}: {item.reason}")
+    return [item.beat_id for item in stale]
 
 
 def cmd_final(args):
@@ -945,6 +975,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_iter.add_argument("--quality", choices=_QUALITY_PRESETS, help=quality_help)
     p_iter.add_argument("--gpu", action="store_true", help=gpu_help)
     p_iter.add_argument("--no-cache", action="store_true", help=nocache_help)
+    p_iter.add_argument("--stale", action="store_true",
+                        help="Render only beats missing or older than current inputs/cache")
     p_iter.add_argument("--parallel", "-j", type=int, default=None, help=parallel_help)
     p_iter.add_argument("--engine", choices=["ffmpeg", "moviepy"], default="ffmpeg",
                         help="Render engine: ffmpeg (default, fast) or moviepy (legacy)")
