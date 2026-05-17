@@ -21,11 +21,14 @@ devlogs/                   ← workspace root, git repo, contains common/ + proj
 
 | When user wants | Default action | Skill |
 |---|---|---|
-| Quick result from beats.py edit | 540p draft, parallel, cache-aware | `/dl-iterate` |
-| Auto-rebuild on save | Polling watch mode | `/dl-watch` |
-| Final upload-ready render | 1080p or 4K + GPU | `/dl-final` |
-| Improve a rendered beat/video | Loop: render → reviewer → mech fixes → repeat | `/dl-improve` |
-| Cut clip for reel/short | `dl cut` with reframe | `/dl-reel` |
+| Quick result from beats.py edit | `dl iter [edit] -j 4..8` | CLI |
+| One-beat iteration | `dl iter --beat <id>` or Studio `Render 540p` | CLI/Studio |
+| Record → process → render beat | Studio `Process + Render` on selected beat | Studio |
+| Auto-rebuild on save | `dl watch --beat <id>` for targeted work | CLI |
+| Final upload-ready render | `dl final [edit]` | CLI |
+| Start a new video from script | `dl new-video <project> --script <file>` | CLI |
+| Improve a rendered beat/video | Loop: render → reviewer → mech fixes → repeat | workflow |
+| Cut clip for reel/short | `dl cut` with reframe | CLI |
 | Review a recorded VO take | Spawn `vo-reviewer` agent on `.webm` | (agent) |
 | Review composed beat / iter video | Spawn `video-reviewer` agent | (agent) |
 
@@ -35,25 +38,27 @@ devlogs/                   ← workspace root, git repo, contains common/ + proj
 
 2. **Cache is correct and on by default.** Hash includes engine source, design, asset mtimes, draft/gpu flags. Engine code changes auto-invalidate. Don't pass `--no-cache` unless debugging cache itself.
 
-3. **Resolution and quality are runtime flags, not code constants.** `--width 540p --quality draft` for iteration, `--width 4k --quality upload` for final. Engine is resolution-independent via `design.px()` — same `beats.py` renders correctly at any resolution.
+3. **Resolution and quality are runtime flags, not code constants.** Use `dl iter` for 540p draft iteration and `dl final` for upload-ready renders. Engine is resolution-independent via `design.px()` — same `beats.py` renders correctly at any resolution.
 
 4. **Parallel render** (`-j 4..8`) is safe and useful when rendering many beats. Each worker is its own Python process. Per-worker cache writes are atomic.
 
 5. **Run `dl check` before expensive renders.** Use plain `dl check` during normal iteration and `dl check --deep` after changing video assets or scene offsets. These use `default_edit` from `devlog.toml`.
 
-6. **Use `dl doctor` and `dl beats` for triage.** `dl doctor` verifies local dependencies; `dl beats <edit> --missing-only` shows durations and missing rendered beat files.
+6. **Use `dl doctor`, `dl beats`, and `dl stale` for triage.** `dl doctor` verifies local dependencies; `dl beats <edit> --missing-only` shows durations and missing rendered beat files; `dl stale --width 540p --quality draft` shows renders older than current inputs/cache state.
 
 7. **Prefer targeted watch for one-beat iteration.** `dl watch --beat <id>` runs `check` and re-renders only that beat when `beats.py`, `design.py`, or renderer files change.
 
 8. **Use `dl smoke` after engine changes.** `dl smoke` runs tests plus `check` and `beats`; `dl smoke --skip-tests` is the faster sanity pass.
 
-9. **Use `dl assets --width 4k` before final render.** Missing assets are blockers; low-res warnings are quality notes, not automatic blockers.
+9. **Use `dl assets --width 4k` before final render.** Missing assets are blockers; low-res warnings include severity, affected beat ids, and recommended action.
 
 10. **Inspect cache before clearing it.** Prefer `dl cache-info`; use `dl cache-prune --older-than-days N` for old entries. Full `cache-clear` is still a rare debugging action.
 
-11. **Use `dl script` and `dl shotlist` for planning/review.** They export the VO script and chunk/scene plan from `beats.py`, keeping `beats.py` as the source of truth.
+11. **Use `dl script`, `dl shotlist`, `dl import-script`, and `dl new-video` for planning.** `beats.py` remains the source of truth; `import-script` generates starter chunks from a rough script, and `new-video` creates a scaffold plus generated `beats.py`.
 
-5. **Per-chunk fade-in/out is currently disabled in ffmpeg engine** — known interaction with overlay alpha that broke text bands. Plates and overlay bands pop in/out abruptly. Don't try to "fix" the missing fade with hacks unless you have a verified ffmpeg alpha-fade approach. Crossfade between scenes (xfade) works fine.
+12. **Studio is the default daily UI.** Run `dl serve [edit]`, open `/devlog/studio.html`, then use: select beat → record take → `Process + Render` → preview the 540p draft on the Script tab. The separate recorder page remains available for focused capture.
+
+13. **Per-chunk fade-in/out is currently disabled in ffmpeg engine** — known interaction with overlay alpha that broke text bands. Plates and overlay bands pop in/out abruptly. Don't try to "fix" the missing fade with hacks unless you have a verified ffmpeg alpha-fade approach. Crossfade between scenes (xfade) works fine.
 
 ## Improve-loop discipline
 
