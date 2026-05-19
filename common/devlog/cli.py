@@ -739,6 +739,28 @@ def cmd_assets(args):
         raise SystemExit(1)
 
 
+def cmd_gen(args):
+    """Render a generated infographic asset from JSON or a built-in sample."""
+    config = load_config()
+    edit_path = _resolve_edit(args.edit, config)
+    edit, root = _load_edit(edit_path)
+    _project_chdir(root)
+    design = _resize_design(edit.design, args.width)
+
+    if args.sample:
+        from devlog.charts import sample_spec
+        spec = sample_spec(args.sample)
+    else:
+        if not args.spec:
+            raise SystemExit("Pass a JSON spec path or use --sample.")
+        from devlog.generated import load_json_spec
+        spec = load_json_spec(args.spec)
+
+    from devlog.generated import render_generated
+    out = render_generated(spec, design, args.out, fps=args.fps)
+    print(f"[devlog] generated {out}")
+
+
 def _write_or_print(text: str, out_path: str | None) -> None:
     if out_path:
         Path(out_path).parent.mkdir(parents=True, exist_ok=True)
@@ -1116,6 +1138,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_assets.add_argument("--show-unused", action="store_true")
     p_assets.add_argument("--strict", action="store_true", help="Exit 1 when assets are missing")
     p_assets.set_defaults(func=cmd_assets)
+
+    p_gen = sub.add_parser("gen", help="Render generated infographic asset from JSON")
+    p_gen.add_argument("spec", nargs="?", help="JSON spec path; omit when using --sample")
+    p_gen.add_argument("--edit", help="Edit module for design tokens; defaults to devlog.toml")
+    p_gen.add_argument("--out", required=True, help="Output .mp4 or .png path relative to project root")
+    p_gen.add_argument("--width", help=width_help)
+    p_gen.add_argument("--fps", type=int, help="Override output FPS")
+    p_gen.add_argument("--sample", choices=["bar", "timeline", "workflow", "counter"],
+                       help="Render a built-in sample spec")
+    p_gen.set_defaults(func=cmd_gen)
 
     p_script = sub.add_parser("script", help="Export VO script markdown")
     p_script.add_argument("edit", nargs="?")
