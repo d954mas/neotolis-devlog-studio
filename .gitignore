@@ -18,6 +18,7 @@ __pycache__/
 # Build/render logs (auto-generated)
 **/data/finalize/*_log.txt
 **/data/finalize/*_render*.txt
+**/data/finalize/*track_page.html
 # Intermediate whisper outputs (final words.json IS tracked)
 **/data/finalize/*_raw_*.json
 **/data/finalize/*_preprocessed.wav
@@ -25,6 +26,7 @@ __pycache__/
 # ─── Reviews + previews (per-session, ephemeral) ───────────
 **/data/review/
 **/data/previews/
+**/data/serve*.log
 
 # ─── ALL media binaries under data/ (large, stored separately) ─
 # Videos and audio
@@ -54,9 +56,11 @@ __pycache__/
 # Generated Hyperframes projects and native generator caches
 **/data/hyperframes/
 **/data/infographics/.build_cache.json
+**/data/infographics/*.hyperframes_error.txt
 
 # ─── Stray temp files in project root ──────────────────────
 **/tmp_*
+tmp/
 **/tmp[a-z]*_reviewframe_*.jpg
 **/probe_*.jpg
 

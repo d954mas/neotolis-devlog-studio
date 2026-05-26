@@ -98,6 +98,39 @@
     font-weight: 700; padding: 2px 0; border-radius: 3px;
     box-shadow: 0 2px 0 var(--yellow); }
   .vo-text .word.past { color: var(--ink-dim); }
+  .karaoke-head {
+    display: none;
+    position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+    z-index: 1000; width: min(1100px, calc(100vw - 32px));
+    padding: 14px 20px 16px;
+    background: #17120d; color: var(--paper);
+    border: 3px solid var(--yellow); border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.22);
+  }
+  .karaoke-head.open { display: block; }
+  .karaoke-head.minimized { width: auto; min-width: 360px; padding: 10px 12px; }
+  .karaoke-head.minimized .label,
+  .karaoke-head.minimized .line,
+  .karaoke-head.minimized .next { display: none; }
+  .karaoke-head .actions { position: absolute; top: 10px; right: 12px;
+    display: flex; gap: 8px; align-items: center; }
+  .karaoke-head .actions .btn { padding: 6px 10px; font-size: 12px; border-radius: 5px; }
+  .karaoke-head .actions .show-panel { display: none; }
+  .karaoke-head.minimized .actions { position: static; }
+  .karaoke-head.minimized .actions .show-panel { display: inline-block; }
+  .karaoke-head.minimized .actions .close-panel { display: none; }
+  .karaoke-head .label { font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--yellow); font-weight: 800; margin-bottom: 6px; }
+  .karaoke-head .line { min-height: 88px; max-height: 112px; overflow: hidden;
+    font-size: 34px; line-height: 1.16; font-weight: 850;
+    color: var(--paper); max-width: 940px; padding-right: 170px; }
+  .karaoke-head .line.pause { color: var(--yellow); text-transform: uppercase; }
+  .karaoke-head .line .now { color: var(--yellow); background: rgba(246,196,83,0.18);
+    border-radius: 6px; padding: 0 6px; }
+  .karaoke-head .line .done { color: rgba(250,247,239,0.55); }
+  .karaoke-head .next { min-height: 44px; max-height: 48px; overflow: hidden;
+    margin-top: 6px; font-size: 20px; line-height: 1.2;
+    color: rgba(250,247,239,0.72); font-weight: 650; max-width: 940px; }
   .stage-note { max-width: 800px; margin: 0 0 16px; font-size: 14px;
     padding: 12px 18px; background: #fff8e0; border: 2px solid var(--yellow);
     border-radius: 8px; }
@@ -129,7 +162,8 @@
   /* TAB CONTENT — record */
   .record-area { display: grid; grid-template-columns: 1fr 320px; gap: 24px; }
   .record-main { }
-  .controls { padding: 16px 0; display: flex; gap: 16px; align-items: center;
+  .controls { padding: 16px 0; display: flex; gap: 12px; align-items: center;
+    flex-wrap: wrap;
     border-top: 1px solid var(--line); margin-top: 16px; }
   .btn { padding: 10px 20px; border-radius: 6px; border: 1px solid var(--ink);
     background: var(--ink); color: var(--paper); font-size: 14px; font-weight: 700;
@@ -146,6 +180,19 @@
   .meter-bar .fill { height: 100%; background: var(--green); width: 0;
     transition: width 0.06s linear; }
   .meter-bar .fill.peak { background: var(--accent); }
+  .device-select { max-width: 180px; padding: 8px 10px; border-radius: 6px;
+    border: 1px solid var(--line); background: var(--paper); color: var(--ink);
+    font-size: 12px; }
+  .device-tests { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(240px, 1fr);
+    gap: 16px; margin-top: 16px; }
+  .test-panel { border: 1px solid var(--line); background: var(--paper);
+    border-radius: 6px; padding: 12px; }
+  .test-panel h3 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--ink-dim); }
+  .test-panel .hint { margin-top: 8px; font-size: 12px; color: var(--ink-dim); }
+  .camera-preview { width: 100%; aspect-ratio: 16 / 9; border-radius: 6px;
+    background: #111; object-fit: cover; display: block; }
+  .camera-preview.off { display: flex; align-items: center; justify-content: center; }
 
   .takes { padding: 0; }
   .takes h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
@@ -202,9 +249,21 @@
     <div class="tab" data-tab="review">Review</div>
   </div>
   <span class="api" id="api-status">API: <b>checking…</b></span>
-</header>
+  </header>
 
-<main>
+  <div class="karaoke-head" id="karaoke-head">
+    <div class="actions">
+      <button class="btn secondary show-panel" id="karaoke-show-btn" type="button">Show karaoke</button>
+      <button class="btn secondary close-panel" id="karaoke-close-btn" type="button">Close</button>
+      <button class="btn secondary" id="stop-save-btn" type="button">Stop & save</button>
+      <button class="btn record" id="cancel-recording-btn" type="button">Cancel recording</button>
+    </div>
+    <div class="label">Read now</div>
+    <div class="line" id="karaoke-current">Select a beat</div>
+    <div class="next" id="karaoke-next">Then press Record</div>
+  </div>
+
+  <main>
 
   <aside class="beats" id="beat-list"></aside>
 
@@ -246,7 +305,37 @@
         <div class="record-main">
           <div class="stage-note" id="stage-note-rec" style="display: none"></div>
           <div class="vo-text" id="vo-karaoke">…</div>
+          <div class="device-tests">
+            <div class="test-panel">
+              <h3>Microphone test</h3>
+              <div class="meter">
+                RMS <div class="meter-bar"><div class="fill" id="test-meter-rms"></div></div>
+                <span id="test-meter-rms-val">—</span>
+              </div>
+              <div class="meter" style="margin-top:8px">
+                Peak <div class="meter-bar"><div class="fill" id="test-meter-peak"></div></div>
+                <span id="test-meter-peak-val">—</span>
+              </div>
+              <div class="hint" id="mic-test-hint">Press Request mic permission, then speak. The bars should move.</div>
+            </div>
+            <div class="test-panel">
+              <h3>Camera test</h3>
+              <video class="camera-preview" id="camera-preview" autoplay playsinline muted></video>
+              <div class="hint" id="camera-test-hint">Press Request camera permission to see a live preview.</div>
+            </div>
+          </div>
           <div class="controls">
+            <button class="btn secondary" id="mic-btn">🎙 Request mic permission</button>
+            <button class="btn secondary" id="camera-btn">📷 Request camera permission</button>
+            <button class="btn secondary" id="camera-stop-btn">■ Stop camera</button>
+            <button class="btn secondary" id="karaoke-preview-btn">Show karaoke</button>
+            <button class="btn secondary" id="devices-btn">↻ Devices</button>
+            <select class="device-select" id="mic-select" title="Microphone">
+              <option value="">Default mic</option>
+            </select>
+            <select class="device-select" id="camera-select" title="Camera">
+              <option value="">Default camera</option>
+            </select>
             <button class="btn record" id="record-btn" disabled>● Record</button>
             <button class="btn secondary" id="play-last-btn" disabled>▶ Play last</button>
             <span class="timer" id="timer">00:00</span>
@@ -260,6 +349,8 @@
               <span id="meter-peak-val">—</span>
             </div>
             <span class="stat" id="mic-status">no mic</span>
+            <span class="stat" id="permission-status">permission: unknown</span>
+            <span class="stat" id="record-status">select beat + enable mic</span>
           </div>
         </div>
         <div class="takes" id="takes-panel">
@@ -297,10 +388,276 @@ let recStream = null;
 let recChunks = [];
 let recStart = 0;
 let timerInt = null;
+let recordingKaraokeInt = null;
+let discardCurrentTake = false;
+let recordCountdownInt = null;
 let audioCtx = null;
 let meterNode = null;
+let cameraStream = null;
 let karaokeAudio = null;
 let wordSpans = [];
+let karaokeSegments = [];
+let karaokeSegmentIndex = 0;
+
+const RECORDING_WORDS_PER_SECOND = 1.55;
+const CHUNK_PAUSE_SECONDS = 1.15;
+const PROMPTER_WORDS_PER_PAGE = 11;
+const PROMPTER_MIN_SEGMENT_SECONDS = 2.6;
+const RECORD_COUNTDOWN_SECONDS = 3;
+
+function semanticPrompterPages(start, end, words) {
+  const pages = [];
+  let pageStart = start;
+  for (let i = start; i < end; i++) {
+    const word = words[i] || '';
+    const count = i - pageStart + 1;
+    const strongBreak = /[.!?…]$/.test(word);
+    const softBreak = /[,;:]$/.test(word) || /[—-]$/.test(word);
+    const atEnd = i === end - 1;
+    const shouldBreak = atEnd
+      || (count >= 3 && strongBreak)
+      || (count >= 7 && softBreak)
+      || count >= PROMPTER_WORDS_PER_PAGE;
+    if (shouldBreak) {
+      pages.push({start: pageStart, end: i + 1});
+      pageStart = i + 1;
+    }
+  }
+  return pages;
+}
+
+function buildKaraokeSegments(beat) {
+  const words = wordSpans.map(s => s.textContent);
+  const segments = [];
+  for (const chunk of beat?.chunks || []) {
+    if (!chunk.words || chunk.words.length < 2) continue;
+    const start = Math.max(0, chunk.words[0]);
+    const end = Math.min(words.length, chunk.words[1] + 1);
+    if (start >= end) continue;
+    const pages = semanticPrompterPages(start, end, words);
+    pages.forEach(page => {
+      segments.push({
+        start: page.start,
+        end: page.end,
+        text: words.slice(page.start, page.end).join(' '),
+        words: page.end - page.start,
+        chunkEnd: page.end === end,
+      });
+    });
+  }
+  if (!segments.length && words.length) {
+    segments.push({start: 0, end: words.length, text: words.join(' '), words: words.length});
+  }
+  karaokeSegments = segments;
+  karaokeSegmentIndex = 0;
+}
+
+function segmentTimelineAt(elapsed) {
+  let cursor = 0;
+  for (let i = 0; i < karaokeSegments.length; i++) {
+    const segment = karaokeSegments[i];
+    const duration = Math.max(PROMPTER_MIN_SEGMENT_SECONDS, segment.words / RECORDING_WORDS_PER_SECOND);
+    if (elapsed < cursor + duration) {
+      return {kind: 'read', index: i, elapsedInSegment: elapsed - cursor};
+    }
+    cursor += duration;
+    if (i < karaokeSegments.length - 1 && segment.chunkEnd) {
+      if (elapsed < cursor + CHUNK_PAUSE_SECONDS) {
+        return {kind: 'pause', index: i + 1, elapsedInSegment: 0};
+      }
+      cursor += CHUNK_PAUSE_SECONDS;
+    }
+  }
+  return {kind: 'done', index: Math.max(0, karaokeSegments.length - 1), elapsedInSegment: 0};
+}
+
+function updateKaraokeHead(activeIndex, mode = 'read') {
+  const current = document.getElementById('karaoke-current');
+  const next = document.getElementById('karaoke-next');
+  if (!current || !next || !wordSpans.length) return;
+  if (!karaokeSegments.length && ACTIVE && PROJECT) {
+    buildKaraokeSegments(PROJECT.beats[ACTIVE]);
+  }
+  const targetSegment = karaokeSegments.findIndex(
+    segment => activeIndex >= segment.start && activeIndex < segment.end
+  );
+  if (targetSegment >= 0) {
+    karaokeSegmentIndex = targetSegment;
+  }
+  const segment = karaokeSegments[karaokeSegmentIndex] || karaokeSegments[0];
+  current.classList.toggle('pause', mode === 'pause');
+  if (mode === 'pause') {
+    current.textContent = 'Пауза для монтажа';
+    next.textContent = segment?.text ? `Дальше: ${segment.text}` : '';
+    return;
+  }
+  if (!segment) {
+    current.textContent = '';
+  } else {
+    const words = wordSpans.map(s => s.textContent);
+    current.innerHTML = words.slice(segment.start, segment.end).map((w, idx) => {
+      const realIndex = segment.start + idx;
+      if (realIndex < activeIndex) return `<span class="done">${escapeHtml(w)}</span>`;
+      if (realIndex === activeIndex) return `<span class="now">${escapeHtml(w)}</span>`;
+      return escapeHtml(w);
+    }).join(' ');
+  }
+  next.textContent = karaokeSegments[karaokeSegmentIndex + 1]?.text || '';
+}
+
+function setKaraokeIndex(activeIndex) {
+  wordSpans.forEach((span, i) => {
+    if (i < activeIndex) {
+      span.className = 'word past';
+    } else if (i === activeIndex) {
+      span.className = 'word active';
+      span.scrollIntoView({block: 'center', inline: 'nearest'});
+    } else {
+      span.className = 'word upcoming';
+    }
+  });
+  updateKaraokeHead(activeIndex);
+}
+
+function resetKaraoke() {
+  karaokeSegmentIndex = 0;
+  if (ACTIVE && PROJECT) buildKaraokeSegments(PROJECT.beats[ACTIVE]);
+  wordSpans.forEach(span => { span.className = 'word upcoming'; });
+  if (wordSpans.length) {
+    setKaraokeIndex(0);
+  } else {
+    document.getElementById('karaoke-current').textContent = 'Select a beat';
+    document.getElementById('karaoke-next').textContent = 'Then press Record';
+  }
+}
+
+function startRecordingKaraoke() {
+  clearInterval(recordingKaraokeInt);
+  karaokeAudio = null;
+  resetKaraoke();
+  recordingKaraokeInt = setInterval(() => {
+    const elapsed = (Date.now() - recStart) / 1000;
+    const state = segmentTimelineAt(elapsed);
+    const segment = karaokeSegments[state.index] || karaokeSegments[0];
+    if (!segment) return;
+    if (state.kind === 'pause') {
+      karaokeSegmentIndex = state.index;
+      updateKaraokeHead(segment.start, 'pause');
+      return;
+    }
+    if (state.kind === 'done') {
+      setKaraokeIndex(segment.end - 1);
+      return;
+    }
+    const active = Math.min(
+      segment.end - 1,
+      segment.start + Math.max(0, Math.floor(state.elapsedInSegment * RECORDING_WORDS_PER_SECOND))
+    );
+    setKaraokeIndex(active);
+  }, 120);
+}
+
+function stopRecordingKaraoke() {
+  clearInterval(recordingKaraokeInt);
+  recordingKaraokeInt = null;
+  wordSpans.forEach(span => { span.className = 'word upcoming'; });
+}
+
+function showKaraokePanel() {
+  const panel = document.getElementById('karaoke-head');
+  panel.classList.add('open');
+  panel.classList.remove('minimized');
+}
+
+function minimizeKaraokePanel() {
+  document.getElementById('karaoke-head').classList.add('minimized');
+}
+
+function hideKaraokePanel() {
+  const panel = document.getElementById('karaoke-head');
+  panel.classList.remove('open');
+  panel.classList.remove('minimized');
+}
+
+function cancelRecording() {
+  finishRecording(false);
+}
+
+function finishRecording(save = true) {
+  if (recordCountdownInt) {
+    clearInterval(recordCountdownInt);
+    recordCountdownInt = null;
+    if (!save) hideKaraokePanel();
+    document.getElementById('record-btn').classList.remove('recording');
+    document.getElementById('record-btn').textContent = '● Record';
+    document.getElementById('timer').textContent = '00:00';
+    return;
+  }
+  if (!recorder || recorder.state !== 'recording') return;
+  discardCurrentTake = !save;
+  recorder.stop();
+  clearInterval(timerInt);
+  timerInt = null;
+  stopRecordingKaraoke();
+  hideKaraokePanel();
+  document.getElementById('record-btn').classList.remove('recording');
+  document.getElementById('record-btn').textContent = '● Record';
+}
+
+function startRecordingNow() {
+  recChunks = [];
+  discardCurrentTake = false;
+  recorder.start();
+  recStart = Date.now();
+  timerInt = setInterval(updateTimer, 100);
+  startRecordingKaraoke();
+  showKaraokePanel();
+  document.getElementById('record-btn').classList.add('recording');
+  document.getElementById('record-btn').textContent = '■ Stop & save';
+}
+
+function startRecordCountdown() {
+  let remaining = RECORD_COUNTDOWN_SECONDS;
+  showKaraokePanel();
+  document.getElementById('karaoke-current').classList.add('pause');
+  document.getElementById('karaoke-current').textContent = `Старт через ${remaining}`;
+  document.getElementById('karaoke-next').textContent = 'Приготовься читать первый кусок.';
+  document.getElementById('record-btn').classList.add('recording');
+  document.getElementById('record-btn').textContent = 'Starting...';
+  recordCountdownInt = setInterval(() => {
+    remaining -= 1;
+    if (remaining > 0) {
+      document.getElementById('karaoke-current').textContent = `Старт через ${remaining}`;
+      return;
+    }
+    clearInterval(recordCountdownInt);
+    recordCountdownInt = null;
+    document.getElementById('karaoke-current').classList.remove('pause');
+    startRecordingNow();
+  }, 1000);
+}
+
+function updateRecordButton() {
+  const btn = document.getElementById('record-btn');
+  const status = document.getElementById('record-status');
+  if (!ACTIVE && !recorder) {
+    btn.disabled = true;
+    status.textContent = 'select beat + enable mic';
+    return;
+  }
+  if (!ACTIVE) {
+    btn.disabled = true;
+    status.textContent = 'select beat first';
+    return;
+  }
+  if (!recorder) {
+    btn.disabled = false;
+    status.textContent = 'record will ask mic';
+    return;
+  }
+  btn.disabled = false;
+  status.textContent = 'ready to record';
+}
 
 // ───────────────────────────────────────────────────────────────
 // Loading
@@ -317,6 +674,8 @@ async function loadProject() {
     status.innerHTML = 'API: <b>ok</b>';
     status.className = 'api ok';
     renderBeatList();
+    if (!ACTIVE && PROJECT.order.length) selectBeat(PROJECT.order[0]);
+    updateRecordButton();
   } catch (e) {
     const status = document.getElementById('api-status');
     status.innerHTML = 'API: <b>offline</b> — run <code>dl serve &lt;edit&gt;</code>';
@@ -489,6 +848,7 @@ function selectBeat(bid) {
   document.getElementById('process-render-btn').disabled = false;
   document.getElementById('render-beat-btn').disabled = false;
   document.getElementById('action-status').textContent = '';
+  updateRecordButton();
   renderWorkflowStatus();
 
   // Script tab
@@ -611,6 +971,7 @@ function renderRecord(beat) {
       wordSpans.push(span);
     }
   });
+  resetKaraoke();
   renderTakes();
 }
 
@@ -691,15 +1052,7 @@ async function attachKaraoke(audio) {
     if (!audio._words) return;
     const t = audio.currentTime;
     audio._words.forEach((w, i) => {
-      const span = wordSpans[i];
-      if (!span) return;
-      if (t >= w.start && t < w.end) {
-        span.className = 'word active';
-      } else if (t >= w.end) {
-        span.className = 'word past';
-      } else {
-        span.className = 'word upcoming';
-      }
+      if (t >= w.start && t < w.end) setKaraokeIndex(i);
     });
   });
 }
@@ -707,15 +1060,94 @@ async function attachKaraoke(audio) {
 // ───────────────────────────────────────────────────────────────
 // Audio recording with meter
 // ───────────────────────────────────────────────────────────────
+function setMicStatus(text, color) {
+  const el = document.getElementById('mic-status');
+  el.textContent = text;
+  el.style.color = color || 'var(--ink-dim)';
+}
+
+function setPermissionStatus(text, color) {
+  const el = document.getElementById('permission-status');
+  el.textContent = text;
+  el.style.color = color || 'var(--ink-dim)';
+}
+
+function mediaDevices() {
+  return navigator.mediaDevices;
+}
+
+async function refreshPermissionStatus() {
+  if (!navigator.permissions || !navigator.permissions.query) {
+    setPermissionStatus('permission: browser only');
+    return;
+  }
+  try {
+    const mic = await navigator.permissions.query({name: 'microphone'});
+    const camera = await navigator.permissions.query({name: 'camera'});
+    const color = mic.state === 'granted' ? 'var(--green)'
+      : mic.state === 'denied' ? 'var(--accent)'
+      : 'var(--ink-dim)';
+    setPermissionStatus(`permission: mic ${mic.state}, camera ${camera.state}`, color);
+    mic.onchange = refreshPermissionStatus;
+    camera.onchange = refreshPermissionStatus;
+  } catch (e) {
+    setPermissionStatus('permission: unknown');
+  }
+}
+
+function fillDeviceSelect(selectId, devices, kind, defaultLabel) {
+  const select = document.getElementById(selectId);
+  const previous = select.value;
+  const list = devices.filter(d => d.kind === kind);
+  select.innerHTML = `<option value="">${defaultLabel}</option>`;
+  list.forEach((device, i) => {
+    const opt = document.createElement('option');
+    opt.value = device.deviceId;
+    opt.textContent = device.label || `${defaultLabel} ${i + 1}`;
+    select.appendChild(opt);
+  });
+  if ([...select.options].some(o => o.value === previous)) {
+    select.value = previous;
+  }
+}
+
+async function refreshDevices() {
+  try {
+    if (!mediaDevices() || !mediaDevices().enumerateDevices) {
+      setMicStatus('media devices unavailable', 'var(--accent)');
+      return;
+    }
+    const devices = await mediaDevices().enumerateDevices();
+    fillDeviceSelect('mic-select', devices, 'audioinput', 'Default mic');
+    fillDeviceSelect('camera-select', devices, 'videoinput', 'Default camera');
+  } catch (e) {
+    setMicStatus(`devices error: ${e.name || e.message}`, 'var(--accent)');
+  }
+}
+
 async function setupMic() {
   try {
-    recStream = await navigator.mediaDevices.getUserMedia({audio: true});
+    await refreshPermissionStatus();
+    if (!mediaDevices() || !mediaDevices().getUserMedia) {
+      setMicStatus('getUserMedia unavailable', 'var(--accent)');
+      return;
+    }
+    setMicStatus('requesting mic');
+    if (recStream) recStream.getTracks().forEach(t => t.stop());
+    if (audioCtx) await audioCtx.close().catch(() => {});
+    const deviceId = document.getElementById('mic-select').value;
+    const audio = deviceId ? {deviceId: {exact: deviceId}} : true;
+    recStream = await mediaDevices().getUserMedia({audio});
     recorder = new MediaRecorder(recStream, {mimeType: 'audio/webm'});
     recorder.ondataavailable = e => { if (e.data.size > 0) recChunks.push(e.data); };
     recorder.onstop = saveTake;
-    document.getElementById('record-btn').disabled = false;
-    document.getElementById('mic-status').textContent = 'mic ready';
-    document.getElementById('mic-status').style.color = 'var(--green)';
+    document.getElementById('mic-btn').disabled = true;
+    document.getElementById('mic-btn').textContent = '🎙 Mic ready';
+    document.getElementById('mic-test-hint').textContent = 'Speak now. If the bars move, the microphone works.';
+    setMicStatus('mic ready', 'var(--green)');
+    await refreshDevices();
+    await refreshPermissionStatus();
+    updateRecordButton();
     // Meter
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     const src = audioCtx.createMediaStreamSource(recStream);
@@ -738,33 +1170,82 @@ async function setupMic() {
       const peakDb = 20 * Math.log10(Math.max(peak, 1e-6));
       document.getElementById('meter-rms').style.width = Math.min(100, (rmsDb + 60) * 1.5) + '%';
       document.getElementById('meter-peak').style.width = Math.min(100, (peakDb + 60) * 1.5) + '%';
+      document.getElementById('test-meter-rms').style.width = Math.min(100, (rmsDb + 60) * 1.5) + '%';
+      document.getElementById('test-meter-peak').style.width = Math.min(100, (peakDb + 60) * 1.5) + '%';
       document.getElementById('meter-rms-val').textContent = rmsDb.toFixed(1);
       document.getElementById('meter-peak-val').textContent = peakDb.toFixed(1);
+      document.getElementById('test-meter-rms-val').textContent = rmsDb.toFixed(1);
+      document.getElementById('test-meter-peak-val').textContent = peakDb.toFixed(1);
       const peakBar = document.getElementById('meter-peak');
       peakBar.classList.toggle('peak', peakDb > -3);
+      document.getElementById('test-meter-peak').classList.toggle('peak', peakDb > -3);
       requestAnimationFrame(tick);
     }
     tick();
   } catch (e) {
-    document.getElementById('mic-status').textContent = 'mic denied';
-    document.getElementById('mic-status').style.color = 'var(--accent)';
+    setMicStatus(`mic denied: ${e.name || e.message}`, 'var(--accent)');
+    document.getElementById('mic-btn').disabled = false;
+    document.getElementById('mic-btn').textContent = '🎙 Request mic permission';
+    document.getElementById('mic-test-hint').textContent = e.name === 'NotAllowedError'
+      ? 'Chrome denied microphone access. Use the site settings icon in the address bar, allow Microphone, then press this button again.'
+      : `Microphone failed: ${e.name || e.message}`;
+    recorder = null;
+    await refreshPermissionStatus();
+    updateRecordButton();
   }
 }
 
-function toggleRecord() {
+async function setupCamera() {
+  try {
+    await refreshPermissionStatus();
+    if (!mediaDevices() || !mediaDevices().getUserMedia) {
+      setMicStatus('getUserMedia unavailable', 'var(--accent)');
+      return;
+    }
+    setMicStatus('requesting camera');
+    if (cameraStream) cameraStream.getTracks().forEach(t => t.stop());
+    const deviceId = document.getElementById('camera-select').value;
+    const video = deviceId ? {deviceId: {exact: deviceId}} : true;
+    cameraStream = await mediaDevices().getUserMedia({video});
+    const preview = document.getElementById('camera-preview');
+    preview.srcObject = cameraStream;
+    await preview.play().catch(() => {});
+    setMicStatus('camera ready', 'var(--green)');
+    document.getElementById('camera-btn').textContent = '📷 Camera ready';
+    document.getElementById('camera-test-hint').textContent = 'Camera preview is live.';
+    await refreshDevices();
+    await refreshPermissionStatus();
+  } catch (e) {
+    setMicStatus(`camera denied: ${e.name || e.message}`, 'var(--accent)');
+    document.getElementById('camera-test-hint').textContent = e.name === 'NotAllowedError'
+      ? 'Chrome denied camera access. Use the site settings icon in the address bar, allow Camera, then press this button again.'
+      : `Camera failed: ${e.name || e.message}`;
+    await refreshPermissionStatus();
+  }
+}
+
+function stopCameraTest() {
+  if (cameraStream) {
+    cameraStream.getTracks().forEach(t => t.stop());
+    cameraStream = null;
+  }
+  const preview = document.getElementById('camera-preview');
+  preview.srcObject = null;
+  document.getElementById('camera-btn').textContent = '📷 Request camera permission';
+  document.getElementById('camera-test-hint').textContent = 'Camera preview stopped.';
+}
+
+async function toggleRecord() {
   if (!ACTIVE) { alert('Select a beat first'); return; }
+  if (recordCountdownInt) return;
+  if (!recorder) {
+    await setupMic();
+    if (!recorder) return;
+  }
   if (recorder.state === 'recording') {
-    recorder.stop();
-    clearInterval(timerInt);
-    document.getElementById('record-btn').classList.remove('recording');
-    document.getElementById('record-btn').textContent = '● Record';
+    finishRecording(true);
   } else {
-    recChunks = [];
-    recorder.start();
-    recStart = Date.now();
-    timerInt = setInterval(updateTimer, 100);
-    document.getElementById('record-btn').classList.add('recording');
-    document.getElementById('record-btn').textContent = '■ Stop';
+    startRecordCountdown();
   }
 }
 
@@ -776,6 +1257,12 @@ function updateTimer() {
 }
 
 async function saveTake() {
+  if (discardCurrentTake) {
+    discardCurrentTake = false;
+    recChunks = [];
+    document.getElementById('timer').textContent = '00:00';
+    return;
+  }
   const blob = new Blob(recChunks, {type: 'audio/webm'});
   const existing = RECORDINGS.filter(r => r.name.includes(`_${ACTIVE}_`)).length;
   const slug = (PROJECT.beats[ACTIVE].title || ACTIVE)
@@ -867,6 +1354,16 @@ document.querySelectorAll('header .tab').forEach(t => {
 // Init
 // ───────────────────────────────────────────────────────────────
 document.getElementById('record-btn').addEventListener('click', toggleRecord);
+document.getElementById('mic-btn').addEventListener('click', setupMic);
+document.getElementById('camera-btn').addEventListener('click', setupCamera);
+document.getElementById('camera-stop-btn').addEventListener('click', stopCameraTest);
+document.getElementById('karaoke-preview-btn').addEventListener('click', showKaraokePanel);
+document.getElementById('karaoke-close-btn').addEventListener('click', minimizeKaraokePanel);
+document.getElementById('karaoke-show-btn').addEventListener('click', showKaraokePanel);
+document.getElementById('stop-save-btn').addEventListener('click', () => finishRecording(true));
+document.getElementById('cancel-recording-btn').addEventListener('click', cancelRecording);
+document.getElementById('devices-btn').addEventListener('click', refreshDevices);
+document.getElementById('mic-select').addEventListener('change', setupMic);
 document.getElementById('play-last-btn').addEventListener('click', playLast);
 document.getElementById('run-check-btn').addEventListener('click', runCheck);
 document.getElementById('process-render-btn').addEventListener('click', processLatestAndRender);
@@ -882,7 +1379,8 @@ loadProject();
 loadRecordings();
 loadFeedback();
 loadStatus();
-setupMic();
+refreshDevices();
+refreshPermissionStatus();
 
 // Refresh feedback periodically — agents write asynchronously
 setInterval(loadFeedback, 5000);

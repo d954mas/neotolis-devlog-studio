@@ -106,25 +106,74 @@ def make_overlay_badge(
     canvas = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     draw = ImageDraw.Draw(canvas)
 
+    def _text_box(value: str, font: ImageFont.FreeTypeFont, spacing: int = 0) -> tuple[int, int]:
+        if "\n" in value:
+            bbox = draw.multiline_textbbox((0, 0), value, font=font, spacing=spacing)
+        else:
+            bbox = draw.textbbox((0, 0), value, font=font, anchor="lt")
+        return bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+    def _soft_backdrop(box: tuple[int, int, int, int], radius: int, alpha: int = 190) -> None:
+        x1, y1, x2, y2 = box
+        shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        sd = ImageDraw.Draw(shadow)
+        sd.rounded_rectangle((x1 + S(10), y1 + S(18), x2 + S(10), y2 + S(18)),
+                             radius=radius, fill=(0, 0, 0, 180))
+        shadow = shadow.filter(ImageFilter.GaussianBlur(S(30)))
+        canvas.alpha_composite(shadow)
+        gd = ImageDraw.Draw(canvas)
+        gd.rounded_rectangle(box, radius=radius, fill=(13, 12, 10, alpha))
+        gd.rounded_rectangle(box, radius=radius, outline=(*pal.gold, 95), width=max(1, S(2)))
+
     # ── HERO style ──
     if style == "hero":
-        text_size = S(140)
-        sub_size = S(64)
-        f_main = ImageFont.truetype(pick_font(text, design), text_size)
-        f_sub = ImageFont.truetype(pick_font(subtitle, design), sub_size) if subtitle else None
-        bbox = draw.textbbox((0, 0), text, font=f_main, anchor="lt")
-        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-        sub_h = sub_size + S(24) if subtitle else 0
+        text_size = S(150)
+        sub_size = S(56)
+        max_w = W - S(260)
+        max_h = int(H * 0.54)
+        ml = "\n" in text
+        for _ in range(10):
+            f_main = ImageFont.truetype(pick_font(text, design), text_size)
+            f_sub = ImageFont.truetype(pick_font(subtitle, design), sub_size) if subtitle else None
+            line_spacing = int(text_size * 0.16)
+            tw, th = _text_box(text, f_main, line_spacing)
+            sw, sh = _text_box(subtitle, f_sub) if subtitle and f_sub else (0, 0)
+            sub_h = sh + S(26) if subtitle else 0
+            if max(tw, sw) <= max_w and th + sub_h <= max_h:
+                break
+            text_size = max(S(76), int(text_size * 0.90))
+            sub_size = max(S(34), int(sub_size * 0.90))
         block_h = th + sub_h + S(20)
         block_y = (H - block_h) // 2
         tx = (W - tw) // 2
         ty = block_y
-        stroke_w = S(8)
+
+        box_w = min(W - S(180), max(tw, sw) + S(180))
+        box_h = block_h + S(118)
+        bx = (W - box_w) // 2
+        by = max(S(110), block_y - S(60))
+        glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        gd = ImageDraw.Draw(glow)
+        gd.ellipse((bx - S(120), by - S(80), bx + box_w + S(120), by + box_h + S(100)),
+                   fill=(*pal.red, 42))
+        glow = glow.filter(ImageFilter.GaussianBlur(S(70)))
+        canvas.alpha_composite(glow)
+        _soft_backdrop((bx, by, bx + box_w, by + box_h), S(30), alpha=145)
+        draw = ImageDraw.Draw(canvas)
+        stroke_w = S(7)
         for dx in range(-stroke_w, stroke_w + 1, max(1, S(2))):
             for dy in range(-stroke_w, stroke_w + 1, max(1, S(2))):
                 if dx * dx + dy * dy <= stroke_w * stroke_w:
-                    draw.text((tx + dx, ty + dy), text, fill=(0, 0, 0, 255), font=f_main, anchor="lt")
-        draw.text((tx, ty), text, fill=(255, 255, 255, 255), font=f_main, anchor="lt")
+                    if ml:
+                        draw.multiline_text((tx + dx, ty + dy), text, fill=(0, 0, 0, 255),
+                                            font=f_main, spacing=line_spacing, align="center")
+                    else:
+                        draw.text((tx + dx, ty + dy), text, fill=(0, 0, 0, 255), font=f_main, anchor="lt")
+        if ml:
+            draw.multiline_text((tx, ty), text, fill=(*pal.white, 255),
+                                font=f_main, spacing=line_spacing, align="center")
+        else:
+            draw.text((tx, ty), text, fill=(*pal.white, 255), font=f_main, anchor="lt")
         if subtitle and f_sub:
             sb = draw.textbbox((0, 0), subtitle, font=f_sub, anchor="lt")
             sw = sb[2] - sb[0]
@@ -183,8 +232,6 @@ def make_overlay_badge(
                                radius=S(24), fill=(20, 16, 12, 235))
         draw.rounded_rectangle((cx, cy, cx + card_w, cy + card_h),
                                radius=S(24), outline=(*pal.gold, 255), width=S(5))
-        # Red left accent bar
-        draw.rectangle((cx, cy + S(30), cx + S(14), cy + card_h - S(30)), fill=(*pal.red, 255))
         # Text
         tx = (W - tw) // 2
         ty = cy + pad_y
@@ -205,47 +252,48 @@ def make_overlay_badge(
             draw.text((sx, sy), subtitle, fill=(*pal.gold_dim, 255), font=f_sub, anchor="lt")
         return np.array(canvas)
 
-    # ── BAND style (default) ──
-    text_size = S(96)
-    sub_size = S(44)
-    f_main = ImageFont.truetype(pick_font(text, design), text_size)
-    f_sub = ImageFont.truetype(pick_font(subtitle, design), sub_size) if subtitle else None
-    bbox = draw.textbbox((0, 0), text, font=f_main)
-    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    sub_h = sub_size + S(20) if subtitle else 0
+    # ── BAND style (default): compact lower-third callout ──
+    text_size = S(86)
+    sub_size = S(36)
+    max_w = W - S(300)
+    for _ in range(9):
+        f_main = ImageFont.truetype(pick_font(text, design), text_size)
+        f_sub = ImageFont.truetype(pick_font(subtitle, design), sub_size) if subtitle else None
+        tw, th = _text_box(text, f_main)
+        sw, sh = _text_box(subtitle, f_sub) if subtitle and f_sub else (0, 0)
+        if max(tw, sw) <= max_w:
+            break
+        text_size = max(S(52), int(text_size * 0.90))
+        sub_size = max(S(24), int(sub_size * 0.90))
 
-    pad_v = S(design.overlay_band_pad_v)
-    margin = S(60)
-    red_bar_w = S(12)
-    band_h = th + pad_v + sub_h
+    pad_x = S(72)
+    pad_y = S(42)
+    gap = S(16) if subtitle else 0
+    accent_safe_w = S(112)
+    box_w = max(S(860), min(W - S(200), max(tw, sw) + pad_x * 2 + accent_safe_w))
+    box_h = th + sh + gap + pad_y * 2
 
     if position == "bottom":
-        band_y = H - band_h - margin
+        y = H - box_h - S(78)
     elif position == "top":
-        band_y = margin
+        y = S(78)
     else:
-        band_y = (H - band_h) // 2
+        y = (H - box_h) // 2
+    x = (W - box_w) // 2
 
-    draw.rectangle((0, band_y, W, band_y + band_h), fill=(20, 16, 12, 240))
-    draw.line([(red_bar_w + S(2), band_y), (W, band_y)], fill=(*pal.gold, 100), width=max(1, S(2)))
-    draw.rectangle((0, band_y, red_bar_w, band_y + band_h), fill=pal.red)
-
-    fade_px = S(12)
-    for yy in range(fade_px):
-        alpha = int(240 * (yy / max(1, fade_px)))
-        draw.line([(red_bar_w + S(2), band_y + yy), (W, band_y + yy)], fill=(20, 16, 12, alpha))
-
-    tx = (W - tw) // 2
-    ty = band_y + S(40)
-    draw.text((tx + S(3), ty + S(3)), text, fill=(0, 0, 0, 255), font=f_main, anchor="lt")
-    draw.text((tx, ty), text, fill=(*pal.gold, 255), font=f_main, anchor="lt")
+    _soft_backdrop((x, y, x + box_w, y + box_h), S(24), alpha=205)
+    draw = ImageDraw.Draw(canvas)
+    text_area_x = x + S(34)
+    text_area_w = box_w - S(68)
+    tx = text_area_x + max(0, (text_area_w - tw) // 2)
+    ty = y + pad_y
+    draw.text((tx + S(3), ty + S(4)), text, fill=(0, 0, 0, 255), font=f_main, anchor="lt")
+    draw.text((tx, ty), text, fill=(*pal.white, 255), font=f_main, anchor="lt")
 
     if subtitle and f_sub:
-        sbbox = draw.textbbox((0, 0), subtitle, font=f_sub, anchor="lt")
-        sw = sbbox[2] - sbbox[0]
-        sx = (W - sw) // 2
-        sy = ty + th + S(22)
-        draw.text((sx + S(2), sy + S(2)), subtitle, fill=(0, 0, 0, 255), font=f_sub, anchor="lt")
-        draw.text((sx, sy), subtitle, fill=(*pal.gold_dim, 255), font=f_sub, anchor="lt")
+        sx = text_area_x + max(0, (text_area_w - sw) // 2)
+        sy = ty + th + gap
+        draw.text((sx + S(2), sy + S(3)), subtitle, fill=(0, 0, 0, 255), font=f_sub, anchor="lt")
+        draw.text((sx, sy), subtitle, fill=(*pal.gold, 255), font=f_sub, anchor="lt")
 
     return np.array(canvas)

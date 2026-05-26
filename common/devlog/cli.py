@@ -761,6 +761,43 @@ def cmd_gen(args):
     print(f"[devlog] generated {out}")
 
 
+def cmd_gen_html(args):
+    """Render or initialize an optional Hyperframes HTML/GSAP asset."""
+    config = load_config()
+    edit_path = _resolve_edit(args.edit, config)
+    _edit, root = _load_edit(edit_path)
+    _project_chdir(root)
+
+    from devlog.hyperframes import create_sample_project, render_hyperframes
+
+    project_dir = Path(args.project)
+    if args.init:
+        create_sample_project(project_dir, force=args.force, title=args.title)
+        print(f"[devlog] hyperframes sample -> {project_dir}")
+        if not args.out:
+            return
+
+    if not args.out:
+        raise SystemExit("--out is required unless using --init without rendering.")
+
+    out = render_hyperframes(
+        project_dir,
+        args.out,
+        composition=args.composition,
+        fps=args.fps,
+        quality=args.quality,
+        fmt=args.format,
+        workers=args.workers,
+        docker=args.docker,
+        gpu=args.gpu,
+        resolution=args.resolution,
+        variables=args.variables,
+        variables_file=args.variables_file,
+        package=args.package,
+    )
+    print(f"[devlog] hyperframes generated {out}")
+
+
 def _write_or_print(text: str, out_path: str | None) -> None:
     if out_path:
         Path(out_path).parent.mkdir(parents=True, exist_ok=True)
@@ -909,11 +946,13 @@ Next steps:
 4. Run `dl check {project}.edits.{edit_name}` before rendering.
 5. Render drafts with `dl render {project}.edits.{edit_name} --width 540p --quality draft -j 6`.
 ''', args.force)
-    source_agents = Path.cwd() / "trolley" / ".claude" / "agents"
+    source_agents = Path.cwd() / ".claude" / "agents"
+    if not source_agents.exists():
+        source_agents = Path.cwd() / "trolley" / ".claude" / "agents"
     target_agents = root / ".claude" / "agents"
     if source_agents.exists():
         target_agents.mkdir(parents=True, exist_ok=True)
-        for agent_name in ("vo-reviewer.md", "video-reviewer.md"):
+        for agent_name in ("vo-reviewer.md", "video-reviewer.md", "motion-infographic-designer.md"):
             src = source_agents / agent_name
             dst = target_agents / agent_name
             if src.exists() and (args.force or not dst.exists()):
@@ -1148,6 +1187,32 @@ def build_parser() -> argparse.ArgumentParser:
     p_gen.add_argument("--sample", choices=["bar", "timeline", "workflow", "counter"],
                        help="Render a built-in sample spec")
     p_gen.set_defaults(func=cmd_gen)
+
+    p_gen_html = sub.add_parser("gen-html", help="Render Hyperframes HTML/GSAP asset")
+    p_gen_html.add_argument("project", help="Hyperframes project directory")
+    p_gen_html.add_argument("--edit", help="Edit module for project root; defaults to devlog.toml")
+    p_gen_html.add_argument("--out", help="Output .mp4/.webm/.mov path relative to project root")
+    p_gen_html.add_argument("--init", action="store_true",
+                            help="Create a minimal sample Hyperframes project before rendering")
+    p_gen_html.add_argument("--force", action="store_true", help="Overwrite sample files for --init")
+    p_gen_html.add_argument("--title", default="273 COMMITS", help="Sample title for --init")
+    p_gen_html.add_argument("--composition", "-c",
+                            help="Render a specific composition file instead of index.html")
+    p_gen_html.add_argument("--fps", help="Frame rate, e.g. 30 or 30000/1001")
+    p_gen_html.add_argument("--quality", choices=["draft", "standard", "high"],
+                            help="Hyperframes quality preset")
+    p_gen_html.add_argument("--format", choices=["mp4", "webm", "mov", "png-sequence"],
+                            help="Hyperframes output format")
+    p_gen_html.add_argument("--workers", help="Parallel render workers, e.g. 4 or auto")
+    p_gen_html.add_argument("--docker", action="store_true",
+                            help="Use Hyperframes Docker mode for deterministic render")
+    p_gen_html.add_argument("--gpu", action="store_true", help="Use Hyperframes GPU encoding")
+    p_gen_html.add_argument("--resolution", help="Hyperframes resolution preset, e.g. 4k")
+    p_gen_html.add_argument("--variables", help="JSON object passed to Hyperframes --variables")
+    p_gen_html.add_argument("--variables-file", help="JSON file passed to Hyperframes --variables-file")
+    p_gen_html.add_argument("--package", default="hyperframes",
+                            help="npx package/executable to run (default: hyperframes)")
+    p_gen_html.set_defaults(func=cmd_gen_html)
 
     p_script = sub.add_parser("script", help="Export VO script markdown")
     p_script.add_argument("edit", nargs="?")

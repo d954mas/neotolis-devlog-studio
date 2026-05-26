@@ -71,6 +71,10 @@
   .btn:disabled { opacity: 0.4; cursor: not-allowed; }
   .btn.record { background: var(--accent); border-color: var(--accent); }
   .btn.record.recording { background: var(--green); border-color: var(--green); }
+  .btn.secondary { background: var(--paper); color: var(--ink); }
+  .device-select { max-width: 190px; padding: 8px 10px; border-radius: 6px;
+    border: 1px solid var(--line); background: var(--paper); color: var(--ink);
+    font-size: 12px; }
   .timer { font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 700;
     color: var(--ink-dim); }
 
@@ -114,6 +118,11 @@
       <div class="vo-text" id="vo-text">Pick a beat from the left to see its voiceover script.</div>
     </div>
     <div class="controls">
+      <button class="btn secondary" id="mic-btn">🎙 Enable mic</button>
+      <button class="btn secondary" id="devices-btn">↻ Devices</button>
+      <select class="device-select" id="mic-select" title="Microphone">
+        <option value="">Default mic</option>
+      </select>
       <button class="btn record" id="record-btn" disabled>● Record</button>
       <span class="timer" id="timer">00:00</span>
       <span class="spacer" style="flex:1"></span>
@@ -138,6 +147,8 @@ let PROJECT = null;       // /api/project response
 let RECORDINGS = [];      // /api/list response
 let ACTIVE_BEAT = null;   // beat id currently selected
 let recorder = null;      // MediaRecorder instance
+let recStream = null;
+let audioCtx = null;
 let chunks = [];          // recording chunks
 let startTs = 0;
 let timerInterval = null;
@@ -244,24 +255,75 @@ function escapeHtml(s) {
 // ───────────────────────────────────────────────────────────────
 // Recording
 // ───────────────────────────────────────────────────────────────
+function setMicStatus(text, color) {
+  const el = document.getElementById('mic-status');
+  el.textContent = text;
+  el.style.color = color || 'var(--ink-dim)';
+}
+
+function mediaDevices() {
+  return navigator.mediaDevices;
+}
+
+async function refreshDevices() {
+  try {
+    if (!mediaDevices() || !mediaDevices().enumerateDevices) {
+      setMicStatus('media devices unavailable', 'var(--accent)');
+      return;
+    }
+    const select = document.getElementById('mic-select');
+    const previous = select.value;
+    const devices = await mediaDevices().enumerateDevices();
+    const mics = devices.filter(d => d.kind === 'audioinput');
+    select.innerHTML = '<option value="">Default mic</option>';
+    mics.forEach((device, i) => {
+      const opt = document.createElement('option');
+      opt.value = device.deviceId;
+      opt.textContent = device.label || `Default mic ${i + 1}`;
+      select.appendChild(opt);
+    });
+    if ([...select.options].some(o => o.value === previous)) {
+      select.value = previous;
+    }
+  } catch (e) {
+    setMicStatus(`devices error: ${e.name || e.message}`, 'var(--accent)');
+  }
+}
+
 async function setupMic() {
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({audio: true});
-    recorder = new MediaRecorder(stream, {mimeType: 'audio/webm'});
+    if (!mediaDevices() || !mediaDevices().getUserMedia) {
+      setMicStatus('getUserMedia unavailable', 'var(--accent)');
+      return;
+    }
+    setMicStatus('requesting mic');
+    if (recStream) recStream.getTracks().forEach(t => t.stop());
+    if (audioCtx) await audioCtx.close().catch(() => {});
+    const deviceId = document.getElementById('mic-select').value;
+    const audio = deviceId ? {deviceId: {exact: deviceId}} : true;
+    recStream = await mediaDevices().getUserMedia({audio});
+    recorder = new MediaRecorder(recStream, {mimeType: 'audio/webm'});
     recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
     recorder.onstop = saveTake;
     document.getElementById('record-btn').disabled = false;
-    document.getElementById('mic-status').textContent = 'mic ready';
-    document.getElementById('mic-status').style.color = 'var(--green)';
+    document.getElementById('mic-btn').disabled = true;
+    document.getElementById('mic-btn').textContent = '🎙 Mic ready';
+    setMicStatus('mic ready', 'var(--green)');
+    await refreshDevices();
   } catch (e) {
-    document.getElementById('mic-status').textContent = 'mic denied';
-    document.getElementById('mic-status').style.color = 'var(--accent)';
+    setMicStatus(`mic denied: ${e.name || e.message}`, 'var(--accent)');
+    document.getElementById('mic-btn').disabled = false;
+    document.getElementById('mic-btn').textContent = '🎙 Enable mic';
     console.error('Mic permission:', e);
   }
 }
 
-function toggleRecord() {
+async function toggleRecord() {
   if (!ACTIVE_BEAT) { alert('Select a beat first'); return; }
+  if (!recorder) {
+    await setupMic();
+    if (!recorder) return;
+  }
   if (recorder.state === 'recording') {
     recorder.stop();
     clearInterval(timerInterval);
@@ -311,9 +373,12 @@ async function saveTake() {
 // Init
 // ───────────────────────────────────────────────────────────────
 document.getElementById('record-btn').addEventListener('click', toggleRecord);
+document.getElementById('mic-btn').addEventListener('click', setupMic);
+document.getElementById('devices-btn').addEventListener('click', refreshDevices);
+document.getElementById('mic-select').addEventListener('change', setupMic);
 loadProject();
 loadRecordings();
-setupMic();
+refreshDevices();
 </script>
 
 </body>

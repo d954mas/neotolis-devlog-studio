@@ -76,6 +76,7 @@ dl.bat compose newproject.edits.youtube intro
 | `dl stale [edit]` | Show missing renders or renders older than inputs |
 | `dl assets [edit]` | Show used, missing, unused, and low-resolution assets |
 | `dl gen [spec.json] --out <path>` | Render generated infographic PNG/MP4 assets from a JSON spec or sample |
+| `dl gen-html <dir> --out <path>` | Render optional Hyperframes HTML/GSAP motion assets |
 | `dl smoke` | Run unit tests + `check` + `beats` as a fast self-test |
 | `dl cache-info` | Show render cache entry count and size |
 | `dl cache-prune --older-than-days N` | Remove old render cache entries |
@@ -108,6 +109,8 @@ dl stale --width 540p --quality draft   # what needs rerendering
 dl assets --width 4k                    # missing/unused/low-res asset report
 dl gen --sample bar --out data/infographics/sample_bar.mp4
 dl gen chart.json --out data/infographics/my_chart.mp4 --width 540p
+dl gen-html data/hyperframes/bar_demo --init
+dl gen-html data/hyperframes/bar_demo --out data/infographics/bar_demo.mp4 --quality draft
 dl cache-info                           # render cache size
 dl cache-prune --older-than-days 14     # clean old cache entries
 dl script --out data/review/script.md   # VO script export

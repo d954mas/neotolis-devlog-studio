@@ -543,7 +543,8 @@ def compose_ffmpeg(beat: Beat, design: Design, out_path: str,
                 f"crop={design.W}:{design.H},setsar=1,fps={design.fps},"
                 f"format=yuva420p,"
                 f"fade=t=in:st=0:d={fi:.3f}:alpha=1,"
-                f"fade=t=out:st={dur - fo:.3f}:d={fo:.3f}:alpha=1[{tmp_label}]"
+                f"fade=t=out:st={dur - fo:.3f}:d={fo:.3f}:alpha=1,"
+                f"setpts=PTS-STARTPTS+{t_start:.3f}/TB[{tmp_label}]"
             )
             out_label = f"v_vid_{ci}"
             filter_parts.append(

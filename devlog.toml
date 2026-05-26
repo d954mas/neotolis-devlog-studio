@@ -1,6 +1,6 @@
 # Workspace defaults for fast local iteration.
 
-default_edit = "trolley.edits.youtube"
+default_edit = "neotolis_diary.edits.youtube"
 
 [defaults]
 width = "540p"
