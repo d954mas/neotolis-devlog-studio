@@ -1,0 +1,7 @@
+interface:
+  display_name: "Devlog Reflection"
+  short_description: "Find slow steps and improve the devlog pipeline."
+  default_prompt: "Use $devlog-reflection to review the latest devlog production run, identify bottlenecks, and propose concrete improvements."
+
+policy:
+  allow_implicit_invocation: true

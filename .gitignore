@@ -31,6 +31,7 @@ __pycache__/
 **/data/**/*.mp4
 **/data/**/*.webm
 **/data/**/*.wav
+**/data/**/*.mp3
 **/data/**/*.m4a
 **/data/**/*.opus
 **/data/**/*.mov
@@ -49,6 +50,10 @@ __pycache__/
 
 # Raw recordings folder (large webm takes)
 **/data/recordings/*
+
+# Generated Hyperframes projects and native generator caches
+**/data/hyperframes/
+**/data/infographics/.build_cache.json
 
 # ─── Stray temp files in project root ──────────────────────
 **/tmp_*

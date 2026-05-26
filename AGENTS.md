@@ -28,9 +28,13 @@ devlogs/                   ← workspace root, git repo, contains common/ + proj
 | Final upload-ready render | `dl final [edit]` | CLI |
 | Start a new video from script | `dl new-video <project> --script <file>` | CLI |
 | Improve a rendered beat/video | Loop: render → reviewer → mech fixes → repeat | workflow |
+| Create simple chart/counter/timeline infographic | `dl gen` from JSON/sample, then use as `Scene(kind="video"|"image")` | CLI |
+| Create rich HTML/GSAP motion graphic | `dl gen-html <dir> --init`, edit HTML/CSS/JS, render to MP4 | CLI/Hyperframes |
 | Cut clip for reel/short | `dl cut` with reframe | CLI |
 | Review a recorded VO take | Spawn `vo-reviewer` agent on `.webm` | (agent) |
 | Review composed beat / iter video | Spawn `video-reviewer` agent | (agent) |
+| Design infographic/motion asset plan | Spawn `motion-infographic-designer` | (agent) |
+| Reflect after a devlog run | Spawn `devlog-reflector`, use `devlog-reflection` | agent/skill |
 
 ## Critical engineering defaults
 
@@ -60,6 +64,59 @@ devlogs/                   ← workspace root, git repo, contains common/ + proj
 
 13. **Per-chunk fade-in/out is currently disabled in ffmpeg engine** — known interaction with overlay alpha that broke text bands. Plates and overlay bands pop in/out abruptly. Don't try to "fix" the missing fade with hacks unless you have a verified ffmpeg alpha-fade approach. Crossfade between scenes (xfade) works fine.
 
+14. **Generated infographics are first-class assets.** Use `dl gen` for simple branded charts/counters/timelines/workflow diagrams. It uses `common/devlog/anim.py`, `charts.py`, and `generated.py`, with only Pillow + NumPy + FFmpeg. Render to `data/infographics/*.mp4` or `.png`, then reference the file from `beats.py` through `Scene(kind="video", src="data/infographics/<file>.mp4")` or `Scene(kind="image", ...)`.
+
+15. **Hyperframes is optional for rich motion graphics, not the core renderer.** Use `dl gen-html` when the visual needs HTML/CSS layout, GSAP animation, dashboard-like UI, or complex motion that is awkward in Pillow. It runs `npx hyperframes render` via `common/devlog/hyperframes.py` and requires Node 22+, npm/npx, Chromium/Puppeteer download access, and FFmpeg. Keep Hyperframes projects under `data/hyperframes/<name>/` and render outputs under `data/infographics/`.
+
+16. **Do not replace the devlog pipeline with Hyperframes or Remotion.** The main video remains `Beat`/`Chunk`/`Scene` + FFmpeg composition. Hyperframes/`dl gen` only produce asset clips that the existing pipeline consumes.
+
+## Infographic and motion workflow
+
+Use this decision tree:
+
+| Need | Use | Command |
+|---|---|---|
+| Bar chart, counter, timeline, simple workflow diagram | Native generator | `dl gen spec.json --out data/infographics/name.mp4 --width 540p` |
+| Quick native generator sample | Native generator | `dl gen --sample bar --out data/infographics/sample_bar.mp4` |
+| HTML/CSS/GSAP motion, dashboard, UI animation | Hyperframes bridge | `dl gen-html data/hyperframes/name --init`, edit HTML, then render |
+| Math/whiteboard explanation | Consider external Manim asset, then import as video | Ask before adding new dependency |
+
+Native `dl gen` JSON spec examples:
+
+```json
+{
+  "type": "bar_chart",
+  "title": "273 COMMITS",
+  "subtitle": "13 DAY JAM",
+  "values": [
+    {"label": "D1", "value": 8},
+    {"label": "D2", "value": 23},
+    {"label": "D3", "value": 80}
+  ],
+  "highlight_index": 2
+}
+```
+
+Supported native types: `bar_chart`, `timeline`, `workflow`, `counter`.
+
+Hyperframes starter flow:
+
+```powershell
+dl gen-html data/hyperframes/bar_demo --init
+# edit data/hyperframes/bar_demo/index.html
+dl gen-html data/hyperframes/bar_demo --out data/infographics/bar_demo.mp4 --quality draft
+```
+
+After generation, connect the asset in `beats.py`:
+
+```python
+Chunk(words=(0, 5), kind="overlay",
+      text="273 КОММИТА", subtitle="ЗА 13 ДНЕЙ",
+      scene=Scene(kind="video", src="data/infographics/bar_demo.mp4"))
+```
+
+Run `dl check` after connecting generated assets. Run `dl assets --width 4k` before final.
+
 ## Improve-loop discipline
 
 When running `/dl-improve` or auto-iterating on review feedback, the
@@ -87,18 +144,26 @@ Reviewers persist verdicts to `<project>/data/review/feedback.json` so the
 studio UI displays them. Use Write tool inside the agent. Merge with existing
 `vo` / `video` keys — don't overwrite.
 
-Agent file locations:
-- `trolley/.claude/agents/vo-reviewer.md` — audio take review (.webm)
-- `trolley/.claude/agents/video-reviewer.md` — composed beat / full video / plan review
+Canonical workspace agent templates:
+- `.claude/agents/vo-reviewer.md` — audio take review (.webm)
+- `.claude/agents/video-reviewer.md` — composed beat / full video / plan review
+- `.claude/agents/motion-infographic-designer.md` — plans and generates chart/motion assets via `dl gen` / `dl gen-html`
+- `.claude/agents/devlog-reflector.md` — post-run reflection: bottlenecks, missed gates, and pipeline improvements
 
-For new projects, copy these `.md` files into `<newproject>/.claude/agents/`.
+Project-local copies/overrides live in `<project>/.claude/agents/`. The
+current `trolley/.claude/agents/` files are a project-local copy for the
+first project, not the canonical source. `dl new` copies from root
+`.claude/agents/` into each new project.
 
 ## Don't
 
 - Don't render at 4K during iteration (slow + separate cache entry).
 - Don't `--no-cache` unless debugging cache.
 - Don't write rendered MP4s, raw recordings, or large images into git (`.gitignore` covers this — verify if adding new asset types).
+- Don't commit generated `data/infographics/*.mp4`, `data/hyperframes/*`, or `.build_cache.json` unless the user explicitly wants assets versioned.
 - Don't invent file paths when applying `src` changes — always Glob/Read first.
+- Don't use Hyperframes for simple counters/charts that `dl gen` can produce faster.
+- Don't add Manim/Matplotlib/Remotion dependencies without asking; prefer the native generator first.
 - Don't loop the improve cycle past 5 iterations without checking in with the user.
 - Don't recommend `--engine moviepy` unless ffmpeg engine has a verified visual bug.
 - Don't run `dl concat` separately from `dl render` — render handles concat unless `--no-concat`.
@@ -115,4 +180,5 @@ Skills:
 - `~/.claude/skills/dl-*` — user-level skills, work across all devlog projects in this workspace
 
 Agents:
-- `<project>/.claude/agents/` — project-local reviewer definitions
+- `.claude/agents/` — canonical workspace templates copied by `dl new`
+- `<project>/.claude/agents/` — project-local copies/overrides
