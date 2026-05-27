@@ -1131,6 +1131,78 @@ def cmd_stock(args):
     raise SystemExit("stock subcommand is required")
 
 
+def _quote_py_string(value: str) -> str:
+    return repr(value.replace("\\", "/"))
+
+
+def cmd_preview_chunk(args):
+    """Render one chunk to a still PNG for quick visual inspection."""
+    config = load_config()
+    if args.chunk_index is None:
+        edit_path = _resolve_edit(None, config)
+        beat_id = args.edit_or_beat
+        chunk_index = args.beat_or_chunk
+    else:
+        edit_path = args.edit_or_beat
+        beat_id = args.beat_or_chunk
+        chunk_index = args.chunk_index
+
+    edit, root = _load_edit(edit_path)
+    _project_chdir(root)
+    out = args.out or f"data/review/{beat_id}_c{int(chunk_index):02d}_preview.png"
+    from devlog.preview import render_chunk_preview
+    path = render_chunk_preview(edit, beat_id, int(chunk_index), out)
+    print(f"[devlog] chunk preview -> {path}")
+
+
+def _stock_apply_snippet(edit, beat_id: str, chunk_index: int, asset_path: str,
+                         *, kind: str, fit: str, offset: float) -> str:
+    if beat_id not in edit.beats:
+        raise SystemExit(f"Unknown beat: {beat_id}")
+    beat = edit.beats[beat_id]
+    if chunk_index < 0 or chunk_index >= len(beat.chunks):
+        raise SystemExit(f"Unknown chunk index for {beat_id}: {chunk_index}")
+    chunk = beat.chunks[chunk_index]
+    words = f"({chunk.words[0]}, {chunk.words[1]})"
+    src = _quote_py_string(asset_path)
+    if chunk.kind == "overlay" and chunk.text:
+        text = _quote_py_string(chunk.text)
+        subtitle = f", subtitle={_quote_py_string(chunk.subtitle)}" if chunk.subtitle else ""
+        scene = f"Scene(kind={_quote_py_string(kind)}, src={src}, offset={offset}, fit={_quote_py_string(fit)})"
+        return (
+            "from devlog.types import Scene\n\n"
+            f"Chunk(words={words}, kind=\"overlay\", text={text}{subtitle}, "
+            f"scene={scene})"
+        )
+    return (
+        f"Chunk(words={words}, kind={_quote_py_string(kind)}, src={src}, "
+        f"fit={_quote_py_string(fit)}, offset={offset})"
+    )
+
+
+def cmd_stock_apply(args):
+    """Print a beats.py snippet for applying a stock/local asset to a chunk."""
+    config = load_config()
+    edit_path = _resolve_edit(args.edit, config)
+    edit, root = _load_edit(edit_path)
+    _project_chdir(root)
+    asset = Path(args.asset)
+    if not asset.is_absolute():
+        asset = Path.cwd() / asset
+    if not asset.exists():
+        raise SystemExit(f"Asset does not exist: {args.asset}")
+    rel_asset = asset.relative_to(Path.cwd()).as_posix()
+    print(_stock_apply_snippet(
+        edit,
+        args.beat_id,
+        args.chunk_index,
+        rel_asset,
+        kind=args.kind,
+        fit=args.fit,
+        offset=args.offset,
+    ))
+
+
 def _powershell_encoded(script: str) -> str:
     import base64
     return base64.b64encode(script.encode("utf-16le")).decode("ascii")
@@ -1690,6 +1762,24 @@ def build_parser() -> argparse.ArgumentParser:
     p_stock_download.add_argument("--out", default="data/assets/stock")
     p_stock_download.add_argument("--limit", type=int)
     p_stock_download.set_defaults(func=cmd_stock)
+
+    p_stock_apply = stock_sub.add_parser("apply", help="Print a beats.py snippet for a chunk asset")
+    p_stock_apply.add_argument("beat_id")
+    p_stock_apply.add_argument("chunk_index", type=int)
+    p_stock_apply.add_argument("asset")
+    p_stock_apply.add_argument("--kind", choices=["video", "image"], default="video")
+    p_stock_apply.add_argument("--fit", choices=["cover", "contain"], default="cover")
+    p_stock_apply.add_argument("--offset", type=float, default=0.0)
+    p_stock_apply.set_defaults(func=cmd_stock_apply)
+
+    p_preview_chunk = sub.add_parser("preview-chunk", help="Render one chunk to a still PNG")
+    p_preview_chunk.add_argument("edit_or_beat",
+                                 help="Beat id, or edit module path when beat_id is also provided")
+    p_preview_chunk.add_argument("beat_or_chunk",
+                                 help="Chunk index, or beat id when chunk_index is also provided")
+    p_preview_chunk.add_argument("chunk_index", nargs="?")
+    p_preview_chunk.add_argument("--out", help="Output .png path relative to project root")
+    p_preview_chunk.set_defaults(func=cmd_preview_chunk)
 
     p_scratch_tts = sub.add_parser("scratch-tts", help="Generate local scratch TTS for a beat")
     p_scratch_tts.add_argument("edit_or_beat", nargs="?",
