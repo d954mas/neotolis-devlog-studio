@@ -1,0 +1,3 @@
+display_name: Devlog Thumbnail
+short_description: YouTube thumbnail planning and QA
+default_prompt: Create or review a YouTube thumbnail for a devlog video. Use real product visuals, check readability at feed size, and return concrete fixes.

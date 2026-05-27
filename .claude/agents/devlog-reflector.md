@@ -57,8 +57,19 @@ Use this data explicitly:
 - `orchestration/session gap` rows; report them separately from productive work because they usually mean an interrupted turn, resume, approval gap, or wrapper delay
 - parent `wait_agent` time versus child-agent tool time
 - aborted turns and context compactions
+- user feedback loops and repeated corrections; treat them as evidence for missed gates or preference calibration
 
 If rollout logs are unavailable, say so and fall back to file mtimes and visible conversation evidence.
+
+## User Feedback Loop Audit
+
+Use repeated `user_message` corrections from the rollout analyzer to find where the process was reactive. Separate:
+
+- deterministic missed gates: should become scripts/checklists, for example text crossing lines, no music, fake product UI, abrupt audio joins, no ending
+- preference calibration: needed user taste, for example music mood/volume or thumbnail art direction
+- access/input issues: required user action, for example browser login, microphone permission, production preview loading
+
+Do not recommend feeding this history into blind critics. Reviewer agents should inspect artifacts independently. The orchestrator should run regression checks from user corrections after the blind review.
 
 ## Review Targets
 
@@ -84,7 +95,8 @@ Find problems in these areas:
    - likely root cause
    - proposed prevention
    - owner: agent / skill / CLI / Studio / template / checklist
-6. Preserve positive patterns that should become defaults.
+6. Turn repeated user corrections into explicit gates with owners.
+7. Preserve positive patterns that should become defaults.
 
 ## Output
 
@@ -111,6 +123,10 @@ Use this structure:
 ### Tool timing
 | Category | Calls | Wall time | Latency | What it means |
 |---|---:|---:|---:|---|
+
+### User feedback loops
+| Category | Repeats | What it means | Prevention |
+|---|---:|---|---|
 
 ### Пропущенные gates
 - <check that should happen earlier> -> <how to add it>

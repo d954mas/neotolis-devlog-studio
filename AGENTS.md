@@ -35,6 +35,7 @@ devlogs/                   ← workspace root, git repo, contains common/ + proj
 | Review composed beat / iter video | Spawn `video-reviewer` agent | (agent) |
 | Design infographic/motion asset plan | Spawn `motion-infographic-designer` | (agent) |
 | Reflect after a devlog run | Spawn `devlog-reflector`, use `devlog-reflection` | agent/skill |
+| Create/review YouTube thumbnail | Spawn `thumbnail-designer`, use `devlog-thumbnail` | agent/skill |
 
 ## Critical engineering defaults
 
@@ -144,11 +145,16 @@ Reviewers persist verdicts to `<project>/data/review/feedback.json` so the
 studio UI displays them. Use Write tool inside the agent. Merge with existing
 `vo` / `video` keys — don't overwrite.
 
+Reviewer agents should be isolated from prior user corrections by default. Give them the artifact and neutral context, let them produce a blind verdict, then let the orchestrator run a separate regression checklist against known user constraints.
+
+Before final handoff, the orchestrator must run the regression checklist: audio/music present and mixed, VO joins clean, no visual glitches, text/overlays inside safe zones, real product visuals where promised, thumbnail QA for YouTube packaging, and deliberate ending.
+
 Canonical workspace agent templates:
 - `.claude/agents/vo-reviewer.md` — audio take review (.webm)
 - `.claude/agents/video-reviewer.md` — composed beat / full video / plan review
 - `.claude/agents/motion-infographic-designer.md` — plans and generates chart/motion assets via `dl gen` / `dl gen-html`
 - `.claude/agents/devlog-reflector.md` — post-run reflection: bottlenecks, missed gates, and pipeline improvements
+- `.claude/agents/thumbnail-designer.md` — YouTube thumbnail concept, real-product compositing, and feed-size QA
 
 Project-local copies/overrides live in `<project>/.claude/agents/`. The
 current `trolley/.claude/agents/` files are a project-local copy for the

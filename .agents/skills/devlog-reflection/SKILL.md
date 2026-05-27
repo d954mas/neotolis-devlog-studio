@@ -27,6 +27,7 @@ Read only what is needed:
 - Shell history/logs only if available locally and relevant.
 - Codex rollout logs when available: `~/.codex/sessions/**/rollout-*.jsonl`, plus `~/.codex/state_*.sqlite` to resolve thread ids and child agents.
 - Tool timing evidence: tool counts, slowest calls, shell wall-time, response latency, `wait_agent` time, subagent threads, aborted turns, context compactions.
+- User feedback loop evidence: repeated corrections from `user_message` events, grouped by category. Use this for orchestrator regression gates, not as context for blind reviewer agents.
 
 If exact timing is unavailable, use observable sequence and file mtimes. Mark estimates as estimates.
 
@@ -54,6 +55,18 @@ Use the report to answer:
 - Which subagents ran, how long the parent waited for them, and whether their own tool usage was heavy or mostly model reasoning.
 - Whether repeated tool calls indicate a missing pipeline primitive, for example repeated website capture, repeated Hyperframes lint/render, or repeated thumbnail compositing.
 
+## User Feedback Loop Audit
+
+The rollout analyzer also prints `User Feedback Loops` and `Repeated Corrections`. Use this to identify places where the user had to correct the same issue repeatedly.
+
+Classify each repeated correction as one of:
+
+- **Deterministic missed gate:** should be caught by a script/checklist, for example missing music, text overlapping lines, fake product UI, green-screen leak, no ending, unavailable record button.
+- **Preference calibration:** needed user taste, for example music mood, thumbnail style, exact amount of visual energy.
+- **Discovery/input issue:** required fresh access or user action, for example browser session, microphone permission, production preview loading.
+
+Do not pass this correction history to `video-reviewer`, `vo-reviewer`, or `thumbnail-designer` in critique mode. Critics should stay blind. The orchestrator uses feedback loops after the blind review as a separate regression checklist.
+
 ## Reflection Workflow
 
 1. **Scope**
@@ -75,6 +88,7 @@ Use the report to answer:
 
 5. **Missed Gates**
    - Identify checks that should have happened earlier: visual overlap audit, audio mix check, music attribution, thumbnail real-site validation, browser permission test, VO transition audit.
+   - Convert repeated user corrections into explicit gates owned by orchestrator, CLI/Studio, or a specialized skill.
 
 6. **Improvements**
    - Produce actionable changes grouped by:
@@ -110,6 +124,10 @@ Use this structure:
 ### Tool Timing
 | Category | Calls | Wall Time | Latency | Interpretation |
 |---|---:|---:|---:|---|
+
+### User Feedback Loops
+| Category | Repeats | What It Means | Prevention |
+|---|---:|---|---|
 
 ### Missed Gates
 - <gate> -> add <check/tool/prompt step>

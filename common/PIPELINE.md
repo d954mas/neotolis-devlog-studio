@@ -18,6 +18,7 @@ The user writes in free form. Map their intent to one of these actions:
 | "посмотри бит X", "разбор b4", "что с битом" | Spawn `video-reviewer` on `data/finalize/<bid>_video_*.mp4` |
 | "разбор iter", "посмотри финал", "что с видео" | Spawn `video-reviewer` on latest `iter*.mp4` |
 | "разбери план X", "что в beats.py для X" | Spawn `video-reviewer` plan mode (no render) |
+| "thumbnail", "обложка", "иконка для ролика", "картинка для YouTube" | Spawn `thumbnail-designer` and use `devlog-thumbnail` |
 | "улучши X", "доведи X до ship", "make it better" | **Run improve loop** (see below) |
 | "сделай быстрый рендер", "draft X" | `dl compose <edit> <bid> --width 540p --draft` |
 | "финальный рендер", "render final" | `dl render <edit> --width 4k` (or 1080p if explicit) |
@@ -46,6 +47,8 @@ and the orchestrator runs:
    - User interrupts
 8. Report final state + any re-record / re-design items that need user input
 ```
+
+After the blind review, run the orchestrator regression checklist before calling anything "ship". This pass may use prior user corrections because it is not the critic's independent verdict.
 
 ### Mechanical fixes the orchestrator may apply WITHOUT asking
 - Plate `size` change (number → number)
@@ -144,6 +147,26 @@ that beat's hash changes → re-render; other beats stay cached.
 
 ## When to spawn which agent
 
+### Reviewer isolation
+
+Reviewer agents (`vo-reviewer`, `video-reviewer`, `thumbnail-designer` in review mode) should receive only the artifact and neutral task context needed to evaluate it. Do not pass the last 10-20 user corrections into the critic by default. The point of the critic is an independent read.
+
+Prior user corrections belong to the orchestrator's regression checklist after the blind review. Run it as a separate pass: "does the new output still violate known user constraints?" Keep that separate from the critic's verdict.
+
+### Orchestrator regression checklist
+
+Run this after reviewer output and before final handoff:
+
+- **Audio/music:** background music exists when requested, is audible but not distracting, and attribution is available when needed.
+- **VO joins:** no abrupt phrase cut at beat boundaries or edited joins; inspect user-reported timestamps if any.
+- **Visual glitches:** no one-frame/one-second wrong visual flashes, stale screenshot flashes, or transition pops in the final render.
+- **Readability/safe zones:** titles, captions, and overlays do not collide with borders, accent lines, device frames, or UI edges.
+- **Real product proof:** website/app/game thumbnails and promo shots use real captured visuals, not invented UI.
+- **Thumbnail:** if packaging for YouTube, use `thumbnail-designer` plus `devlog-thumbnail` contact-sheet QA.
+- **Ending:** final video has a deliberate outro/end card or clean landing frame, not an accidental hard stop.
+
+If a checklist item fails, fix it or report it as open. Do not hide it behind a reviewer "ship" verdict.
+
 ### `vo-reviewer` — spawn when:
 - User just recorded a take and asks for review
 - User uploaded a new `.webm` and wants verdict
@@ -157,7 +180,15 @@ that beat's hash changes → re-render; other beats stay cached.
 - User asks "what to improve" or "is this ready to ship"
 - User changed beats.py and wants plan-level critique before rendering
 
-**Don't spawn for:** raw audio take quality.
+**Don't spawn for:** raw audio take quality; YouTube thumbnails or cover art.
+
+### `thumbnail-designer` — spawn when:
+- User asks for a YouTube thumbnail, cover image, or "icon for the video"
+- User wants AI art combined with a real product/site screenshot
+- User asks whether the thumbnail is readable, clickable, or uses the real product correctly
+- Packaging phase needs a thumbnail before upload
+
+**Don't spawn for:** composed video pacing, raw VO, or internal motion graphics unless they are being used as thumbnail source material.
 
 ### Parallel reviews
 If user has both new audio AND new render, spawn both agents in **one
@@ -251,6 +282,7 @@ reviewer said "swap image X for image Y" and Y exists, just do it.
 - Loop more than 5 iterations without checking in
 - Skip rendering after a beats.py edit ("trust me bro" — always re-render + re-review)
 - Apply fixes the reviewer flagged as `re-design` (those need user)
+- Treat blind reviewer approval as final ship approval when regression gates still fail
 
 ---
 
@@ -262,6 +294,7 @@ USER SAYS                   ORCHESTRATOR DOES
 "оцени запись"          →  spawn vo-reviewer on latest .webm
 "посмотри бит X"        →  spawn video-reviewer on data/finalize/X*
 "разбор iter"           →  spawn video-reviewer on latest iter*.mp4
+"thumbnail/обложка"     →  spawn thumbnail-designer
 "улучши X"              →  RUN IMPROVE LOOP
 "быстрый рендер X"      →  dl compose <edit> X --width 540p --draft
 "финал"                 →  dl render <edit>

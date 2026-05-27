@@ -27,6 +27,76 @@ CALL_END_TYPES = {
     "tool_search_output",
 }
 
+FEEDBACK_PATTERNS: dict[str, tuple[str, ...]] = {
+    "real data / product proof": (
+        "реальн",
+        "данн",
+        "feed",
+        "сайт",
+        "прод",
+        "скрин",
+        "превью",
+    ),
+    "recording / studio UX": (
+        "микроф",
+        "камер",
+        "record",
+        "запис",
+        "кнопк",
+        "караоке",
+        "телепромптер",
+        "стоп",
+    ),
+    "script / tone": (
+        "нейросет",
+        "человеч",
+        "ютуб",
+        "текст",
+        "фраз",
+        "суть",
+        "скуч",
+    ),
+    "visual readability": (
+        "видно",
+        "крупн",
+        "визуал",
+        "линии",
+        "залез",
+        "заголов",
+        "глитч",
+        "резк",
+    ),
+    "audio / music": (
+        "музык",
+        "звук",
+        "слыш",
+        "громк",
+        "пауз",
+        "склей",
+        "переход",
+        "голос",
+    ),
+    "thumbnail / package": (
+        "thumbnail",
+        "облож",
+        "иконк",
+        "ноутбук",
+        "зелен",
+        "маск",
+        "youtube",
+        "атрибуц",
+    ),
+    "pipeline / agent process": (
+        "агент",
+        "критик",
+        "пайплайн",
+        "рефлекс",
+        "скилл",
+        "коммит",
+        "пуш",
+    ),
+}
+
 
 def parse_ts(value: str) -> float:
     return dt.datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
@@ -41,6 +111,34 @@ def short(value: Any, limit: int = 160) -> str:
 def tool_name(payload: dict[str, Any]) -> str:
     name = payload.get("name") or payload.get("action") or payload.get("type") or "<unknown>"
     return short(name, 120)
+
+
+def extract_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        return " ".join(extract_text(item) for item in value)
+    if isinstance(value, dict):
+        parts: list[str] = []
+        for key in ("text", "content", "message", "body", "input", "prompt"):
+            if key in value:
+                parts.append(extract_text(value[key]))
+        if not parts:
+            for item in value.values():
+                parts.append(extract_text(item))
+        return " ".join(part for part in parts if part)
+    return str(value)
+
+
+def feedback_categories(text: str) -> list[str]:
+    lowered = text.lower()
+    result = []
+    for name, patterns in FEEDBACK_PATTERNS.items():
+        if any(pattern in lowered for pattern in patterns):
+            result.append(name)
+    return result or ["uncategorized user input"]
 
 
 def category(row: dict[str, Any]) -> str:
@@ -78,11 +176,14 @@ def category(row: dict[str, Any]) -> str:
     return name
 
 
-def read_rollout(path: Path) -> tuple[list[dict[str, Any]], collections.Counter[str], collections.Counter[str], list[float]]:
+def read_rollout(
+    path: Path,
+) -> tuple[list[dict[str, Any]], collections.Counter[str], collections.Counter[str], list[float], list[dict[str, Any]]]:
     calls: dict[str, dict[str, Any]] = {}
     event_counts: collections.Counter[str] = collections.Counter()
     item_counts: collections.Counter[str] = collections.Counter()
     aborts: list[float] = []
+    user_messages: list[dict[str, Any]] = []
 
     with path.open("r", encoding="utf-8", errors="replace") as handle:
         for index, line in enumerate(handle):
@@ -98,6 +199,17 @@ def read_rollout(path: Path) -> tuple[list[dict[str, Any]], collections.Counter[
                 event_counts[event_type] += 1
                 if event_type == "turn_aborted":
                     aborts.append(timestamp)
+                if event_type == "user_message":
+                    text = short(extract_text(payload), 220)
+                    if text:
+                        user_messages.append(
+                            {
+                                "timestamp": timestamp,
+                                "line": index,
+                                "text": text,
+                                "categories": feedback_categories(text),
+                            }
+                        )
                 continue
 
             if obj.get("type") != "response_item":
@@ -132,7 +244,7 @@ def read_rollout(path: Path) -> tuple[list[dict[str, Any]], collections.Counter[
         row["wall"] = call.get("wall")
         row["category"] = category(row)
         rows.append(row)
-    return rows, event_counts, item_counts, aborts
+    return rows, event_counts, item_counts, aborts, user_messages
 
 
 def codex_home() -> Path:
@@ -224,6 +336,7 @@ def print_report(
     event_counts: collections.Counter[str],
     item_counts: collections.Counter[str],
     aborts: list[float],
+    user_messages: list[dict[str, Any]],
     top: int,
 ) -> None:
     print("## Tool Timing Audit")
@@ -291,6 +404,37 @@ def print_report(
         for value in aborts:
             print(f"- {dt.datetime.fromtimestamp(value, dt.timezone.utc).isoformat()}")
 
+    print_user_feedback(user_messages, top)
+
+
+def print_user_feedback(user_messages: list[dict[str, Any]], top: int) -> None:
+    if not user_messages:
+        return
+
+    buckets: dict[str, list[dict[str, Any]]] = collections.defaultdict(list)
+    for message in user_messages:
+        for item in message["categories"]:
+            buckets[item].append(message)
+
+    print()
+    print("### User Feedback Loops")
+    print()
+    print("| Category | Count | First | Last | Latest sample |")
+    print("|---|---:|---|---|---|")
+    for name, messages in sorted(buckets.items(), key=lambda item: len(item[1]), reverse=True):
+        first = dt.datetime.fromtimestamp(messages[0]["timestamp"], dt.timezone.utc).strftime("%H:%M")
+        last = dt.datetime.fromtimestamp(messages[-1]["timestamp"], dt.timezone.utc).strftime("%H:%M")
+        sample = messages[-1]["text"].replace("|", "/")
+        print(f"| {name} | {len(messages)} | {first} | {last} | `{sample}` |")
+
+    repeated = [(name, messages) for name, messages in buckets.items() if len(messages) >= 3]
+    if repeated:
+        print()
+        print("### Repeated Corrections")
+        for name, messages in sorted(repeated, key=lambda item: len(item[1]), reverse=True)[:top]:
+            samples = " / ".join(f"`{message['text']}`" for message in messages[-3:])
+            print(f"- **{name}**: {len(messages)} mentions. Latest: {samples}")
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Summarize Codex rollout tool timing.")
@@ -311,8 +455,8 @@ def main() -> int:
     if not rollout or not rollout.exists():
         raise SystemExit("No rollout JSONL found. Pass --rollout, --thread-id, or --cwd.")
 
-    rows, event_counts, item_counts, aborts = read_rollout(rollout)
-    print_report(rollout, rows, event_counts, item_counts, aborts, args.top)
+    rows, event_counts, item_counts, aborts, user_messages = read_rollout(rollout)
+    print_report(rollout, rows, event_counts, item_counts, aborts, user_messages, args.top)
 
     if args.children:
         for child_id, status, nickname, child_path in child_threads(thread_id, args.codex_home):
@@ -321,8 +465,16 @@ def main() -> int:
             if not child_path:
                 print("No rollout file found.")
                 continue
-            child_rows, child_events, child_items, child_aborts = read_rollout(child_path)
-            print_report(child_path, child_rows, child_events, child_items, child_aborts, min(args.top, 8))
+            child_rows, child_events, child_items, child_aborts, child_messages = read_rollout(child_path)
+            print_report(
+                child_path,
+                child_rows,
+                child_events,
+                child_items,
+                child_aborts,
+                child_messages,
+                min(args.top, 8),
+            )
     return 0
 
 
