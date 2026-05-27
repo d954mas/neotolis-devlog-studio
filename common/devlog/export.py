@@ -22,8 +22,11 @@ def shotlist_markdown(edit: Edit) -> str:
         title = beat.title or beat_id
         lines.extend([f"## {beat_id} — {title}", ""])
         for idx, chunk in enumerate(beat.chunks):
-            scene = chunk.scene or beat.scene
-            scene_desc = f"{scene.kind}:{scene.src}" if scene else "solid"
+            if chunk.kind in {"image", "video"} and chunk.src:
+                scene_desc = f"{chunk.kind}:{chunk.src}"
+            else:
+                scene = chunk.scene or beat.scene
+                scene_desc = f"{scene.kind}:{scene.src}" if scene else "solid"
             text = (chunk.text or chunk.label or "").replace("\n", " / ")
             words = f"{chunk.words[0]}-{chunk.words[1]}"
             lines.append(f"- c{idx} words {words} · {chunk.kind} · {scene_desc} · {text}")

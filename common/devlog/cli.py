@@ -66,6 +66,10 @@ def _project_chdir(project_root: Path):
     print(f"[devlog] cwd -> {project_root}")
 
 
+def _workspace_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
 _WIDTH_PRESETS = {
     "360p":  640,
     "540p":  960,
@@ -1065,7 +1069,191 @@ def cmd_shotlist(args):
     edit, root = _load_edit(args.edit)
     _project_chdir(root)
     from devlog.export import shotlist_markdown
-    _write_or_print(shotlist_markdown(edit), args.out)
+    content = shotlist_markdown(edit)
+    if args.suggest_broll:
+        from devlog.broll import (
+            suggest_broll,
+            suggestions_markdown,
+            suggestions_to_json,
+        )
+        suggestions = suggest_broll(edit, Path.cwd())
+        content = content.rstrip() + "\n\n" + suggestions_markdown(suggestions)
+        json_path = Path(args.broll_json)
+        json_path.parent.mkdir(parents=True, exist_ok=True)
+        json_path.write_text(
+            json.dumps(suggestions_to_json(suggestions), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        print(f"[devlog] wrote {json_path}")
+    _write_or_print(content, args.out)
+
+
+def cmd_stock(args):
+    """Search or download stock B-roll candidates."""
+    config = load_config()
+    edit_path = _resolve_edit(args.edit, config)
+    _edit, root = _load_edit(edit_path)
+    _project_chdir(root)
+
+    if args.stock_cmd == "search":
+        from devlog.stock import search_stock, write_candidates
+        candidates = search_stock(
+            args.query,
+            source=args.source,
+            aspect=args.aspect,
+            min_duration=args.min_duration,
+            limit=args.limit,
+        )
+        out = Path(args.out)
+        write_candidates(out, candidates)
+        print(f"[devlog] stock search: {len(candidates)} candidates -> {out}")
+        for item in candidates[:5]:
+            print(
+                f"  {item.provider}:{item.provider_id} "
+                f"{item.width}x{item.height} {item.duration:.1f}s {item.source_url}"
+            )
+        return
+
+    if args.stock_cmd == "download":
+        from devlog.stock import download_candidates
+        downloaded = download_candidates(
+            Path(args.candidates),
+            project_root=Path.cwd(),
+            workspace_root=_workspace_root(),
+            out_dir=Path(args.out),
+            limit=args.limit,
+        )
+        print(f"[devlog] stock download: {len(downloaded)} files -> {args.out}")
+        for item in downloaded:
+            print(f"  {item['project_path']}")
+        return
+
+    raise SystemExit("stock subcommand is required")
+
+
+def _powershell_encoded(script: str) -> str:
+    import base64
+    return base64.b64encode(script.encode("utf-16le")).decode("ascii")
+
+
+def _windows_sapi_voices() -> list[dict[str, str]]:
+    if sys.platform != "win32":
+        raise SystemExit("scratch-tts SAPI voices are only available on Windows.")
+    script = r"""
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+Add-Type -AssemblyName System.Speech
+$s = New-Object System.Speech.Synthesis.SpeechSynthesizer
+$voices = @()
+foreach ($voice in $s.GetInstalledVoices()) {
+  $info = $voice.VoiceInfo
+  $voices += [PSCustomObject]@{
+    Name = $info.Name
+    Culture = $info.Culture.Name
+    Gender = $info.Gender.ToString()
+    Age = $info.Age.ToString()
+  }
+}
+$s.Dispose()
+$voices | ConvertTo-Json -Compress
+"""
+    proc = subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+         "-EncodedCommand", _powershell_encoded(script)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    payload = proc.stdout.strip()
+    if not payload:
+        return []
+    parsed = json.loads(payload)
+    return parsed if isinstance(parsed, list) else [parsed]
+
+
+def _windows_sapi_tts(text: str, out_path: Path, *,
+                      voice: str, rate: int, volume: int) -> None:
+    if sys.platform != "win32":
+        raise SystemExit("scratch-tts currently uses Windows SAPI and only works on Windows.")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    text_path = out_path.with_suffix(".txt")
+    text_path.write_text(text, encoding="utf-8")
+    script = r"""
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+Add-Type -AssemblyName System.Speech
+$s = New-Object System.Speech.Synthesis.SpeechSynthesizer
+$voice = $env:DEVLOG_TTS_VOICE
+if ($voice) {
+  $s.SelectVoice($voice)
+}
+$s.Rate = [Math]::Max(-10, [Math]::Min(10, [int]$env:DEVLOG_TTS_RATE))
+$s.Volume = [Math]::Max(0, [Math]::Min(100, [int]$env:DEVLOG_TTS_VOLUME))
+$text = Get-Content -LiteralPath $env:DEVLOG_TTS_TEXT -Raw -Encoding UTF8
+$s.SetOutputToWaveFile($env:DEVLOG_TTS_OUT)
+$s.Speak($text) | Out-Null
+$s.Dispose()
+"""
+    env = os.environ.copy()
+    env.update({
+        "DEVLOG_TTS_TEXT": str(text_path.resolve()),
+        "DEVLOG_TTS_OUT": str(out_path.resolve()),
+        "DEVLOG_TTS_VOICE": voice,
+        "DEVLOG_TTS_RATE": str(rate),
+        "DEVLOG_TTS_VOLUME": str(volume),
+    })
+    subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+         "-EncodedCommand", _powershell_encoded(script)],
+        env=env,
+        check=True,
+    )
+
+
+def cmd_scratch_tts(args):
+    """Generate local scratch TTS for a beat's VO."""
+    if args.list_voices:
+        for item in _windows_sapi_voices():
+            print(f"{item['Name']} [{item['Culture']}, {item['Gender']}, {item['Age']}]")
+        return
+
+    if not args.edit_or_beat:
+        raise SystemExit("Beat id is required unless --list-voices is used.")
+
+    config = load_config()
+    if args.beat_id:
+        edit_path = args.edit_or_beat
+        beat_id = args.beat_id
+    else:
+        edit_path = _resolve_edit(None, config)
+        beat_id = args.edit_or_beat
+
+    edit, root = _load_edit(edit_path)
+    _project_chdir(root)
+    if beat_id not in edit.beats:
+        raise SystemExit(f"Unknown beat: {beat_id}")
+
+    beat = edit.beats[beat_id]
+    text = args.text or beat.vo
+    if not text.strip():
+        chunk_text = " ".join(ch.text for ch in beat.chunks if ch.text)
+        text = chunk_text or beat.title
+    if not text.strip():
+        raise SystemExit(f"Beat {beat_id} has no vo/text to synthesize.")
+
+    out = Path(args.out or f"data/scratch/{beat_id}_scratch_tts.wav")
+    _windows_sapi_tts(
+        text,
+        out,
+        voice=args.voice,
+        rate=args.rate,
+        volume=args.volume,
+    )
+    try:
+        duration = _probe_media_duration(out)
+        print(f"[devlog] scratch tts -> {out} ({duration:.2f}s)")
+    except Exception:
+        print(f"[devlog] scratch tts -> {out}")
 
 
 def cmd_import_script(args):
@@ -1478,7 +1666,46 @@ def build_parser() -> argparse.ArgumentParser:
     p_shotlist = sub.add_parser("shotlist", help="Export chunk/scene shotlist markdown")
     p_shotlist.add_argument("edit", nargs="?")
     p_shotlist.add_argument("--out", help="Write markdown to this path instead of stdout")
+    p_shotlist.add_argument("--suggest-broll", action="store_true",
+                            help="Append heuristic B-roll suggestions and write candidates JSON")
+    p_shotlist.add_argument("--broll-json", default="data/review/broll_candidates.json",
+                            help="B-roll candidates JSON path relative to project root")
     p_shotlist.set_defaults(func=cmd_shotlist)
+
+    p_stock = sub.add_parser("stock", help="Search/download stock B-roll assets")
+    p_stock.add_argument("--edit", help="Edit module for project root; defaults to devlog.toml")
+    stock_sub = p_stock.add_subparsers(dest="stock_cmd", required=True)
+
+    p_stock_search = stock_sub.add_parser("search", help="Search Pexels/Pixabay videos")
+    p_stock_search.add_argument("query", help="Search query")
+    p_stock_search.add_argument("--source", choices=["pexels", "pixabay"], default="pexels")
+    p_stock_search.add_argument("--aspect", choices=["16:9", "9:16", "1:1"], default="16:9")
+    p_stock_search.add_argument("--min-duration", type=float, default=4.0)
+    p_stock_search.add_argument("--limit", type=int, default=10)
+    p_stock_search.add_argument("--out", default="data/review/stock_search.json")
+    p_stock_search.set_defaults(func=cmd_stock)
+
+    p_stock_download = stock_sub.add_parser("download", help="Download stock candidates into project assets")
+    p_stock_download.add_argument("candidates", help="Candidates JSON from `dl stock search`")
+    p_stock_download.add_argument("--out", default="data/assets/stock")
+    p_stock_download.add_argument("--limit", type=int)
+    p_stock_download.set_defaults(func=cmd_stock)
+
+    p_scratch_tts = sub.add_parser("scratch-tts", help="Generate local scratch TTS for a beat")
+    p_scratch_tts.add_argument("edit_or_beat", nargs="?",
+                               help="Beat id, or edit module path when beat_id is also provided")
+    p_scratch_tts.add_argument("beat_id", nargs="?")
+    p_scratch_tts.add_argument("--voice", default="Microsoft Irina Desktop",
+                               help="Windows SAPI voice name")
+    p_scratch_tts.add_argument("--rate", type=int, default=1,
+                               help="Windows SAPI rate from -10 to 10")
+    p_scratch_tts.add_argument("--volume", type=int, default=100,
+                               help="Volume from 0 to 100")
+    p_scratch_tts.add_argument("--out", help="Output .wav path relative to project root")
+    p_scratch_tts.add_argument("--text", help="Use this text instead of the beat VO")
+    p_scratch_tts.add_argument("--list-voices", action="store_true",
+                               help="List installed Windows SAPI voices")
+    p_scratch_tts.set_defaults(func=cmd_scratch_tts)
 
     p_import_script = sub.add_parser("import-script", help="Convert a draft script into beats.py")
     p_import_script.add_argument("script", help="Text or Markdown script file")

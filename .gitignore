@@ -25,6 +25,7 @@ __pycache__/
 
 # ─── Reviews + previews (per-session, ephemeral) ───────────
 **/data/review/
+**/data/scratch/
 **/data/previews/
 **/data/reels/preview/
 **/data/serve*.log
@@ -58,6 +59,7 @@ __pycache__/
 **/data/hyperframes/
 **/data/infographics/.build_cache.json
 **/data/infographics/*.hyperframes_error.txt
+.asset_cache/
 
 # ─── Stray temp files in project root ──────────────────────
 **/tmp_*

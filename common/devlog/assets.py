@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 from PIL import Image
 
@@ -29,6 +30,7 @@ class AssetReport:
     missing: list[str]
     unused: list[str]
     low_res: list[str]
+    stock: list[str]
 
 
 def _resolve(root: Path, path: str) -> Path:
@@ -64,6 +66,7 @@ def _iter_data_files(root: Path) -> list[Path]:
         if (
             "/.cache/" in rel
             or rel.endswith("_ffmpeg_error.txt")
+            or rel == "data/assets/stock/manifest.json"
             or any(rel.startswith(prefix) for prefix in GENERATED_DATA_DIRS)
         ):
             continue
@@ -171,11 +174,42 @@ def asset_report(edit: Edit, root: Path, target_width: int | None = None) -> Ass
             seen_low_res.add(raw)
     low_res = [item for _, _, item in sorted(low_res_items, key=lambda x: (x[0], -x[1], x[2]))]
 
+    stock_items: list[str] = []
+    manifest_path = root / "data" / "assets" / "stock" / "manifest.json"
+    if manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            manifest = []
+            stock_items.append(f"error: could not read data/assets/stock/manifest.json: {exc}")
+        if isinstance(manifest, list):
+            for item in manifest:
+                if not isinstance(item, dict):
+                    continue
+                project_path = item.get("project_path", "")
+                source_url = item.get("source_url", "")
+                provider = item.get("provider", "stock")
+                query = item.get("query", "")
+                if not project_path:
+                    stock_items.append(f"warning: {provider} entry has no project_path ({query})")
+                    continue
+                resolved = _resolve(root, project_path)
+                if not resolved.exists():
+                    stock_items.append(f"missing: {project_path} ({provider}, query: {query})")
+                    continue
+                if resolved.resolve() in used_abs:
+                    stock_items.append(f"used: {project_path} ({provider}, query: {query})")
+                else:
+                    stock_items.append(f"unused: {project_path} ({provider}, query: {query})")
+                if not source_url:
+                    stock_items.append(f"warning: {project_path} has no source_url")
+
     return AssetReport(
         used=used_raw,
         missing=missing,
         unused=sorted(unused),
         low_res=low_res,
+        stock=stock_items,
     )
 
 
@@ -192,6 +226,9 @@ def format_asset_report(report: AssetReport, *, show_used: bool = False, show_un
     if report.low_res:
         lines.append("\nlow-res images:")
         lines.extend(f"  {p}" for p in report.low_res)
+    if report.stock:
+        lines.append("\nstock manifest:")
+        lines.extend(f"  {p}" for p in report.stock)
     if show_unused and report.unused:
         lines.append("\nunused:")
         lines.extend(f"  {p}" for p in report.unused)
