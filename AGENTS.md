@@ -31,6 +31,7 @@ devlogs/                   ← workspace root, git repo, contains common/ + proj
 | Create simple chart/counter/timeline infographic | `dl gen` from JSON/sample, then use as `Scene(kind="video"|"image")` | CLI |
 | Create rich HTML/GSAP motion graphic | `dl gen-html <dir> --init`, edit HTML/CSS/JS, render to MP4 | CLI/Hyperframes |
 | Cut clip for reel/short | `dl cut` with reframe | CLI |
+| Iterate a reel/short edit | `dl reel-preview <edit>` before any upload render | CLI |
 | Review a recorded VO take | Spawn `vo-reviewer` agent on `.webm` | (agent) |
 | Review composed beat / iter video | Spawn `video-reviewer` agent | (agent) |
 | Design infographic/motion asset plan | Spawn `motion-infographic-designer` | (agent) |
@@ -53,23 +54,35 @@ devlogs/                   ← workspace root, git repo, contains common/ + proj
 
 7. **Prefer targeted watch for one-beat iteration.** `dl watch --beat <id>` runs `check` and re-renders only that beat when `beats.py`, `design.py`, or renderer files change.
 
-8. **Use `dl smoke` after engine changes.** `dl smoke` runs tests plus `check` and `beats`; `dl smoke --skip-tests` is the faster sanity pass.
+8. **For reels/shorts, use `dl reel-preview` before upload renders.** It renders a 540p draft, writes a contact sheet, and extracts chunk midpoint frames. Use this for text size, story clarity, ending, and safe-zone checks. Run 1080/upload only after the preview passes.
 
-9. **Use `dl assets --width 4k` before final render.** Missing assets are blockers; low-res warnings include severity, affected beat ids, and recommended action.
+9. **Use `dl smoke` after engine changes.** `dl smoke` runs tests plus `check` and `beats`; `dl smoke --skip-tests` is the faster sanity pass.
 
-10. **Inspect cache before clearing it.** Prefer `dl cache-info`; use `dl cache-prune --older-than-days N` for old entries. Full `cache-clear` is still a rare debugging action.
+10. **Use `dl assets --width 4k` before final render.** Missing assets are blockers; low-res warnings include severity, affected beat ids, and recommended action.
 
-11. **Use `dl script`, `dl shotlist`, `dl import-script`, and `dl new-video` for planning.** `beats.py` remains the source of truth; `import-script` generates starter chunks from a rough script, and `new-video` creates a scaffold plus generated `beats.py`.
+11. **Inspect cache before clearing it.** Prefer `dl cache-info`; use `dl cache-prune --older-than-days N` for old entries. Full `cache-clear` is still a rare debugging action.
 
-12. **Studio is the default daily UI.** Run `dl serve [edit]`, open `/devlog/studio.html`, then use: select beat → record take → `Process + Render` → preview the 540p draft on the Script tab. The separate recorder page remains available for focused capture.
+12. **Use `dl script`, `dl shotlist`, `dl import-script`, and `dl new-video` for planning.** `beats.py` remains the source of truth; `import-script` generates starter chunks from a rough script, and `new-video` creates a scaffold plus generated `beats.py`.
 
-13. **Per-chunk fade-in/out is currently disabled in ffmpeg engine** — known interaction with overlay alpha that broke text bands. Plates and overlay bands pop in/out abruptly. Don't try to "fix" the missing fade with hacks unless you have a verified ffmpeg alpha-fade approach. Crossfade between scenes (xfade) works fine.
+13. **Studio is the default daily UI.** Run `dl serve [edit]`, open `/devlog/studio.html`, then use: select beat → record take → `Process + Render` → preview the 540p draft on the Script tab. The separate recorder page remains available for focused capture.
 
-14. **Generated infographics are first-class assets.** Use `dl gen` for simple branded charts/counters/timelines/workflow diagrams. It uses `common/devlog/anim.py`, `charts.py`, and `generated.py`, with only Pillow + NumPy + FFmpeg. Render to `data/infographics/*.mp4` or `.png`, then reference the file from `beats.py` through `Scene(kind="video", src="data/infographics/<file>.mp4")` or `Scene(kind="image", ...)`.
+14. **Per-chunk fade-in/out is currently disabled in ffmpeg engine** — known interaction with overlay alpha that broke text bands. Plates and overlay bands pop in/out abruptly. Don't try to "fix" the missing fade with hacks unless you have a verified ffmpeg alpha-fade approach. Crossfade between scenes (xfade) works fine.
 
-15. **Hyperframes is optional for rich motion graphics, not the core renderer.** Use `dl gen-html` when the visual needs HTML/CSS layout, GSAP animation, dashboard-like UI, or complex motion that is awkward in Pillow. It runs `npx hyperframes render` via `common/devlog/hyperframes.py` and requires Node 22+, npm/npx, Chromium/Puppeteer download access, and FFmpeg. Keep Hyperframes projects under `data/hyperframes/<name>/` and render outputs under `data/infographics/`.
+15. **Generated infographics are first-class assets.** Use `dl gen` for simple branded charts/counters/timelines/workflow diagrams. It uses `common/devlog/anim.py`, `charts.py`, and `generated.py`, with only Pillow + NumPy + FFmpeg. Render to `data/infographics/*.mp4` or `.png`, then reference the file from `beats.py` through `Scene(kind="video", src="data/infographics/<file>.mp4")` or `Scene(kind="image", ...)`.
 
-16. **Do not replace the devlog pipeline with Hyperframes or Remotion.** The main video remains `Beat`/`Chunk`/`Scene` + FFmpeg composition. Hyperframes/`dl gen` only produce asset clips that the existing pipeline consumes.
+16. **Hyperframes is optional for rich motion graphics, not the core renderer.** Use `dl gen-html` when the visual needs HTML/CSS layout, GSAP animation, dashboard-like UI, or complex motion that is awkward in Pillow. It runs `npx hyperframes render` via `common/devlog/hyperframes.py` and requires Node 22+, npm/npx, Chromium/Puppeteer download access, and FFmpeg. Keep Hyperframes projects under `data/hyperframes/<name>/` and render outputs under `data/infographics/`.
+
+17. **Do not replace the devlog pipeline with Hyperframes or Remotion.** The main video remains `Beat`/`Chunk`/`Scene` + FFmpeg composition. Hyperframes/`dl gen` only produce asset clips that the existing pipeline consumes.
+
+## Reel/short defaults
+
+Before rendering an upload-quality reel, run this gate:
+
+- **Standalone story:** first 2-4 seconds explain the product/context in voice, not only text.
+- **No dependency on another reel:** avoid openings like "а еще", "теперь", "можно..." unless the product was just named.
+- **Readable phone text:** main overlay should be short; subtitle should be a second readable line, usually `sub_ratio >= 0.5` for vertical reels.
+- **Ending:** hold a deliberate final frame with site/product/CTA for about one second.
+- **Preview first:** run `dl reel-preview <edit>` and inspect the contact sheet/keyframes before any `--quality upload` render.
 
 ## Infographic and motion workflow
 

@@ -91,6 +91,9 @@ def make_overlay_badge(
     subtitle: str | None = None,
     position: str = "bottom",
     style: str = "band",
+    size: int | None = None,
+    sub_ratio: float = 0.25,
+    line_gap_ratio: float = 0.18,
 ) -> np.ndarray:
     """Render an overlay-kind chunk's visual layer (RGBA).
 
@@ -253,8 +256,8 @@ def make_overlay_badge(
         return np.array(canvas)
 
     # ── BAND style (default): compact lower-third callout ──
-    text_size = S(86)
-    sub_size = S(36)
+    text_size = S(size or 86)
+    sub_size = max(S(32), int(text_size * sub_ratio)) if subtitle else S(36)
     max_w = W - S(300)
     for _ in range(9):
         f_main = ImageFont.truetype(pick_font(text, design), text_size)
@@ -268,7 +271,7 @@ def make_overlay_badge(
 
     pad_x = S(72)
     pad_y = S(42)
-    gap = S(16) if subtitle else 0
+    gap = max(S(12), int(text_size * line_gap_ratio)) if subtitle else 0
     accent_safe_w = S(112)
     box_w = max(S(860), min(W - S(200), max(tw, sw) + pad_x * 2 + accent_safe_w))
     box_h = th + sh + gap + pad_y * 2

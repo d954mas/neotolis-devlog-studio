@@ -150,6 +150,9 @@ def _chunk_to_visual_clip(ch_dict: dict, chunk: Chunk, design: Design):
             subtitle=chunk.subtitle,
             position=chunk.position,
             style=chunk.style,
+            size=chunk.size,
+            sub_ratio=chunk.sub_ratio,
+            line_gap_ratio=chunk.line_gap_ratio,
         )
         rgb = rgba[:, :, :3]
         alpha = rgba[:, :, 3].astype(np.float32) / 255.0

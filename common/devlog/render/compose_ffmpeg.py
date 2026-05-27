@@ -63,7 +63,10 @@ def _prerender_chunk_pngs(beat: Beat, design: Design, tmp_dir: Path) -> dict[int
             rgba = make_overlay_badge(ch.text, design,
                                       subtitle=ch.subtitle,
                                       position=ch.position,
-                                      style=ch.style)
+                                      style=ch.style,
+                                      size=ch.size,
+                                      sub_ratio=ch.sub_ratio,
+                                      line_gap_ratio=ch.line_gap_ratio)
             p = tmp_dir / f"chunk_{i}.png"
             _save_png_rgba(rgba, p)
             info["path"] = p

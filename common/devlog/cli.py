@@ -24,6 +24,8 @@ import sys
 import os
 import argparse
 import importlib
+import json
+import math
 import re
 import shutil
 import subprocess
@@ -276,6 +278,126 @@ def cmd_iter(args):
     cmd_render(args)
 
 
+def cmd_reel_preview(args):
+    """Fast reel review loop: draft render + contact sheet + chunk keyframes."""
+    config = load_config()
+    args.edit = _resolve_edit(args.edit, config)
+    args.width = args.width or "540p"
+    args.quality = args.quality or "draft"
+    args.draft = False
+    args.gpu = False
+    args.no_cache = False
+    args.no_concat = False
+    args.no_review = True
+    args.strict_review = False
+    args.review_threshold = 35.0
+    args.parallel = 1
+    args.engine = "ffmpeg"
+
+    edit, root = _load_edit(args.edit)
+    _project_chdir(root)
+
+    from devlog.check import check_edit
+    issues = check_edit(edit, root, deep=False)
+    errors = [i for i in issues if i.severity == "error"]
+    warnings = [i for i in issues if i.severity == "warning"]
+    print(f"[reel-preview] check: {len(errors)} errors, {len(warnings)} warnings")
+    if errors:
+        for issue in errors[:10]:
+            print(f"[reel-preview] ERROR {issue.code}: {issue.message}")
+        raise SystemExit(1)
+
+    design = _resize_design(edit.design, args.width)
+    suffix = _render_suffix(args)
+    quality = _effective_quality(args)
+    draft = _effective_draft(args)
+    print(f"[reel-preview] render {args.edit} at {design.resolution}, quality={quality}")
+    for bid in edit.order:
+        out_path = f"data/finalize/{bid}{suffix}.mp4"
+        print(f"[reel-preview] rendering {bid} -> {out_path}")
+        _render_one(edit.beats[bid], design, out_path, draft, args.gpu,
+                    args.no_cache, args.engine, quality)
+    _concat(edit, root, suffix=suffix, quiet=True)
+
+    video = Path(_edit_output_for_suffix(edit.output, suffix))
+    preview_dir = Path(args.out_dir) if args.out_dir else Path("data/reels/preview")
+    preview_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", edit.name)
+    contact = preview_dir / f"{safe_name}_{design.W}w_{quality}_contact.jpg"
+    _write_contact_sheet(video, contact, args.interval)
+    print(f"[reel-preview] contact -> {contact}")
+
+    if not args.no_keyframes:
+        keyframes = _write_chunk_keyframes(edit, video, preview_dir, safe_name, args.max_keyframes)
+        print(f"[reel-preview] keyframes: {len(keyframes)}")
+        for path in keyframes:
+            print(f"  {path}")
+    print(f"[reel-preview] video -> {video}")
+
+
+def _probe_media_duration(path: str | Path) -> float:
+    r = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "csv=p=0", str(path)],
+        capture_output=True, text=True, check=True,
+    )
+    return float(r.stdout.strip())
+
+
+def _write_contact_sheet(video: Path, out: Path, interval: float) -> None:
+    dur = max(0.1, _probe_media_duration(video))
+    frames = max(1, int(math.ceil(dur / interval)))
+    cols = min(3, frames)
+    rows = int(math.ceil(frames / cols))
+    subprocess.run([
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        "-i", str(video),
+        "-vf", f"fps=1/{interval:g},scale=270:-1,tile={cols}x{rows}",
+        "-frames:v", "1",
+        "-update", "1",
+        str(out),
+    ], check=True)
+
+
+def _write_chunk_keyframes(edit, video: Path, out_dir: Path, safe_name: str,
+                           max_keyframes: int) -> list[Path]:
+    times: list[tuple[float, str, int]] = []
+    offset = 0.0
+    for bid in edit.order:
+        beat = edit.beats[bid]
+        with open(beat.words, "r", encoding="utf-8") as f:
+            words = json.load(f)["words"]
+        audio_dur = _probe_media_duration(beat.audio)
+        for ci, ch in enumerate(beat.chunks):
+            wi_start, _ = ch.words
+            t_start = words[wi_start]["start"]
+            if ci + 1 < len(beat.chunks):
+                t_end = words[beat.chunks[ci + 1].words[0]]["start"]
+            else:
+                t_end = audio_dur
+            times.append((offset + (t_start + t_end) / 2.0, bid, ci))
+        offset += audio_dur
+
+    if max_keyframes > 0 and len(times) > max_keyframes:
+        step = len(times) / max_keyframes
+        times = [times[int(i * step)] for i in range(max_keyframes)]
+
+    paths: list[Path] = []
+    for t, bid, ci in times:
+        path = out_dir / f"{safe_name}_c{len(paths):02d}_{bid}_{ci}.jpg"
+        subprocess.run([
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-ss", f"{t:.3f}",
+            "-i", str(video),
+            "-frames:v", "1",
+            "-q:v", "2",
+            "-update", "1",
+            str(path),
+        ], check=True)
+        paths.append(path)
+    return paths
+
+
 def _iter_stale_targets(args, edit, root: Path, design, suffix: str, draft: bool, quality: str | None) -> list[str]:
     """Return stale beat ids for `dl iter --stale`, respecting --beat."""
     from devlog.stale import stale_beats
@@ -406,7 +528,7 @@ def cmd_concat(args):
     _concat(edit, root, suffix=suffix)
 
 
-def _concat(edit, root: Path, suffix: str = "_video_1080p"):
+def _concat(edit, root: Path, suffix: str = "_video_1080p", quiet: bool = False):
     """Internal: build concat manifest and run ffmpeg."""
     manifest = Path("data/finalize/_concat.txt")
     manifest.parent.mkdir(parents=True, exist_ok=True)
@@ -424,10 +546,7 @@ def _concat(edit, root: Path, suffix: str = "_video_1080p"):
     manifest.write_text("\n".join(lines) + "\n", encoding="utf-8")
     # If using a non-default suffix, append it to the output filename so
     # different-resolution renders don't overwrite each other.
-    out = edit.output
-    if suffix != "_video_1080p":
-        out_path = Path(out)
-        out = str(out_path.with_stem(out_path.stem + suffix))
+    out = _edit_output_for_suffix(edit.output, suffix)
     # Two-step concat: demuxer with stream-copy video + audio re-encode.
     # Why: demuxer concat + `-c copy` audio produces a duplicated audio
     # stream (363s on 247s video) due to non-monotonic DTS in our
@@ -443,14 +562,25 @@ def _concat(edit, root: Path, suffix: str = "_video_1080p"):
     # (e.g. outro at 96kHz) broke demuxer concat by causing audio packets
     # to be timestamped inconsistently. Result: ~5s concat instead of
     # ~30s filter-graph re-encode.
-    subprocess.run([
-        "ffmpeg", "-y",
+    cmd = ["ffmpeg", "-y"]
+    if quiet:
+        cmd += ["-hide_banner", "-loglevel", "error"]
+    cmd += [
         "-f", "concat", "-safe", "0",
         "-i", str(manifest),
         "-c", "copy",
         out,
-    ], check=True)
+    ]
+    subprocess.run(cmd, check=True)
     print(f"[devlog] done -> {out}")
+
+
+def _edit_output_for_suffix(output: str, suffix: str) -> str:
+    """Return the edit output path for a render suffix."""
+    if suffix == "_video_1080p":
+        return output
+    out_path = Path(output)
+    return str(out_path.with_stem(out_path.stem + suffix))
 
 
 def cmd_audio(args):
@@ -1042,6 +1172,24 @@ def build_parser() -> argparse.ArgumentParser:
     p_iter.add_argument("--engine", choices=["ffmpeg", "moviepy"], default="ffmpeg",
                         help="Render engine: ffmpeg (default, fast) or moviepy (legacy)")
     p_iter.set_defaults(func=cmd_iter)
+
+    p_reel_preview = sub.add_parser(
+        "reel-preview",
+        help="Fast reel loop: 540p draft render + contact sheet + chunk keyframes",
+    )
+    p_reel_preview.add_argument("edit", nargs="?")
+    p_reel_preview.add_argument("--width", default="540p", help=width_help)
+    p_reel_preview.add_argument("--quality", choices=_QUALITY_PRESETS, default="draft",
+                                help=quality_help)
+    p_reel_preview.add_argument("--interval", type=float, default=3.0,
+                                help="Seconds between contact-sheet samples (default 3)")
+    p_reel_preview.add_argument("--out-dir", default="data/reels/preview",
+                                help="Preview artifact directory relative to project root")
+    p_reel_preview.add_argument("--max-keyframes", type=int, default=12,
+                                help="Maximum chunk midpoint frames to extract (default 12)")
+    p_reel_preview.add_argument("--no-keyframes", action="store_true",
+                                help="Only write the contact sheet")
+    p_reel_preview.set_defaults(func=cmd_reel_preview)
 
     p_final = sub.add_parser("final", help="Final render shortcut (uses [final] defaults + preflight)")
     p_final.add_argument("edit", nargs="?")

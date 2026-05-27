@@ -23,6 +23,7 @@ The user writes in free form. Map their intent to one of these actions:
 | "сделай быстрый рендер", "draft X" | `dl compose <edit> <bid> --width 540p --draft` |
 | "финальный рендер", "render final" | `dl render <edit> --width 4k` (or 1080p if explicit) |
 | "сделай рилс из X" | `dl cut <video> <range> --reframe crop_center --out reels/...` |
+| "поправь рилс", "рилс непонятный/мелкий/скучный" | Run the reel story gate, then `dl reel-preview <edit>` before upload render |
 | "запиши новый бит", "после записи" | Run `dl audio <edit> <bid> <file>` then spawn `vo-reviewer` |
 
 If intent is unclear, **ask one short question** before acting.
@@ -110,6 +111,9 @@ dl smoke --skip-tests
 # Mid-quality preview
 dl render <edit> --width 1080p --quality preview -j 4
 
+# Fast reel/short preview: draft render + contact sheet + chunk keyframes
+dl reel-preview <edit>
+
 # Final delivery
 dl render <edit> --quality upload             # explicit upload preset
 dl render --final                             # final preset + preflight from devlog.toml
@@ -164,6 +168,16 @@ Run this after reviewer output and before final handoff:
 - **Real product proof:** website/app/game thumbnails and promo shots use real captured visuals, not invented UI.
 - **Thumbnail:** if packaging for YouTube, use `thumbnail-designer` plus `devlog-thumbnail` contact-sheet QA.
 - **Ending:** final video has a deliberate outro/end card or clean landing frame, not an accidental hard stop.
+
+### Reel / short-form gate
+
+Run this before rendering an upload-quality reel:
+
+- **Voice context first:** the opening voice line names the product or problem. Do not rely on a text overlay to explain what the reel is about.
+- **Standalone story:** the reel must make sense without the previous reel. Avoid starting with "а", "можно", "теперь" unless context was already stated in voice.
+- **Short overlay copy:** main text should be one strong idea; subtitles must be readable on phone. For vertical reels, default to `sub_ratio >= 0.5` and keep yellow lines short.
+- **Deliberate ending:** include a final hold with site/product/CTA, usually about one second.
+- **Cheap preview first:** use `dl reel-preview <edit>` to inspect contact sheet and chunk keyframes. Only run 1080/upload after this passes.
 
 If a checklist item fails, fix it or report it as open. Do not hide it behind a reviewer "ship" verdict.
 
