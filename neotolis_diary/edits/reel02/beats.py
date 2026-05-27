@@ -18,11 +18,11 @@ BEATS: dict[str, Beat] = {
             "Плюс к ним подтягивается просмотр, лайки, комментарии и ответы."
         ),
         stage="Самостоятельный vertical edit: сначала объяснить продукт, потом источники и реакцию.",
-        audio="data/reels/reel02_product_intro_end_audio.wav",
-        words="data/reels/reel02_product_intro_end_words.json",
+        audio="data/reels/reel02_product_intro_end_safe_audio.wav",
+        words="data/reels/reel02_product_intro_end_safe_words.json",
         chunks=[
             Chunk(
-                words=(0, 3),
+                words=(0, 2),
                 kind="overlay",
                 text="NEOTOLIS DIARY",
                 subtitle="ДНЕВНИК ПРОДВИЖЕНИЯ",
@@ -34,7 +34,7 @@ BEATS: dict[str, Beat] = {
                 scene=Scene(kind="image", src=FEED_TOP),
             ),
             Chunk(
-                words=(4, 11),
+                words=(3, 10),
                 kind="overlay",
                 text="ВСЕ ДЕЙСТВИЯ В ОДНОЙ ЛЕНТЕ",
                 subtitle="ПО ПРОДВИЖЕНИЮ ИГРЫ",
@@ -46,7 +46,7 @@ BEATS: dict[str, Beat] = {
                 scene=Scene(kind="image", src=FEED_TOP),
             ),
             Chunk(
-                words=(12, 15),
+                words=(11, 14),
                 kind="overlay",
                 text="МОЖНО ДОБАВЛЯТЬ РУКАМИ",
                 subtitle="ПОСТ · РОЛИК · УПОМИНАНИЕ",
@@ -58,7 +58,7 @@ BEATS: dict[str, Beat] = {
                 scene=Scene(kind="image", src=FEED_TOP),
             ),
             Chunk(
-                words=(16, 18),
+                words=(15, 17),
                 kind="overlay",
                 text="ИЛИ ПОДКЛЮЧИТЬ ИСТОЧНИКИ",
                 subtitle="АВТОМАТОМ",
@@ -70,7 +70,7 @@ BEATS: dict[str, Beat] = {
                 scene=Scene(kind="image", src=SOURCES),
             ),
             Chunk(
-                words=(19, 24),
+                words=(18, 23),
                 kind="overlay",
                 text="YOUTUBE + REDDIT",
                 subtitle="ИСТОЧНИКИ ДАННЫХ",
@@ -82,7 +82,7 @@ BEATS: dict[str, Beat] = {
                 scene=Scene(kind="image", src=SOURCES),
             ),
             Chunk(
-                words=(25, 33),
+                words=(24, 32),
                 kind="overlay",
                 text="ПОСТЫ САМИ В ЛЕНТУ",
                 subtitle="РОЛИКИ И ПОСТЫ",
@@ -94,7 +94,7 @@ BEATS: dict[str, Beat] = {
                 scene=Scene(kind="image", src=FEED_TOP),
             ),
             Chunk(
-                words=(34, 41),
+                words=(33, 40),
                 kind="overlay",
                 text="СРАЗУ ВИДНО РЕАКЦИЮ",
                 subtitle="VIEWS · LIKES · COMMENTS",
@@ -106,7 +106,7 @@ BEATS: dict[str, Beat] = {
                 scene=Scene(kind="image", src=FEED_SCROLL),
             ),
             Chunk(
-                words=(42, 42),
+                words=(41, 41),
                 kind="overlay",
                 text="NEOTOLIS-DIARY.DEV",
                 subtitle="ДНЕВНИК ДЛЯ ИГРЫ",

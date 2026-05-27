@@ -307,22 +307,48 @@ def cmd_reel_preview(args):
             print(f"[reel-preview] ERROR {issue.code}: {issue.message}")
         raise SystemExit(1)
 
+    edge_issues = _audio_edge_issues(edit)
+    if edge_issues:
+        print("[reel-preview] audio edge check failed:")
+        for issue in edge_issues:
+            print(f"  {issue}")
+        raise SystemExit(1)
+    print("[reel-preview] audio edge check: ok")
+
     design = _resize_design(edit.design, args.width)
     suffix = _render_suffix(args)
     quality = _effective_quality(args)
     draft = _effective_draft(args)
-    print(f"[reel-preview] render {args.edit} at {design.resolution}, quality={quality}")
-    for bid in edit.order:
-        out_path = f"data/finalize/{bid}{suffix}.mp4"
-        print(f"[reel-preview] rendering {bid} -> {out_path}")
-        _render_one(edit.beats[bid], design, out_path, draft, args.gpu,
-                    args.no_cache, args.engine, quality)
-    _concat(edit, root, suffix=suffix, quiet=True)
-
-    video = Path(_edit_output_for_suffix(edit.output, suffix))
     preview_dir = Path(args.out_dir) if args.out_dir else Path("data/reels/preview")
     preview_dir.mkdir(parents=True, exist_ok=True)
     safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", edit.name)
+    video = preview_dir / f"{safe_name}_{design.W}w_{quality}.mp4"
+
+    print(f"[reel-preview] render {args.edit} at {design.resolution}, quality={quality}")
+    rendered_paths: list[Path] = []
+    for bid in edit.order:
+        out_path = preview_dir / f"{safe_name}_{bid}{suffix}.mp4"
+        print(f"[reel-preview] rendering {bid} -> {out_path}")
+        _render_one(edit.beats[bid], design, str(out_path), draft, args.gpu,
+                    args.no_cache, args.engine, quality)
+        ok, error = _video_decodes(out_path)
+        if not ok and not args.no_cache:
+            _drop_render_cache(edit.beats[bid], design, draft, args.gpu, quality)
+            print("[reel-preview] cached/rendered video failed decode; cache entry removed, re-rendering")
+            _render_one(edit.beats[bid], design, str(out_path), draft, args.gpu,
+                        False, args.engine, quality)
+            ok, error = _video_decodes(out_path)
+        if not ok:
+            raise SystemExit(f"[reel-preview] rendered video is not decodable: {out_path}\n{error}")
+        rendered_paths.append(out_path)
+    if len(rendered_paths) == 1:
+        shutil.copyfile(rendered_paths[0], video)
+    else:
+        _concat_files(rendered_paths, video, quiet=True)
+    ok, error = _video_decodes(video)
+    if not ok:
+        raise SystemExit(f"[reel-preview] preview video is not decodable: {video}\n{error}")
+
     contact = preview_dir / f"{safe_name}_{design.W}w_{quality}_contact.jpg"
     _write_contact_sheet(video, contact, args.interval)
     print(f"[reel-preview] contact -> {contact}")
@@ -344,6 +370,42 @@ def _probe_media_duration(path: str | Path) -> float:
     return float(r.stdout.strip())
 
 
+def _audio_edge_issues(edit, *, min_lead_in: float = 0.25,
+                       min_tail: float = 0.35) -> list[str]:
+    """Return blocking issues for speech too close to render boundaries."""
+    issues: list[str] = []
+    for bid in edit.order:
+        beat = edit.beats[bid]
+        with open(beat.words, "r", encoding="utf-8") as f:
+            words = json.load(f).get("words", [])
+        if not words:
+            issues.append(f"{bid}: words file is empty")
+            continue
+        blank_words = [
+            idx for idx, word in enumerate(words)
+            if not str(word.get("word", "")).strip()
+        ]
+        if blank_words:
+            sample = ", ".join(str(idx) for idx in blank_words[:5])
+            issues.append(f"{bid}: words file has blank word tokens at indices {sample}")
+        audio_dur = _probe_media_duration(beat.audio)
+        first = words[0]
+        last = words[-1]
+        lead = float(first["start"])
+        tail = audio_dur - float(last["end"])
+        if lead < min_lead_in:
+            issues.append(
+                f"{bid}: first word {first.get('word')!r} starts at {lead:.3f}s; "
+                f"need >= {min_lead_in:.2f}s lead-in"
+            )
+        if tail < min_tail:
+            issues.append(
+                f"{bid}: last word {last.get('word')!r} leaves {tail:.3f}s tail; "
+                f"need >= {min_tail:.2f}s"
+            )
+    return issues
+
+
 def _write_contact_sheet(video: Path, out: Path, interval: float) -> None:
     dur = max(0.1, _probe_media_duration(video))
     frames = max(1, int(math.ceil(dur / interval)))
@@ -357,6 +419,31 @@ def _write_contact_sheet(video: Path, out: Path, interval: float) -> None:
         "-update", "1",
         str(out),
     ], check=True)
+
+
+def _video_decodes(path: Path) -> tuple[bool, str]:
+    """Return whether ffmpeg can fully decode the video stream."""
+    r = subprocess.run(
+        [
+            "ffmpeg", "-v", "error", "-xerror",
+            "-i", str(path),
+            "-map", "0:v:0",
+            "-f", "null", "-",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    return r.returncode == 0, (r.stderr or r.stdout).strip()
+
+
+def _drop_render_cache(beat, design, draft: bool, gpu: bool, quality: str | None) -> None:
+    from devlog.cache import beat_hash, cache_path
+
+    key = beat_hash(beat, design, draft=draft, gpu=gpu, quality=quality)
+    path = cache_path(key)
+    if path.exists():
+        path.unlink()
+        print(f"[reel-preview] removed corrupt cache {key}")
 
 
 def _write_chunk_keyframes(edit, video: Path, out_dir: Path, safe_name: str,
@@ -573,6 +660,27 @@ def _concat(edit, root: Path, suffix: str = "_video_1080p", quiet: bool = False)
     ]
     subprocess.run(cmd, check=True)
     print(f"[devlog] done -> {out}")
+
+
+def _concat_files(paths: list[Path], out: Path, quiet: bool = False):
+    """Concat explicit files without using shared edit-level temp paths."""
+    out.parent.mkdir(parents=True, exist_ok=True)
+    manifest = out.with_name(f"_{out.stem}_concat.txt")
+    missing = [str(path) for path in paths if not path.exists()]
+    if missing:
+        raise SystemExit(f"Missing rendered videos: {missing}.")
+    lines = [f"file '{path.resolve().as_posix()}'" for path in paths]
+    manifest.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    cmd = ["ffmpeg", "-y"]
+    if quiet:
+        cmd += ["-hide_banner", "-loglevel", "error"]
+    cmd += [
+        "-f", "concat", "-safe", "0",
+        "-i", str(manifest),
+        "-c", "copy",
+        str(out),
+    ]
+    subprocess.run(cmd, check=True)
 
 
 def _edit_output_for_suffix(output: str, suffix: str) -> str:

@@ -17,8 +17,8 @@ BEATS: dict[str, Beat] = {
             "Это Neotolis Diary. Сюда я складываю все действия по продвижению игры."
         ),
         stage="Плотный vertical edit: боль, забывание, решение, реальная лента.",
-        audio="data/reels/reel01_fast_end_audio.wav",
-        words="data/reels/reel01_fast_end_words.json",
+        audio="data/reels/reel01_fast_end_safe_audio.wav",
+        words="data/reels/reel01_fast_end_safe_words.json",
         chunks=[
             Chunk(
                 words=(0, 4),
