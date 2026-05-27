@@ -199,6 +199,11 @@ def asset_report(edit: Edit, root: Path, target_width: int | None = None) -> Ass
                     continue
                 if resolved.resolve() in used_abs:
                     stock_items.append(f"used: {project_path} ({provider}, query: {query})")
+                    idea = str(item.get("broll_idea", "")).lower()
+                    if "real captured" in idea or "product/dev" in idea:
+                        stock_items.append(
+                            f"warning: {project_path} is stock, but broll plan requested real product/dev footage"
+                        )
                 else:
                     stock_items.append(f"unused: {project_path} ({provider}, query: {query})")
                 if not source_url:

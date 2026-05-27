@@ -202,6 +202,50 @@ def write_candidates(path: Path, candidates: list[StockCandidate]) -> None:
     )
 
 
+def search_broll_candidates(candidates_path: Path, *, source: str, aspect: str,
+                            min_duration: float, limit_per_query: int,
+                            max_queries: int, include_covered: bool = False) -> list[dict]:
+    payload = json.loads(candidates_path.read_text(encoding="utf-8-sig"))
+    if not isinstance(payload, list):
+        raise ValueError("B-roll candidates JSON must be a list")
+
+    out: list[dict] = []
+    seen_urls: set[str] = set()
+    searched = 0
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        if item.get("visual_gap") is False and not include_covered:
+            continue
+        priority = item.get("priority", "")
+        if priority == "low" and not include_covered:
+            continue
+        used_for = [
+            f"{item.get('beat_id')}:c{item.get('chunk_index')}",
+        ]
+        for query in item.get("search_terms", [])[:2]:
+            if searched >= max_queries:
+                return out
+            searched += 1
+            for candidate in search_stock(
+                query,
+                source=source,
+                aspect=aspect,
+                min_duration=min_duration,
+                limit=limit_per_query,
+            ):
+                data = candidate.to_dict()
+                url = data["download_url"]
+                if url in seen_urls:
+                    continue
+                seen_urls.add(url)
+                data["used_for"] = used_for
+                data["broll_priority"] = priority
+                data["broll_idea"] = item.get("visual_idea", "")
+                out.append(data)
+    return out
+
+
 def _url_hash(url: str) -> str:
     clean = urlsplit(url)
     without_query = clean._replace(query="", fragment="").geturl()
@@ -294,7 +338,9 @@ def download_candidates(candidates_path: Path, *, project_root: Path, workspace_
             "cached_path": cache_path.as_posix(),
             "project_path": rel_project,
             "status": "downloaded",
-            "used_in": [],
+            "used_in": candidate.get("used_for", []),
+            "broll_priority": candidate.get("broll_priority"),
+            "broll_idea": candidate.get("broll_idea"),
             "duration": candidate.get("duration"),
             "width": candidate.get("width"),
             "height": candidate.get("height"),

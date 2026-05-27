@@ -75,6 +75,9 @@ dl.bat compose newproject.edits.youtube intro
 | `dl beats [edit]` | Show beat durations, chunk counts, and render status |
 | `dl stale [edit]` | Show missing renders or renders older than inputs |
 | `dl assets [edit]` | Show used, missing, unused, and low-resolution assets |
+| `dl stock search/download` | Search/download stock B-roll into project assets with manifest |
+| `dl preview-chunk <beat> <chunk>` | Render one chunk to a still PNG for fast visual checks |
+| `dl scratch-tts <beat>` | Generate local Windows SAPI scratch voiceover for timing |
 | `dl gen [spec.json] --out <path>` | Render generated infographic PNG/MP4 assets from a JSON spec or sample |
 | `dl gen-html <dir> --out <path>` | Render optional Hyperframes HTML/GSAP motion assets |
 | `dl smoke` | Run unit tests + `check` + `beats` as a fast self-test |
@@ -107,6 +110,12 @@ dl smoke                                # tests + check + beats
 dl smoke --skip-tests                   # faster check + beats only
 dl stale --width 540p --quality draft   # what needs rerendering
 dl assets --width 4k                    # missing/unused/low-res asset report
+dl shotlist --suggest-broll --out data/review/shotlist_broll.md
+dl stock search "server logs" --source pexels --aspect 16:9
+dl stock search-candidates data/review/broll_candidates.json --source pexels
+dl stock download data/review/stock_search.json --out data/assets/stock
+dl preview-chunk b04 2 --out data/review/b04_c02_preview.png
+dl scratch-tts b04
 dl gen --sample bar --out data/infographics/sample_bar.mp4
 dl gen chart.json --out data/infographics/my_chart.mp4 --width 540p
 dl gen-html data/hyperframes/bar_demo --init

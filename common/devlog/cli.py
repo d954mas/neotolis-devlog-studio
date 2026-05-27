@@ -1114,6 +1114,23 @@ def cmd_stock(args):
             )
         return
 
+    if args.stock_cmd == "search-candidates":
+        from devlog.stock import search_broll_candidates
+        results = search_broll_candidates(
+            Path(args.candidates),
+            source=args.source,
+            aspect=args.aspect,
+            min_duration=args.min_duration,
+            limit_per_query=args.limit_per_query,
+            max_queries=args.max_queries,
+            include_covered=args.include_covered,
+        )
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"[devlog] stock search-candidates: {len(results)} candidates -> {out}")
+        return
+
     if args.stock_cmd == "download":
         from devlog.stock import download_candidates
         downloaded = download_candidates(
@@ -1756,6 +1773,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_stock_search.add_argument("--limit", type=int, default=10)
     p_stock_search.add_argument("--out", default="data/review/stock_search.json")
     p_stock_search.set_defaults(func=cmd_stock)
+
+    p_stock_search_candidates = stock_sub.add_parser(
+        "search-candidates",
+        help="Search stock videos from broll_candidates.json",
+    )
+    p_stock_search_candidates.add_argument("candidates", help="B-roll candidates JSON")
+    p_stock_search_candidates.add_argument("--source", choices=["pexels", "pixabay"], default="pexels")
+    p_stock_search_candidates.add_argument("--aspect", choices=["16:9", "9:16", "1:1"], default="16:9")
+    p_stock_search_candidates.add_argument("--min-duration", type=float, default=4.0)
+    p_stock_search_candidates.add_argument("--limit-per-query", type=int, default=3)
+    p_stock_search_candidates.add_argument("--max-queries", type=int, default=12)
+    p_stock_search_candidates.add_argument("--include-covered", action="store_true",
+                                           help="Also search chunks that already have visuals")
+    p_stock_search_candidates.add_argument("--out", default="data/review/stock_search.json")
+    p_stock_search_candidates.set_defaults(func=cmd_stock)
 
     p_stock_download = stock_sub.add_parser("download", help="Download stock candidates into project assets")
     p_stock_download.add_argument("candidates", help="Candidates JSON from `dl stock search`")
