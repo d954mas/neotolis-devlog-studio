@@ -30,8 +30,35 @@ Use evidence before conclusions:
 - git status/diff for changed prompts, skills, scripts, or project files
 - available conversation summary or transcript
 - file mtimes when exact timing is unavailable
+- Codex rollout logs: `~/.codex/sessions/**/rollout-*.jsonl`
+- Codex state DB: `~/.codex/state_*.sqlite`, to resolve the active thread, child subagents, and rollout paths
 
 Mark estimates as estimates. Do not invent exact durations.
+
+## Tool Timing Audit
+
+Before writing the reflection, inspect tool usage and waits. Prefer the bundled skill script:
+
+```powershell
+python .agents/skills/devlog-reflection/scripts/analyze_rollout.py --cwd C:\projects\devlogs --children
+```
+
+If the active thread id is known:
+
+```powershell
+python .agents/skills/devlog-reflection/scripts/analyze_rollout.py --thread-id <thread-id> --children
+```
+
+Use this data explicitly:
+
+- total counts by tool: shell, patches, image previews, browser/Node REPL, web search, image generation, subagent spawn/wait
+- slowest calls by response latency and shell wall-time
+- categories of waiting: website capture, render/ffmpeg, Hyperframes, music download/search, thumbnail/image generation, subagents
+- `orchestration/session gap` rows; report them separately from productive work because they usually mean an interrupted turn, resume, approval gap, or wrapper delay
+- parent `wait_agent` time versus child-agent tool time
+- aborted turns and context compactions
+
+If rollout logs are unavailable, say so and fall back to file mtimes and visible conversation evidence.
 
 ## Review Targets
 
@@ -48,15 +75,16 @@ Find problems in these areas:
 ## Method
 
 1. Identify the requested deliverable and final candidate artifacts.
-2. Build a compact phase timeline from conversation order, file mtimes, and render outputs.
-3. Rank bottlenecks by impact, not annoyance.
-4. For every bottleneck, write:
+2. Run the tool timing audit if rollout logs are available.
+3. Build a compact phase timeline from conversation order, rollout timestamps, file mtimes, and render outputs.
+4. Rank bottlenecks by impact, not annoyance. Use measured wait time when available.
+5. For every bottleneck, write:
    - symptom
    - evidence
    - likely root cause
    - proposed prevention
    - owner: agent / skill / CLI / Studio / template / checklist
-5. Preserve positive patterns that should become defaults.
+6. Preserve positive patterns that should become defaults.
 
 ## Output
 
@@ -79,6 +107,10 @@ Use this structure:
 
 ### Что было долгим / проблемным
 1. **<bottleneck>** — evidence: <file/dialogue/render>. Cause: <root cause>. Fix: <specific change>.
+
+### Tool timing
+| Category | Calls | Wall time | Latency | What it means |
+|---|---:|---:|---:|---|
 
 ### Пропущенные gates
 - <check that should happen earlier> -> <how to add it>

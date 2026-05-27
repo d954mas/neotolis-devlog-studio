@@ -25,8 +25,34 @@ Read only what is needed:
 - Git status/diff when code or prompts were changed.
 - Conversation summary or available transcript when the reflection is about the current thread.
 - Shell history/logs only if available locally and relevant.
+- Codex rollout logs when available: `~/.codex/sessions/**/rollout-*.jsonl`, plus `~/.codex/state_*.sqlite` to resolve thread ids and child agents.
+- Tool timing evidence: tool counts, slowest calls, shell wall-time, response latency, `wait_agent` time, subagent threads, aborted turns, context compactions.
 
 If exact timing is unavailable, use observable sequence and file mtimes. Mark estimates as estimates.
+
+## Tool Timing Audit
+
+Run this before writing bottlenecks when a Codex rollout file is available:
+
+```powershell
+python .agents/skills/devlog-reflection/scripts/analyze_rollout.py --cwd C:\projects\devlogs --children
+```
+
+Useful variants:
+
+```powershell
+python .agents/skills/devlog-reflection/scripts/analyze_rollout.py --thread-id <thread-id> --children
+python .agents/skills/devlog-reflection/scripts/analyze_rollout.py --rollout C:\Users\ROG\.codex\sessions\...\rollout-....jsonl
+```
+
+Use the report to answer:
+
+- Which tools were used most: shell, browser, image generation, patching, subagents, web search.
+- Where the agent actually waited: command wall-time, response latency, `wait_agent`, image generation, web downloads, browser capture.
+- Whether time was spent in useful compute or orchestration overhead. If latency is much higher than wall-time, call that out as waiting on wrapper/approval/model rather than the command itself.
+- Treat `orchestration/session gap` separately from productive work. It usually means an interrupted turn, resume, approval gap, or wrapper delay, not that the underlying tool was slow.
+- Which subagents ran, how long the parent waited for them, and whether their own tool usage was heavy or mostly model reasoning.
+- Whether repeated tool calls indicate a missing pipeline primitive, for example repeated website capture, repeated Hyperframes lint/render, or repeated thumbnail compositing.
 
 ## Reflection Workflow
 
@@ -37,6 +63,7 @@ If exact timing is unavailable, use observable sequence and file mtimes. Mark es
 2. **Timeline**
    - Build a compact timeline of phases: setup, script, recording, render, review, fixes, final packaging.
    - Note repeated loops, blocked steps, and handoffs to reviewer agents.
+   - Add a timing layer from rollout logs when available: top wait categories, longest calls, and subagent waits.
 
 3. **What Went Fast**
    - List 3-7 things that were efficient.
@@ -79,6 +106,10 @@ Use this structure:
 
 ### Slow / Problematic
 1. **<bottleneck>** — evidence: <artifact>. Cause: <cause>. Fix: <specific change>.
+
+### Tool Timing
+| Category | Calls | Wall Time | Latency | Interpretation |
+|---|---:|---:|---:|---|
 
 ### Missed Gates
 - <gate> -> add <check/tool/prompt step>
