@@ -525,3 +525,118 @@ def test_render_targets_parallel_real_subprocess_boundary(tmp_path):
             os.environ.pop("DLSTUDIO_CACHE_DIR", None)
         else:
             os.environ["DLSTUDIO_CACHE_DIR"] = old
+
+
+# ─── cmd_iter --stale: restore-on-skip when the cache entry outlives the
+# on-disk beat file (docs/issues/dlstudio-phase1-followups.md #5) ─────────
+#
+# --stale skips beats whose cache key already exists (nothing to render),
+# but the beat's MP4 under data/finalize/ may since have been deleted (e.g.
+# the workdir got cleaned). Before the fix, cmd_iter left that file missing
+# and the trailing "missing rendered beats" check failed the whole `iter`
+# even though the render was still sitting in cache. cmd_iter must restore
+# it via dl_cache.get(key, path) when it notices the skip.
+
+def test_cmd_iter_stale_restores_missing_cached_beat_file(tmp_path, monkeypatch):
+    cache_dir = tmp_path / "cache"
+    monkeypatch.setattr(dl_cache, "CACHE_DIR", cache_dir)
+
+    pkg = _unique_pkg("proj_iter_stale")
+    dotted = _make_fake_project(tmp_path, pkg)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    project_root = (tmp_path / pkg).resolve()
+
+    beat = make_ir_beat("b01")
+    raw_design = make_design()  # 1920x1080
+    timeline = make_timeline([beat], design=raw_design)
+    monkeypatch.setattr(dl_compile_mod, "build_timeline", lambda edit: timeline)
+
+    # cmd_iter's own defaults: width_spec="540p" (no --width given), quality
+    # "draft" (no --quality given), gpu=False -- must match exactly for the
+    # cache key to line up with what cmd_iter itself computes.
+    resized_design = cli._resize_design(raw_design, "540p")
+    key = dl_cache.beat_key(
+        beat, resized_design, quality="draft",
+        width=resized_design.resolution[0], gpu=False,
+    )
+
+    # Prime the cache as if a prior `dl2 iter` run rendered b01 successfully.
+    prerendered = tmp_path / "prerendered.mp4"
+    prerendered.write_bytes(b"cached-beat-bytes")
+    dl_cache.put(key, prerendered)
+    # ...but data/finalize/b01.mp4 was since deleted (e.g. workdir cleanup) --
+    # cmd_iter must not have anything on disk for b01 at this point.
+    assert not (project_root / "data" / "finalize" / "b01.mp4").exists()
+
+    def fail_render_beat(*_a, **_k):
+        raise AssertionError("render_beat must not run for a cache-hit beat")
+
+    def fake_assemble(_timeline, beat_files, _opts):
+        assert beat_files["b01"].exists(), "beat file must be restored before assemble"
+        return project_root / "data" / "finalize" / "final.mp4"
+
+    monkeypatch.setattr(dl_render_mod, "render_beat", fail_render_beat)
+    monkeypatch.setattr(dl_render_mod, "assemble", fake_assemble)
+
+    args = cli._build_parser().parse_args(["iter", dotted, "--stale"])
+    code = cli.cmd_iter(args)
+
+    assert code == 0
+    restored = project_root / "data" / "finalize" / "b01.mp4"
+    assert restored.exists()
+    assert restored.read_bytes() == b"cached-beat-bytes"
+
+
+def test_cmd_iter_stale_skips_restore_when_file_already_present(tmp_path, monkeypatch):
+    """If the beat file is already on disk, --stale must not needlessly
+    re-copy from cache (dl_cache.get is only a fallback for the missing
+    case)."""
+    cache_dir = tmp_path / "cache"
+    monkeypatch.setattr(dl_cache, "CACHE_DIR", cache_dir)
+
+    pkg = _unique_pkg("proj_iter_stale_present")
+    dotted = _make_fake_project(tmp_path, pkg)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    project_root = (tmp_path / pkg).resolve()
+
+    beat = make_ir_beat("b01")
+    raw_design = make_design()
+    timeline = make_timeline([beat], design=raw_design)
+    monkeypatch.setattr(dl_compile_mod, "build_timeline", lambda edit: timeline)
+
+    resized_design = cli._resize_design(raw_design, "540p")
+    key = dl_cache.beat_key(
+        beat, resized_design, quality="draft",
+        width=resized_design.resolution[0], gpu=False,
+    )
+    prerendered = tmp_path / "prerendered.mp4"
+    prerendered.write_bytes(b"cached-beat-bytes")
+    dl_cache.put(key, prerendered)
+
+    out_dir = project_root / "data" / "finalize"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    existing = out_dir / "b01.mp4"
+    existing.write_bytes(b"already-on-disk")
+
+    get_calls = []
+    real_get = dl_cache.get
+
+    def spy_get(k, p):
+        get_calls.append((k, p))
+        return real_get(k, p)
+
+    monkeypatch.setattr(dl_cache, "get", spy_get)
+    monkeypatch.setattr(dl_render_mod, "render_beat",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            AssertionError("render_beat must not run for a cache-hit beat")))
+    monkeypatch.setattr(dl_render_mod, "assemble",
+                        lambda _tl, _bf, _o: out_dir / "final.mp4")
+
+    args = cli._build_parser().parse_args(["iter", dotted, "--stale"])
+    code = cli.cmd_iter(args)
+
+    assert code == 0
+    assert get_calls == []                       # no restore needed
+    assert existing.read_bytes() == b"already-on-disk"

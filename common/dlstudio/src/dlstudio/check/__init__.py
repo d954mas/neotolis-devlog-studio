@@ -15,14 +15,16 @@ Every gate has a VQ code (see docs/ARCHITECTURE_V2.md). Baseline set:
 Design note: chunk word indices and pre-clamp offsets are NOT stored in the
 IR (contract freeze — no new fields), so the two facts that are lost after
 resolution — out-of-range indices and offset-past-EOF — are recorded by
-compile into Timeline.warnings with "VQ-WORDS:"/"VQ-OFFSET:" tags and promoted
-to issues here. Everything else (asset existence, window overlap, resolution)
-is derived directly from the IR.
+compile as structured `CheckIssue` objects directly on `Timeline.diagnostics`
+(`_promote_warnings` merges them as-is, no parsing involved).
+`Timeline.warnings` carries the same facts as human-readable "VQ-WORDS:"/
+"VQ-OFFSET:" tagged strings for display only. Everything else (asset
+existence/readability, window overlap, resolution) is derived directly from
+the IR.
 """
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 from pathlib import Path
 
@@ -32,8 +34,6 @@ _EPS = 1e-3
 _MAX_DIM = 4096          # x264 practical safety ceiling per axis
 _MAX_UPSCALE = 2.2       # full-bleed upscale factor cap (the 3840x6826 OOM class)
 
-_WARN_RE = re.compile(r"^(?:\[(?P<beat>[^\]]+)\]\s*)?(?P<tag>VQ-[A-Z]+):\s*(?P<msg>.*)$")
-
 
 def run_checks(timeline: Timeline) -> CheckReport:
     issues: list[CheckIssue] = []
@@ -42,7 +42,8 @@ def run_checks(timeline: Timeline) -> CheckReport:
     issues += _check_resolution(timeline)
     issues += _promote_warnings(timeline)
 
-    # dedupe exact repeats (compile-tagged overlap vs IR-native overlap)
+    # dedupe exact repeats (defensive: gates are independent and could
+    # in principle produce the same (code, message, where) triple)
     seen: set[tuple[str, str, str]] = set()
     unique: list[CheckIssue] = []
     for it in issues:
@@ -62,6 +63,12 @@ def _check_assets(timeline: Timeline) -> list[CheckIssue]:
             out.append(CheckIssue(
                 severity="error", code="VQ-ASSET",
                 message=f"referenced {probe.kind} asset is missing: {path}",
+                where=path,
+            ))
+        elif probe.readable is False:
+            out.append(CheckIssue(
+                severity="error", code="VQ-ASSET",
+                message=f"referenced {probe.kind} asset is present but unreadable: {path}",
                 where=path,
             ))
     return out
@@ -124,27 +131,14 @@ def _check_resolution(timeline: Timeline) -> list[CheckIssue]:
     return out
 
 
-# ─── compile warnings -> issues ──────────────────────────────────────────────
+# ─── compile diagnostics -> issues ───────────────────────────────────────────
 
 def _promote_warnings(timeline: Timeline) -> list[CheckIssue]:
-    out: list[CheckIssue] = []
-    for w in timeline.warnings:
-        m = _WARN_RE.match(w)
-        if not m:
-            continue
-        tag = m.group("tag")
-        where = m.group("beat") or ""
-        msg = m.group("msg")
-        if tag == "VQ-OFFSET":
-            out.append(CheckIssue(severity="warn", code="VQ-OFFSET",
-                                  message=msg, where=where))
-        elif tag == "VQ-WORDS":
-            out.append(CheckIssue(severity="error", code="VQ-WORDS",
-                                  message=msg, where=where))
-        else:
-            out.append(CheckIssue(severity="warn", code=tag,
-                                  message=msg, where=where))
-    return out
+    """Merge compile's structured diagnostics (VQ-WORDS out-of-range,
+    VQ-OFFSET clamps) straight into the report. compile already builds these
+    as CheckIssue objects with `where` set to the beat id -- nothing to
+    parse or re-derive here."""
+    return list(timeline.diagnostics)
 
 
 # ─── VQ-SYNC postcondition ───────────────────────────────────────────────────

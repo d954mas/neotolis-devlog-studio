@@ -101,6 +101,38 @@ def test_warnings_carry_beat_prefix(tmp_path):
     assert any(x.startswith("[b1] VQ-OFFSET:") for x in tl.warnings)
 
 
+def test_diagnostics_carry_structured_vq_offset_clamp(tmp_path):
+    # Same scenario as test_warnings_carry_beat_prefix, but asserting the
+    # structured CheckIssue side of the migration: compile appends a
+    # CheckIssue to Timeline.diagnostics (where=beat_id) in addition to the
+    # human-readable warning string.
+    w = _words(tmp_path, [(0.0, 0.4, "a")])
+    beat = Beat(audio="vo.wav", words=w, chunks=[
+        Chunk(words=(0, 0), content=Overlay(text="O"),
+              scene=Scene(kind="video", src="short.mp4", offset=50.0))])
+    edit, probes = _edit(beat, _base_probes(
+        **{"short.mp4": probe("short.mp4", "video", duration=6.0, width=1080, height=1920)}))
+    tl = build_timeline(edit, probe=False, probes=probes)
+    offset_diags = [d for d in tl.diagnostics if d.code == "VQ-OFFSET"]
+    assert len(offset_diags) == 1
+    d = offset_diags[0]
+    assert d.severity == "warn"
+    assert d.where == "b1"
+    assert "short.mp4" in d.message
+    assert "VQ-OFFSET" not in d.message   # message is untagged; code carries the tag
+
+
+def test_diagnostics_carry_structured_vq_words_out_of_range(tmp_path):
+    w = _words(tmp_path, [(0.0, 0.4, "a")])
+    beat = Beat(audio="vo.wav", words=w, chunks=[Chunk(words=(5, 9), content=Plate(text="P"))])
+    edit, probes = _edit(beat, _base_probes())
+    tl = build_timeline(edit, probe=False, probes=probes)
+    words_diags = [d for d in tl.diagnostics if d.code == "VQ-WORDS"]
+    assert words_diags
+    assert any("out of range" in d.message and d.where == "b1" and d.severity == "error"
+               for d in words_diags)
+
+
 def test_registry_collects_every_referenced_path(tmp_path):
     w = _words(tmp_path, [(0.0, 0.4, "a")])
     beat = Beat(audio="vo.wav", words=w, scene=Scene(kind="video", src="bg.mp4"),

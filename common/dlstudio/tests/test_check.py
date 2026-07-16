@@ -14,6 +14,7 @@ from dlstudio.compile import build_timeline
 from dlstudio.ir import (
     AssetProbe,
     BeatPlacement,
+    CheckIssue,
     IRBeat,
     IRMix,
     IROverlayItem,
@@ -21,7 +22,8 @@ from dlstudio.ir import (
     Timeline,
     WordSpan,
 )
-from dlstudio.model import Beat, Edit
+from dlstudio.model import Beat, Chunk, Edit, Scene
+from dlstudio.model.content import Overlay
 
 
 # ── helpers to construct IR directly (isolate individual gates) ──────────────
@@ -34,13 +36,14 @@ def mk_beat(*, beat_id="b1", duration=4.0, segments=None, overlays=None):
     )
 
 
-def mk_timeline(*, beats=None, assets=None, warnings=None, resolution=(1080, 1920)):
+def mk_timeline(*, beats=None, assets=None, warnings=None, diagnostics=None,
+                resolution=(1080, 1920)):
     beats = beats or [mk_beat()]
     return Timeline(
         edit_name="e", design=mk_design(resolution=resolution), beats=beats,
         placements=[BeatPlacement(beat_id=b.id, t0=0.0) for b in beats],
         mix=IRMix(), assets=assets or {}, output="out.mp4",
-        warnings=warnings or [],
+        warnings=warnings or [], diagnostics=diagnostics or [],
     )
 
 
@@ -69,6 +72,29 @@ def test_vq_asset_all_present_passes():
     assert not any(i.code == "VQ-ASSET" for i in rep.issues)
 
 
+def test_vq_asset_present_but_unreadable_errors():
+    assets = {"corrupt.mp4": probe("corrupt.mp4", "video", readable=False)}
+    rep = run_checks(mk_timeline(assets=assets))
+    assert not rep.ok
+    errs = [i for i in rep.errors if i.code == "VQ-ASSET"]
+    assert errs and "unreadable" in errs[0].message
+    assert errs[0].where == "corrupt.mp4"
+
+
+def test_vq_asset_readable_true_passes():
+    assets = {"ok.mp4": probe("ok.mp4", "video", duration=4.0, readable=True)}
+    rep = run_checks(mk_timeline(assets=assets))
+    assert not any(i.code == "VQ-ASSET" for i in rep.issues)
+
+
+def test_vq_asset_readable_undetermined_passes():
+    # fonts/other kinds are never ffprobed; readable stays None and must not
+    # be treated as broken.
+    assets = {"font.ttf": probe("font.ttf", "font", readable=None)}
+    rep = run_checks(mk_timeline(assets=assets))
+    assert not any(i.code == "VQ-ASSET" for i in rep.issues)
+
+
 # ── VQ-WORDS ─────────────────────────────────────────────────────────────────
 
 def test_vq_words_overlapping_overlays_errors():
@@ -90,8 +116,10 @@ def test_vq_words_tiled_overlays_pass():
     assert not any(i.code == "VQ-WORDS" for i in rep.issues)
 
 
-def test_vq_words_out_of_range_index_from_compile_warning(tmp_path):
-    # end-to-end: compile clamps + tags a VQ-WORDS warning; run_checks promotes.
+def test_vq_words_out_of_range_index_from_compile_diagnostic(tmp_path):
+    # end-to-end: compile appends a structured VQ-WORDS CheckIssue straight to
+    # Timeline.diagnostics (plus the human-readable string in .warnings);
+    # run_checks merges diagnostics with no parsing involved.
     wp = tmp_path / "w.json"
     wp.write_text(json.dumps({"words": [{"word": "a", "start": 0.0, "end": 0.4}]}),
                   encoding="utf-8")
@@ -103,11 +131,20 @@ def test_vq_words_out_of_range_index_from_compile_warning(tmp_path):
         "/fonts/bold.ttf": probe("/fonts/bold.ttf", "font"),
     }
     tl = build_timeline(edit, probe=False, probes=probes)
+
+    # structured diagnostic present on the IR itself, located to the beat
+    diag_words = [d for d in tl.diagnostics if d.code == "VQ-WORDS"]
+    assert diag_words and any("out of range" in d.message and d.where == "b1"
+                              for d in diag_words)
+    assert all(d.severity == "error" for d in diag_words)
+    # the human-readable tagged string is still present in .warnings
+    assert any(w.startswith("[b1] VQ-WORDS:") and "out of range" in w for w in tl.warnings)
+
     rep = run_checks(tl)
     assert not rep.ok
     words_errs = [i for i in rep.errors if i.code == "VQ-WORDS"]
-    # the out-of-range index (from the compile warning) is promoted, located to
-    # the beat; other VQ-WORDS errors (e.g. overlap) may also be present.
+    # the out-of-range index (from compile diagnostics) is promoted, located
+    # to the beat; other VQ-WORDS errors (e.g. overlap) may also be present.
     assert any("out of range" in i.message and i.where == "b1" for i in words_errs)
 
 
@@ -154,14 +191,54 @@ def test_vq_res_unprobed_segment_skipped():
 # ── VQ-OFFSET (warn, not error) ──────────────────────────────────────────────
 
 def test_vq_offset_warning_promoted_but_not_error():
-    tl = mk_timeline(warnings=[
-        "[b1] VQ-OFFSET: scene offset 99.00s is at/past source duration 10.00s "
-        "for bg.mp4; clamped to 9.00s"])
+    # diagnostics is what run_checks actually merges (no parsing); warnings
+    # carries the matching human-readable string for display only.
+    diag = CheckIssue(
+        severity="warn", code="VQ-OFFSET",
+        message="scene offset 99.00s is at/past source duration 10.00s "
+                "for bg.mp4; clamped to 9.00s",
+        where="b1",
+    )
+    tl = mk_timeline(
+        diagnostics=[diag],
+        warnings=["[b1] VQ-OFFSET: scene offset 99.00s is at/past source "
+                  "duration 10.00s for bg.mp4; clamped to 9.00s"],
+    )
     rep = run_checks(tl)
     assert rep.ok                                    # warn does not fail the gate
     offs = [i for i in rep.issues if i.code == "VQ-OFFSET"]
     assert offs and offs[0].severity == "warn"
     assert offs[0].where == "b1"
+
+
+def test_vq_offset_clamp_from_compile_diagnostic(tmp_path):
+    # end-to-end: compile's offset-past-EOF clamp lands in tl.diagnostics
+    # directly, in addition to the tagged string in tl.warnings.
+    wp = tmp_path / "w.json"
+    wp.write_text(json.dumps({"words": [{"word": "a", "start": 0.0, "end": 0.4}]}),
+                  encoding="utf-8")
+    beat = Beat(audio="vo.wav", words=str(wp), chunks=[
+        Chunk(words=(0, 0), content=Overlay(text="O"),
+              scene=Scene(kind="video", src="short.mp4", offset=50.0))])
+    edit = Edit(name="e", design=mk_design(), beats={"b1": beat}, order=["b1"], output="o.mp4")
+    probes = {
+        "vo.wav": probe("vo.wav", "audio", duration=4.0),
+        "/fonts/main.ttf": probe("/fonts/main.ttf", "font"),
+        "/fonts/bold.ttf": probe("/fonts/bold.ttf", "font"),
+        "short.mp4": probe("short.mp4", "video", duration=6.0, width=1080, height=1920),
+    }
+    tl = build_timeline(edit, probe=False, probes=probes)
+
+    diag_offset = [d for d in tl.diagnostics if d.code == "VQ-OFFSET"]
+    assert diag_offset
+    assert diag_offset[0].severity == "warn"
+    assert diag_offset[0].where == "b1"
+    assert "short.mp4" in diag_offset[0].message
+
+    rep = run_checks(tl)
+    assert rep.ok       # warn only
+    offs = [i for i in rep.issues if i.code == "VQ-OFFSET"]
+    assert offs and offs[0].where == "b1"
 
 
 def test_clean_timeline_passes_all_gates():

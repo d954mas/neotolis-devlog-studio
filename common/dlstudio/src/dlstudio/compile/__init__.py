@@ -13,6 +13,14 @@ Responsibilities:
 - compute beat durations (VO audio is authoritative), absolute placements
 - resolve MusicRegions/SfxEvents onto the timeline
 
+Structured diagnostics: word-index out-of-range and offset-past-EOF clamps
+are the two facts not otherwise recoverable from the resolved IR (raw word
+indices and pre-clamp offsets aren't stored — contract freeze). compile
+appends a `CheckIssue` for each straight to `Timeline.diagnostics` (`where`
+set to the beat id) alongside the human-readable "VQ-WORDS:"/"VQ-OFFSET:"
+tagged string in `Timeline.warnings`; check/ merges diagnostics directly,
+no regex parsing.
+
 Submodules: words.py (transcript parsing), probe.py (ffprobe facts),
 segments.py (window resolution + same-source merge). Overlay/placement/mix
 resolution lives here.
@@ -22,6 +30,7 @@ from __future__ import annotations
 from dlstudio.ir import (
     AssetProbe,
     BeatPlacement,
+    CheckIssue,
     IRAnim,
     IRBeat,
     IRMix,
@@ -60,12 +69,14 @@ def build_timeline(
     assets = build_registry(_referenced_paths(edit), probe=probe, injected=probes)
 
     warnings: list[str] = []
+    diagnostics: list[CheckIssue] = []
     ir_beats: list[IRBeat] = []
     for beat_id in edit.order:
         beat = edit.beats[beat_id]
-        ir_beat, beat_warnings = _compile_beat(beat_id, beat, edit, assets)
+        ir_beat, beat_warnings, beat_diagnostics = _compile_beat(beat_id, beat, edit, assets)
         ir_beats.append(ir_beat)
         warnings.extend(beat_warnings)
+        diagnostics.extend(beat_diagnostics)
 
     placements = _placements(edit.order, ir_beats)
     mix = _build_mix(edit, placements, ir_beats)
@@ -79,6 +90,7 @@ def build_timeline(
         assets=assets,
         output=edit.output,
         warnings=warnings,
+        diagnostics=diagnostics,
     )
 
 
@@ -89,12 +101,12 @@ def _compile_beat(
     beat: Beat,
     edit: Edit,
     assets: dict[str, AssetProbe],
-) -> tuple[IRBeat, list[str]]:
+) -> tuple[IRBeat, list[str], list[CheckIssue]]:
     words = load_words(beat.words)
     duration = _beat_duration(beat, assets)
 
-    windows, word_issues = resolve_windows(beat.chunks, words, duration)
-    segments, seg_warnings = build_segments(
+    windows, word_issues, word_diags = resolve_windows(beat.chunks, words, duration)
+    segments, seg_warnings, seg_diags = build_segments(
         beat.chunks, windows, beat.scene, duration, edit.design, assets)
     overlays = _build_overlays(beat.chunks, windows)
     sfx = _build_sfx(beat, words)
@@ -112,7 +124,10 @@ def _compile_beat(
         transition_out=beat.transition_out,
     )
     warnings = [f"[{beat_id}] {w}" for w in (*word_issues, *seg_warnings)]
-    return ir_beat, warnings
+    diagnostics = [
+        d.model_copy(update={"where": beat_id}) for d in (*word_diags, *seg_diags)
+    ]
+    return ir_beat, warnings, diagnostics
 
 
 def _beat_duration(beat: Beat, assets: dict[str, AssetProbe]) -> float:

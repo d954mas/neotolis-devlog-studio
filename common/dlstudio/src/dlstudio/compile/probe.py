@@ -9,6 +9,12 @@ Two modes, mirroring build_timeline(probe=...):
 - probe=True  -> real ffprobe subprocess (list args, never shell).
 - probe=False -> facts come from an injected {path: AssetProbe} dict; paths
   not injected fall back to a cheap Path.exists() check with no media facts.
+
+`AssetProbe.readable` is populated for image/video/audio kinds when probe=True:
+True on a successful ffprobe, False when the file exists but ffprobe fails on
+it (nonzero exit or unparseable output) -- distinguishes present-but-broken
+from missing (VQ-ASSET reports both, distinctly). Stays None for font/other
+kinds (never ffprobed) and for missing files (existence already covers it).
 """
 from __future__ import annotations
 
@@ -64,14 +70,15 @@ def _ffprobe(path: str, kind: Kind) -> AssetProbe:
         raise RuntimeError("ffprobe not found on PATH") from e
 
     if r.returncode != 0:
-        # File exists but is unreadable/corrupt — report exists so VQ-ASSET can
-        # distinguish "there but broken" from "missing", with no usable facts.
-        return AssetProbe(path=path, kind=kind, exists=True)
+        # File exists but is unreadable/corrupt — report exists + readable=False
+        # so VQ-ASSET can distinguish "there but broken" from "missing", with
+        # no usable facts.
+        return AssetProbe(path=path, kind=kind, exists=True, readable=False)
 
     try:
         data = json.loads(r.stdout)
     except json.JSONDecodeError:  # pragma: no cover - defensive
-        return AssetProbe(path=path, kind=kind, exists=True)
+        return AssetProbe(path=path, kind=kind, exists=True, readable=False)
 
     streams = data.get("streams", [])
     fmt = data.get("format", {})
@@ -98,7 +105,7 @@ def _ffprobe(path: str, kind: Kind) -> AssetProbe:
         duration = None
 
     return AssetProbe(
-        path=path, kind=kind, exists=True,
+        path=path, kind=kind, exists=True, readable=True,
         duration=duration, width=width, height=height,
         has_audio=has_audio if kind in ("video", "audio") else None,
     )

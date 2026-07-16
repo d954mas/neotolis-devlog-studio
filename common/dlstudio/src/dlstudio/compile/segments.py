@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from dlstudio.ir import IRSegment, WordSpan
+from dlstudio.ir import CheckIssue, IRSegment, WordSpan
 from dlstudio.model import Chunk, Design, Scene
 from dlstudio.model.content import ImageShot, Plate, VideoShot
 
@@ -30,7 +30,7 @@ def resolve_windows(
     chunks: list[Chunk],
     words: list[WordSpan],
     duration: float,
-) -> tuple[list[tuple[float, float]], list[str]]:
+) -> tuple[list[tuple[float, float]], list[str], list[CheckIssue]]:
     """Resolve each chunk's word span to a beat-relative [t0, t1] window.
 
     Per-chunk base (v2 formula, adds pads v1 never had):
@@ -50,13 +50,17 @@ def resolve_windows(
     yields t1 > next_t0 — a real overlap, surfaced as VQ-WORDS.
 
     Everything is clamped to [0, duration]. Out-of-range word indices are
-    clamped (compile must not crash) and reported via the returned issue list
-    with a "VQ-WORDS:" tag, which run_checks promotes to an error.
+    clamped (compile must not crash) and reported two ways: a "VQ-WORDS:"
+    tagged string in the returned issue list (human display, -> Timeline.
+    warnings) and a structured CheckIssue in the returned diagnostics list
+    (-> Timeline.diagnostics; `where` is filled in by the caller with the
+    beat id). Both carry the same message text.
     """
     n = len(chunks)
     issues: list[str] = []
+    diagnostics: list[CheckIssue] = []
     if n == 0:
-        return [], issues
+        return [], issues, diagnostics
 
     nw = len(words)
 
@@ -74,15 +78,18 @@ def resolve_windows(
     for ci, ch in enumerate(chunks):
         i, j = ch.words
         if nw == 0:
-            issues.append(f"VQ-WORDS: chunk {ci} references words but the "
-                          f"transcript is empty")
+            msg = f"chunk {ci} references words but the transcript is empty"
+            issues.append(f"VQ-WORDS: {msg}")
+            diagnostics.append(CheckIssue(severity="error", code="VQ-WORDS", message=msg))
         else:
             if not (0 <= i < nw):
-                issues.append(f"VQ-WORDS: chunk {ci} start index {i} out of "
-                              f"range [0,{nw - 1}]")
+                msg = f"chunk {ci} start index {i} out of range [0,{nw - 1}]"
+                issues.append(f"VQ-WORDS: {msg}")
+                diagnostics.append(CheckIssue(severity="error", code="VQ-WORDS", message=msg))
             if not (0 <= j < nw):
-                issues.append(f"VQ-WORDS: chunk {ci} end index {j} out of "
-                              f"range [0,{nw - 1}]")
+                msg = f"chunk {ci} end index {j} out of range [0,{nw - 1}]"
+                issues.append(f"VQ-WORDS: {msg}")
+                diagnostics.append(CheckIssue(severity="error", code="VQ-WORDS", message=msg))
         if i > j:
             issues.append(f"VQ-WORDS: chunk {ci} has start index {i} > end "
                           f"index {j}")
@@ -120,7 +127,7 @@ def resolve_windows(
             issues.append(f"VQ-WORDS: chunk {k} window ends at "
                           f"{windows[k][1]:.3f}s, overlapping chunk {k + 1} "
                           f"which starts at {t0s[k + 1]:.3f}s")
-    return windows, issues
+    return windows, issues, diagnostics
 
 
 def _clamp_idx(idx: int, n: int) -> int:
@@ -193,7 +200,7 @@ def build_segments(
     duration: float,
     design: Design,
     assets: dict,
-) -> tuple[list[IRSegment], list[str]]:
+) -> tuple[list[IRSegment], list[str], list[CheckIssue]]:
     """Merge consecutive same-`src` backgrounds into IRSegments.
 
     v1 same-source merge preserved (test_scene_merge.py matrix):
@@ -211,12 +218,16 @@ def build_segments(
 
     Video offsets at/past the probed source EOF are clamped to
     max(0, duration_src - window_length) with a "VQ-OFFSET:" warning (v1 trap:
-    a silent offset-past-EOF produced audio-only video).
+    a silent offset-past-EOF produced audio-only video). The clamp is also
+    recorded as a structured CheckIssue in the returned diagnostics list
+    (`where` is filled in by the caller with the beat id); `warnings` keeps
+    the tagged string for human display.
     """
     from dlstudio.model.content import Transition
 
     bgs = resolve_backgrounds(chunks, beat_scene)
     warnings: list[str] = []
+    diagnostics: list[CheckIssue] = []
 
     # group consecutive same-src runs
     @dataclass
@@ -249,11 +260,11 @@ def build_segments(
             src_dur = probe.duration if probe is not None else None
             if src_dur is not None and offset >= src_dur - _EPS:
                 new_offset = _round(max(0.0, src_dur - seg_dur))
-                warnings.append(
-                    f"VQ-OFFSET: scene offset {offset:.2f}s is at/past source "
-                    f"duration {src_dur:.2f}s for {bg.src}; clamped to "
-                    f"{new_offset:.2f}s (v1 trap: silent audio-only render)"
-                )
+                msg = (f"scene offset {offset:.2f}s is at/past source "
+                       f"duration {src_dur:.2f}s for {bg.src}; clamped to "
+                       f"{new_offset:.2f}s (v1 trap: silent audio-only render)")
+                warnings.append(f"VQ-OFFSET: {msg}")
+                diagnostics.append(CheckIssue(severity="warn", code="VQ-OFFSET", message=msg))
                 offset = new_offset
 
         # xfade to the NEXT segment (None on the last)
@@ -270,4 +281,4 @@ def build_segments(
             ken_burns=bg.ken_burns, loop=bg.loop, fit=bg.fit,
             xfade=xfade,
         ))
-    return segments, warnings
+    return segments, warnings, diagnostics

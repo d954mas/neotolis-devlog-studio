@@ -3,20 +3,28 @@
 Deferred items surfaced during the Phase-1 build (2026-07-16). None block
 Phase 2; each is a bounded task.
 
-## 1. Migrate compile/check diagnostics off warning-string regex
+## 1. Migrate compile/check diagnostics off warning-string regex — DONE 2026-07-16
 
-`Timeline.diagnostics: list[CheckIssue]` now exists in the IR (added at
-integration). compile still records VQ-tagged strings into
-`Timeline.warnings` and `check._promote_warnings` regex-parses them.
-Migration: compile appends structured `CheckIssue` objects to
-`diagnostics`; check merges them directly; `warnings` stays human-display
-only. Owner: compile-agent scope (`compile/__init__.py`, `check/__init__.py`).
+compile (`compile/segments.py`'s `resolve_windows`/`build_segments`) now
+appends structured `CheckIssue` objects to `Timeline.diagnostics` for the
+VQ-WORDS out-of-range and VQ-OFFSET clamp cases, in addition to the existing
+tagged strings in `Timeline.warnings` (human display only).
+`check._promote_warnings` no longer regex-parses `warnings`; it merges
+`timeline.diagnostics` directly (`_WARN_RE` and the regex path were
+deleted — nothing else depended on it). Tests: `test_compile_windows.py`,
+`test_compile_segments.py` (diagnostics assertions added), `test_check.py`,
+`test_compile_timeline.py` (new structured-diagnostics tests).
 
-## 2. Populate `AssetProbe.readable`
+## 2. Populate `AssetProbe.readable` — DONE 2026-07-16
 
-Field exists (None = undetermined). `compile/probe.py` should set
-`readable=False` when a file exists but ffprobe fails on it, and VQ-ASSET
-should report present-but-broken assets distinctly from missing ones.
+`compile/probe.py` sets `readable=False` when a file exists but ffprobe
+fails on it (nonzero rc or unparseable JSON), `readable=True` on a
+successful probe, and leaves it `None` for kinds never ffprobed (fonts,
+other) or missing files. `check._check_assets` reports a VQ-ASSET error for
+exists-but-`readable is False` assets ("present but unreadable"), distinct
+from the missing-asset error. Tests: `tests/test_compile_probe.py` (new;
+monkeypatched-subprocess unit tests + `@pytest.mark.slow` real-ffprobe
+corrupt-file tests), `test_check.py`.
 
 ## 3. `rotate` anim prop
 
@@ -32,12 +40,15 @@ for collisions (badge over short text); if it matters, add optional
 `Layout` hints from content renderers to decoration passes
 (`render/raster/_util.py` already has a `Layout` seam).
 
-## 5. `dl2 iter --stale` cache-hit-but-file-missing edge
+## 5. `dl2 iter --stale` cache-hit-but-file-missing edge — DONE 2026-07-16
 
-`--stale` skips beats whose cache key exists, then requires the MP4 on
-disk. If the cache entry exists but the target file was deleted, iter
-fails with "missing rendered beats" instead of restoring from cache via
-`dl_cache.get`. Restore-on-skip would fix it.
+`cmd_iter` (`cli/__init__.py`) now restores a stale-skipped beat from cache
+when its `beat_files[bid]` copy is missing on disk: for each beat with a
+cache hit, if the file isn't already there it calls `dl_cache.get(key,
+path)` before the trailing missing-rendered-beats check runs. Tests:
+`test_cli.py::test_cmd_iter_stale_restores_missing_cached_beat_file` and
+`::test_cmd_iter_stale_skips_restore_when_file_already_present` (no
+redundant re-copy when the file is already present).
 
 ## 6. Phase-2 seams (by design, not debt)
 

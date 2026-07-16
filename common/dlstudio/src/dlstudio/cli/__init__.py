@@ -374,10 +374,19 @@ def cmd_iter(args: argparse.Namespace) -> int:
     beat_files = {b.id: out_dir / f"{b.id}.mp4" for b in all_beats}
 
     if args.stale:
-        targets = [
-            b for b in all_beats
-            if not dl_cache.has(dl_cache.beat_key(b, design, quality=quality, width=width_px, gpu=args.gpu))
-        ]
+        targets = []
+        for b in all_beats:
+            key = dl_cache.beat_key(b, design, quality=quality, width=width_px, gpu=args.gpu)
+            if dl_cache.has(key):
+                # Cache hit: nothing to render, but the beat_files[b.id] copy
+                # may have been deleted since the cache entry was written
+                # (e.g. data/finalize got cleaned). Restore it from cache so
+                # the missing-file check below doesn't fail a beat that is
+                # actually still cached.
+                if not beat_files[b.id].exists():
+                    dl_cache.get(key, beat_files[b.id])
+            else:
+                targets.append(b)
         print(f"[dl2] stale beats: {len(targets)}/{len(all_beats)}")
         if not targets:
             print("[dl2] nothing to render")

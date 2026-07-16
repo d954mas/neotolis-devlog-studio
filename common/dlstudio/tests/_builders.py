@@ -52,10 +52,11 @@ def probe(
     width=None,
     height=None,
     has_audio=None,
+    readable=None,
 ) -> AssetProbe:
     return AssetProbe(
         path=path, kind=kind, exists=exists, duration=duration,
-        width=width, height=height, has_audio=has_audio,
+        width=width, height=height, has_audio=has_audio, readable=readable,
     )
 
 
