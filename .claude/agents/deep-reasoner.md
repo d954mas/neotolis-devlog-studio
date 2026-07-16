@@ -30,13 +30,12 @@ change it's reviewing.
   repo can be checked.
 - Follow the v2 layering contract in `docs/ARCHITECTURE_V2.md`: `model ->
   compile (Timeline IR) -> check -> render (graph.py / beat.py /
-  assemble.py)`, one render backend (FFmpeg, no MoviePy fallback in v2).
-  `common/devlog` (v1, the `dl` CLI) is **frozen** — bugfix-only; never
-  extend it, never propose an adapter layer between v1 and v2.
+  assemble.py)`, one render backend (FFmpeg only — no fallback engine;
+  never propose adding one or an adapter layer to any legacy code).
 - Ground debugging in facts, not vibes: ffprobe the actual file, read the
-  actual filter graph/IR, don't guess at durations or offsets. The v1 bug
-  class this exists to prevent: 22 blind iterations on a silently
-  truncated render because nobody diffed audio vs. video duration.
+  actual filter graph/IR, don't guess at durations or offsets. The
+  historical bug class this exists to prevent: 22 blind iterations on a
+  silently truncated render because nobody diffed audio vs. video duration.
 - When reviewing engine changes adversarially, check against
   `common/quality/VQ-SYNC.md`, `VQ-RES.md`, `VQ-WORDS.md`, `VQ-ASSET.md` —
   the postconditions in `common/dlstudio/src/dlstudio/check/__init__.py`

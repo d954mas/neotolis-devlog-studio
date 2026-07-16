@@ -29,9 +29,9 @@ is not a pass, it's an unlabeled skip (see `common/quality/README.md`,
 
 Do not assume gates passed. Check for the actual artifacts:
 
-- Final render exists: `data/finalize/<final>.mp4` (or the edit's `output`).
-- `VQ-SYNC`: an `ffprobe` audio/video duration match, or (v2) confirmation
-  `verify_output()` ran without raising.
+- Final render exists at the edit's `output` (default `data/finalize/final.mp4`).
+- `VQ-SYNC`: an `ffprobe` audio/video duration match, or confirmation the
+  render's built-in `verify_output()` passed.
 - `VQ-AUDIO`: a loudnorm probe near -14 LUFS for the final mix.
 - `VQ-END`: the actual last frame extracted and looked at — not assumed.
 - `VQ-PROOF`: real-product visuals trace to an actual capture, not a
@@ -49,10 +49,6 @@ gates weren't actually checked.
    `services/publish.py`). Note the exact path it prints (`[dl2] youtube
    package -> <path>`; default `data/publish/youtube_package.md`, or
    wherever `--out` pointed) — step 7 updates this same file, not a new one.
-   If unavailable yet in this workspace (Phase 4, may not be built), fall
-   back to reading `beats.py`/the IR directly for beat order, titles, and
-   timestamps — say you used the fallback path, and target that same
-   default path when you write your own version.
 2. **Chapters:** pull beat `title`/`order`/timestamps from the IR
    (`dl2 ir <edit>`) or `beats.py`. Beat titles are internal shorthand —
    rewrite each into a short, viewer-facing chapter label, don't paste the

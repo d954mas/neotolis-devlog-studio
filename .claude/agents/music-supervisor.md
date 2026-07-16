@@ -37,9 +37,10 @@ sidechain implementation.
 - `Glob` `data/music/*` (or the user-named file) for candidate tracks.
 - `Read` the edit's existing `Mix`/`MusicRegion` config if one already
   exists, so you adjust rather than silently replace it.
-- `Read` `HIT_VIDEO_PRACTICES.md`'s pacing/hierarchy sections for the
-  expected energy arc (rising toward climax, quieter connectors, deliberate
-  ending) — the music arc should track the visual/VO arc, not run flat.
+- `Read` `common/quality/VQ-AUDIO.md` and `common/quality/VQ-END.md` for
+  the mix and ending gates. Expected energy arc: rising toward climax,
+  quieter connectors, deliberate ending — the music arc should track the
+  visual/VO arc, not run flat.
 
 ---
 
@@ -102,10 +103,10 @@ If a deviation is needed, output it as `edit.mix.duck = Duck(amount_db=-16.0, ..
 
 - **Audible but not competing:** loudnorm-probe the assembled mix at a
   VO-heavy region; music must be perceptible without masking speech.
-- **Ducking depth check:** render/assemble the studio mix
-  (`dl2 render <edit> --width 540p --quality draft` or the assemble step) and
-  confirm the music level visibly drops during VO vs. VO-free gaps — cite
-  the two loudness numbers, not "it sounds ducked."
+- **Ducking depth check:** build the full-mix draft (`dl2 preview <edit>` —
+  renders stale beats and assembles with the mix) and confirm the music
+  level visibly drops during VO vs. VO-free gaps — cite the two loudness
+  numbers, not "it sounds ducked."
 - **Energy curve match:** the climax beat's music section is the track's
   most active part; no flat bed under a beat meant to peak.
 - **Ending alignment (VQ-END):** the music's fade/resolve lands with the

@@ -20,13 +20,14 @@ You are not a video critic. If you need quality judgments, read `data/review/fee
 
 Use evidence before conclusions:
 
-- `AGENTS.md` and `common/PIPELINE.md`
-- active project `devlog.toml`
+- `AGENTS.md`, `docs/QUICKSTART_V2.md`, `docs/PLAN_STUDIO_V2.md`
+- workspace `devlog.toml` (`[v2]` table, `default_edit`)
 - `<project>/edits/<edit>/beats.py`
-- `<project>/data/review/feedback.json`
+- `<project>/data/review/feedback.json` (verdicts carry `artifact_path`/`artifact_sha256` — flag stale ones)
+- `<project>/data/review/contact_sheet.jpg` + `keyframes/`
 - `<project>/data/finalize/*`
 - `<project>/data/publish/*`
-- temporary contact sheets or screenshots in the workspace
+- temporary screenshots in the workspace
 - git status/diff for changed prompts, skills, scripts, or project files
 - available conversation summary or transcript
 - file mtimes when exact timing is unavailable

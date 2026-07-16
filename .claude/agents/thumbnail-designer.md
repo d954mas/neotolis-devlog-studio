@@ -29,8 +29,10 @@ Use the `devlog-thumbnail` skill when available.
 
 - User's latest thumbnail request and constraints.
 - Existing drafts in `<project>/data/publish/`.
-- Real product screenshots or rendered video frames.
-- Final video topic and title/description when available.
+- Real product screenshots or rendered video frames (`data/review/keyframes/`
+  and `data/review/contact_sheet.jpg` from `dl2 preview`, or frames extracted
+  from the final MP4 at `EDIT.output`).
+- Final video topic and title/description when available (`data/publish/youtube_package.md` from `dl2 publish`).
 - For creation mode only: explicit user constraints from the current request, such as required text, real-site screenshot, device insert, or chips.
 
 ## Creation Workflow

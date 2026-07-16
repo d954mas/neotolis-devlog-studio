@@ -34,10 +34,10 @@ judge).
 - Find the target beat's `vo` field in the active edit's `beats.py`
   (`edits/<edit>/beats.py`, first beat in `order`, or the beat id the user
   names). If the user pastes a draft directly, score that instead.
-- Detect format from the edit path/name: contains `reel`/`short`/vertical
-  edit → **reel** (goal must land in the first ~1s, one sentence). Otherwise
-  → **devlog cold-open** (goal must land within the first 5-8s, 1-2
-  sentences allowed — see `HIT_VIDEO_PRACTICES.md`'s "Hook (first 5-8s)").
+- Detect format from the edit's `design.py` `RESOLUTION` (vertical →
+  **reel**: goal must land in the first ~1s, one sentence) or the edit
+  path/name containing `reel`/`short`. Otherwise → **devlog cold-open**
+  (goal must land within the first 5-8s, 1-2 sentences allowed).
 - Check the beat's `face` mode — face beats carry an extra requirement
   (eye contact at record time), noted as a predicted weakness, not scored
   against the text itself.
@@ -55,11 +55,11 @@ pass/fail:
 
 | # | Criterion | Source |
 |---|---|---|
-| 1 | Goal (product/problem/situation) is answerable from voice alone within the target window | VQ-HOOK: "answer what is this about after one second" |
-| 2 | Viewer-facing: opens on a problem, contradiction, funny situation, concrete number, or visible failure — not a feature tour, not the author's internal interest | VQ-HOOK + HIT_VIDEO_PRACTICES "hook from the viewer's problem, not the author's interest" |
-| 3 | No throat-clearing: no greeting, meta-preamble, or category noun before the specific claim ("итак", "сегодня я хочу показать", "о чём игра") | HIT_VIDEO_PRACTICES: "open on a number or a specific noun, not a category" |
+| 1 | Goal (product/problem/situation) is answerable from voice alone within the target window | `common/quality/VQ-HOOK.md`: "answer what is this about after one second" |
+| 2 | Viewer-facing: opens on a problem, contradiction, funny situation, concrete number, or visible failure — not a feature tour, not the author's internal interest | VQ-HOOK: "not what the author personally finds interesting" |
+| 3 | No throat-clearing: no greeting, meta-preamble, or category noun before the specific claim ("итак", "сегодня я хочу показать", "о чём игра") | VQ-HOOK: "opens on a specific number or noun, not a category" |
 | 4 | Standalone: makes sense with zero prior context; no "а", "теперь", "можно" continuity crutch | VQ-HOOK: "no dependency on a prior reel" |
-| 5 | Speakable in one breath within the format window (reel: ~1 short sentence; devlog: ~2 short sentences in 5-8s) — no subordinate-clause pileup | HIT_VIDEO_PRACTICES hook section + practical delivery constraint |
+| 5 | Speakable in one breath within the format window (reel: ~1 short sentence; devlog: ~2 short sentences in 5-8s) — no subordinate-clause pileup | practical delivery constraint (recorded takes fail on clause pileup) |
 
 A variant that fails criterion 1 or 2 is not rankable as a hook regardless
 of how it scores elsewhere — flag it as rejected, not low-ranked.

@@ -1,244 +1,198 @@
 # AGENTS.md — instructions for AI agents working on this project
 
-This file is for AI agents (Claude Code and similar) — quick orientation
-on how this workspace works, defaults to follow, and which skill/agent to
-invoke for which task. Humans should read `README.md` and `common/PIPELINE.md`.
+This file is for AI agents (Claude Code / Codex) — quick orientation on how
+this workspace works, defaults to follow, and which agent to spawn for which
+task. The one-page draft path is `docs/QUICKSTART_V2.md`; the engine
+contract is `docs/ARCHITECTURE_V2.md`.
 
 ## Workspace shape
 
 ```
-devlogs/                   ← workspace root, git repo, contains common/ + projects
-  common/                  Reusable engine (versioned with workspace)
-    devlog/                Python package (render, audio, cache, cli, web)
-    PIPELINE.md            Orchestrator playbook (READ FIRST for any iteration task)
-    README.md              Quickstart for new projects
-  trolley/                 First project — Not a Trolley Problem devlog
-  newproject/              Future projects sit as siblings here
-  dl.bat / dl              CLI wrapper (Windows / POSIX)
+devlogs/                     ← workspace root, git repo
+  common/
+    dlstudio/                Studio v2 engine: model → compile → IR → check → render (FFmpeg)
+    quality/                 VQ-* quality-rule catalog (sync, audio, hook, motion, ...)
+  docs/
+    QUICKSTART_V2.md         full draft path on one page (cold-start entry)
+    ARCHITECTURE_V2.md       v2 layering contract — read before engine work
+    PLAN_STUDIO_V2.md        production plan (safe-fix / stop rules §2.2–2.3)
+  <project>/                 each video project sits as a sibling of common/
+    edits/<edit>/            __init__.py (module-level EDIT) + beats.py + design.py
+    data/                    audio/ footage/ images/ music/ sfx/ fonts/
+                             hyperframes/ infographics/ scratch/ recordings/
+                             finalize/ review/ publish/
+  dl2.bat / dl2              CLI wrapper (Windows / POSIX)
 ```
+
+Edits are addressed by dotted module path (e.g. `myreel.edits.main`); the
+default edit comes from `devlog.toml` `[v2] default_edit`. Orientation is
+the `RESOLUTION` tuple in `design.py` — there is no separate format field.
+`common/devlog` (v1) заморожен и обслуживает только старые проекты — не
+использовать для новой работы.
 
 ## Defaults — do these without being asked
 
-| When user wants | Default action | Skill |
-|---|---|---|
-| Quick result from beats.py edit | `dl iter --stale -j 4..8` | CLI |
-| One-beat iteration | `dl iter --beat <id>` or Studio `Render 540p` | CLI/Studio |
-| Record → process → render beat | Studio `Process + Render` on selected beat | Studio |
-| Auto-rebuild on save | `dl watch --beat <id>` for targeted work | CLI |
-| Final upload-ready render | `dl final [edit]` | CLI |
-| Start a new video from script | `dl new-video <project> --script <file>` | CLI |
-| Improve a rendered beat/video | Loop: render → reviewer → mech fixes → repeat | workflow |
-| Create simple chart/counter/timeline infographic | `dl gen` from JSON/sample, then use as `Scene(kind="video"|"image")` | CLI |
-| Create rich HTML/GSAP motion graphic | `dl gen-html <dir> --init`, edit HTML/CSS/JS, render to MP4 | CLI/Hyperframes |
-| New reel from a topic/site/update | scaffold edit + scratch VO + `dl reel-preview` first; timebox source capture | CLI |
-| Cut clip for reel/short | `dl cut` with reframe | CLI |
-| Iterate a reel/short edit | `dl reel-preview <edit>` before any upload render | CLI |
-| Review a recorded VO take | Spawn `vo-reviewer` agent on `.webm` | (agent) |
-| Review composed beat / iter video | Spawn `video-reviewer` agent | (agent) |
-| Design infographic/motion asset plan | Spawn `motion-infographic-designer` | (agent) |
-| Reflect after a devlog run | Spawn `devlog-reflector`, use `devlog-reflection` | agent/skill |
-| Create/review YouTube thumbnail | Spawn `thumbnail-designer`, use `devlog-thumbnail` | agent/skill |
+| When user wants | Default action |
+|---|---|
+| Quick result from a beats.py edit | `dl2 iter <edit> --stale -j 4` |
+| One-beat iteration | `dl2 compose <edit> <beat>` |
+| Watchable draft + review artifacts | `dl2 preview <edit>` → draft at `EDIT.output` + `data/review/contact_sheet.jpg` + `data/review/keyframes/` |
+| Final upload-ready render | `dl2 final <edit>` (1080p, −14 LUFS loudnorm) |
+| Start a new video | `dl2 new-video <project> --format vertical` (or `landscape`) |
+| Scratch VO for a beat | `dl2 scratch-tts <edit> <beat>` → `dl2 transcribe <wav> <words.json>` → wire BOTH paths into the beat in `beats.py` |
+| Process a recorded take | `dl2 audio <edit> <beat> <take>` (takes live in `data/recordings/`) |
+| Record VO / takes / feedback UI | `dl2 studio <edit>` → http://127.0.0.1:8788 |
+| Missing-asset / compile triage | `dl2 check <edit>` (its error list is the TODO); cache status: `dl2 beats <edit>` |
+| Ground-truth timings | `dl2 ir <edit> --out ir.json` |
+| Motion / infographic asset | `dl2 gen-html <asset> --init`, edit HTML, render to `data/infographics/` |
+| Stock b-roll | `dl2 stock search` / `dl2 stock download` |
+| YouTube package | `dl2 publish <edit>` → `data/publish/youtube_package.md` |
+| Environment triage | `dl2 doctor` |
+| Engine-work verification | `dl2 verify --changed` |
+
+Agent routing:
+
+| Task | Agent |
+|---|---|
+| Review a recorded VO take | `vo-reviewer` |
+| Review composed beat / full draft / plan | `video-reviewer` |
+| Hook check before recording | `hook-doctor` |
+| Music choice + MusicRegion/Duck params | `music-supervisor` |
+| Design/generate motion or infographic asset | `motion-infographic-designer` |
+| YouTube packaging after final | `publish-packager` |
+| Thumbnail creation / critique | `thumbnail-designer` |
+| Post-run reflection | `devlog-reflector` |
+| Engine architecture / render debugging | `deep-reasoner` (Opus) |
+| Mechanical edits / already-decided plan | `fast-worker` (Sonnet) |
 
 ## Critical engineering defaults
 
-1. **FFmpeg engine is the default** (`compose_ffmpeg.py`). Don't suggest `--engine moviepy` unless the user reports a visual bug specific to the ffmpeg pipeline. MoviePy fallback is kept for safety but is 5-25× slower.
+1. **Checks are a built-in pre-render gate.** Every render path (`compose`,
+   `iter`, `render`, `final`, `preview`, Studio API) compiles the edit and
+   runs the mechanical checks first — errors block, draft may continue on
+   warnings. Don't script a manual check before renders; use `dl2 check`
+   for triage (missing assets, broken fonts, word-index errors).
+2. **Cache is content-addressed and on by default.** Entries are MP4 +
+   VO-stem pairs restored together; keys cover engine source, design,
+   assets, fonts, and the resolution/quality profile. Don't pass
+   `--no-cache` unless debugging the cache itself.
+3. **Resolution profiles are orientation-aware runtime flags, not code.**
+   Draft is the 540p-class profile (960×540 landscape / 304×540 vertical);
+   delivery is 1080p (1920×1080 / 1080×1920) via `dl2 final`; 4K is
+   3840×2160 / 2160×3840. Same `beats.py` renders at any profile.
+4. **Parallel render is safe within one edit** (`-j 4..8`, one process per
+   worker). Don't render two edits of the same project concurrently — they
+   share `data/finalize/`.
+5. **FFmpeg is the only backend.** No fallback engine. A render failure is
+   a bug to fix (route to `deep-reasoner`), not a reason to switch engines.
+6. **Fonts are validated assets.** A broken or missing TTF in `data/fonts/`
+   is a check error, never a silent fallback; replacing a font file
+   invalidates the cache.
+7. **Draft first for a new reel.** Scaffold, provisional script, scratch
+   VO, existing/stock/generated visuals, `dl2 preview`. Source capture is a
+   short bounded step; use placeholders and replace next iteration.
 
-2. **Cache is correct and on by default.** Hash includes engine source, design, asset mtimes, draft/gpu flags. Engine code changes auto-invalidate. Don't pass `--no-cache` unless debugging cache itself.
+## Reel defaults
 
-3. **Resolution and quality are runtime flags, not code constants.** Use `dl iter --stale` for 540p draft iteration and `dl final` for upload-ready renders. Engine is resolution-independent via `design.px()` — same `beats.py` renders correctly at any resolution.
+- **Captions:** set `subtitles=True` on the beat — phrase captions are
+  auto-grouped from the beat's words, styled by `Design.captions`. Don't
+  hand-build caption chunks.
+- **Goal in second 0–1:** first spoken sentence names the
+  situation/problem/product with a viewer-facing hook (problem, number,
+  failure, contrast, funny situation) — else rewrite/re-record before any
+  visual polish.
+- **Standalone:** no "а ещё / теперь / можно…" openings, no dependency on a
+  prior reel.
+- **Voice energy:** flat, disengaged VO is a re-record issue; visual edits
+  can't hide it.
+- **Motion floor:** no static screenshot run over ~3s — `ken_burns`,
+  framed/inset cards, live footage, or a generated motion asset.
+- **Readable phone text:** short overlay text; subtitle as a second
+  readable line.
+- **Ending:** hold a deliberate final frame with site/product/CTA ~1s.
+- **Preview first:** inspect the `dl2 preview` contact sheet + keyframes
+  before any delivery-quality render.
 
-4. **Parallel render inside one edit** (`-j 4..8`) is safe and useful when rendering many beats. Each worker is its own Python process. Per-worker cache writes are atomic. Do **not** run two different edit renders concurrently: they share `data/finalize/main_*` and `_concat.txt`.
+## Infographic and motion workflow — HyperFrames only
 
-5. **Run `dl check` before expensive renders.** Use plain `dl check` during normal iteration and `dl check --deep` after changing video assets or scene offsets. These use `default_edit` from `devlog.toml`.
+All generated motion/infographic assets go through the HyperFrames bridge
+(there is no other generator in v2):
 
-6. **Use `dl doctor`, `dl beats`, and `dl stale` for triage.** `dl doctor` verifies local dependencies; `dl beats <edit> --missing-only` shows durations and missing rendered beat files; `dl stale --width 540p --quality draft` shows renders older than current inputs/cache state.
-
-7. **Prefer targeted watch for one-beat iteration.** `dl watch --beat <id>` runs `check` and re-renders only that beat when `beats.py`, `design.py`, or renderer files change.
-
-8. **For reels/shorts, use `dl reel-preview` before upload renders.** It renders a 540p draft, writes a contact sheet, and extracts chunk midpoint frames. Use this for text size, story clarity, ending, and safe-zone checks. Run 1080/upload only after the preview passes.
-
-9. **Use `dl smoke` after engine changes.** `dl smoke` runs tests plus `check` and `beats`; `dl smoke --skip-tests` is the faster sanity pass.
-
-10. **Use `dl assets --width 4k` before final render.** Missing assets are blockers; low-res warnings include severity, affected beat ids, and recommended action.
-
-11. **Inspect cache before clearing it.** Prefer `dl cache-info`; use `dl cache-prune --older-than-days N` for old entries. Full `cache-clear` is still a rare debugging action.
-
-12. **Use `dl script`, `dl shotlist`, `dl import-script`, and `dl new-video` for planning.** `beats.py` remains the source of truth; `import-script` generates starter chunks from a rough script, and `new-video` creates a scaffold plus generated `beats.py`.
-
-13. **Studio is the default daily UI.** Run `dl serve [edit]`, open `/devlog/studio.html`, then use: select beat → record take → `Process + Render` → preview the 540p draft on the Script tab. The separate recorder page remains available for focused capture.
-
-14. **Per-chunk fade-in/out is currently disabled in ffmpeg engine** — known interaction with overlay alpha that broke text bands. Plates and overlay bands pop in/out abruptly. Don't try to "fix" the missing fade with hacks unless you have a verified ffmpeg alpha-fade approach. Crossfade between scenes (xfade) works fine.
-
-15. **Generated infographics are first-class assets.** Use `dl gen` for simple branded charts/counters/timelines/workflow diagrams. It uses `common/devlog/anim.py`, `charts.py`, and `generated.py`, with only Pillow + NumPy + FFmpeg. Render to `data/infographics/*.mp4` or `.png`, then reference the file from `beats.py` through `Scene(kind="video", src="data/infographics/<file>.mp4")` or `Scene(kind="image", ...)`.
-
-16. **Hyperframes is optional for rich motion graphics, not the core renderer.** Use `dl gen-html` when the visual needs HTML/CSS layout, GSAP animation, dashboard-like UI, or complex motion that is awkward in Pillow. It runs `npx hyperframes render` via `common/devlog/hyperframes.py` and requires Node 22+, npm/npx, Chromium/Puppeteer download access, and FFmpeg. Keep Hyperframes projects under `data/hyperframes/<name>/` and render outputs under `data/infographics/`.
-
-17. **Do not replace the devlog pipeline with Hyperframes or Remotion.** The main video remains `Beat`/`Chunk`/`Scene` + FFmpeg composition. Hyperframes/`dl gen` only produce asset clips that the existing pipeline consumes.
-
-18. **For a new reel, produce a visual draft first.** If the user asks for a new reel/short from an update, topic, URL, or rough idea, immediately create the edit scaffold, provisional script, scratch TTS/words, visuals, and `dl reel-preview`. Do not spend the first pass on open-ended browsing, auth debugging, data validation, or perfect product capture. Source capture is allowed only as a short, bounded step; if it blocks, use existing assets/generated placeholders and keep moving. Replace with real screenshots/data during the next iteration.
-
-## Reel/short defaults
-
-Before rendering an upload-quality reel, run this gate:
-
-- **Draft-first workflow:** for a new reel, the first deliverable is a watchable draft with scratch VO and contact sheet. Real logged-in captures, exact numbers, final VO, and upload render are second-pass work unless the user explicitly asks for source verification first.
-- **Goal in second 0-1:** the viewer must immediately know the situation/problem/product. If the first spoken sentence does not name it, rewrite or re-record before visual polish.
-- **Voice energy:** reels need a conversational, interested delivery. Flat/low-LRA voice is a re-record issue, not something visual edits can hide.
-- **Standalone story:** first 2-4 seconds explain the product/context in voice, not only text.
-- **No dependency on another reel:** avoid openings like "а еще", "теперь", "можно..." unless the product was just named.
-- **Hook first, explanation second:** open with a viewer-facing problem, surprising number, failure, contrast, or funny situation. Do not start with only what the author finds interesting internally.
-- **Screencast is not enough:** raw static screenshots are low-retention. Prefer live footage, hand-held monitor capture, gameplay/product motion, meme/situation B-roll, or generated motion assets. If screenshots are necessary, use them as framed/inset cards or add `Scene(..., ken_burns=True)` plus moving surrounding elements.
-- **Motion floor:** no more than ~3 seconds of static screenshot without motion; no run of repeated identical UI frames unless the text itself is the punchline.
-- **Readable phone text:** main overlay should be short; subtitle should be a second readable line, usually `sub_ratio >= 0.5` for vertical reels.
-- **Ending:** hold a deliberate final frame with site/product/CTA for about one second.
-- **Preview first:** run `dl reel-preview <edit>` and inspect the contact sheet/keyframes before any `--quality upload` render.
-- **Render one reel edit at a time:** separate reel edits share `data/finalize/main_*` and `_concat.txt`; do not run upload renders for multiple edits in parallel.
-
-## Infographic and motion workflow
-
-Use this decision tree:
-
-| Need | Use | Command |
-|---|---|---|
-| Bar chart, counter, timeline, simple workflow diagram | Native generator | `dl gen spec.json --out data/infographics/name.mp4 --width 540p` |
-| Quick native generator sample | Native generator | `dl gen --sample bar --out data/infographics/sample_bar.mp4` |
-| HTML/CSS/GSAP motion, dashboard, UI animation | Hyperframes bridge | `dl gen-html data/hyperframes/name --init`, edit HTML, then render |
-| Math/whiteboard explanation | Consider external Manim asset, then import as video | Ask before adding new dependency |
-
-Native `dl gen` JSON spec examples:
-
-```json
-{
-  "type": "bar_chart",
-  "title": "273 COMMITS",
-  "subtitle": "13 DAY JAM",
-  "values": [
-    {"label": "D1", "value": 8},
-    {"label": "D2", "value": 23},
-    {"label": "D3", "value": 80}
-  ],
-  "highlight_index": 2
-}
+```bash
+dl2 gen-html <asset> --init          # scaffold data/hyperframes/<asset>/
+# edit index.html — deterministic seekable GSAP timelines in window.__timelines
+dl2 gen-html <asset> --out data/infographics/<asset>.mp4 --quality draft
 ```
 
-Supported native types: `bar_chart`, `timeline`, `workflow`, `counter`.
-
-Hyperframes starter flow:
-
-```powershell
-dl gen-html data/hyperframes/bar_demo --init
-# edit data/hyperframes/bar_demo/index.html
-dl gen-html data/hyperframes/bar_demo --out data/infographics/bar_demo.mp4 --quality draft
-```
-
-After generation, connect the asset in `beats.py`:
-
-```python
-Chunk(words=(0, 5), kind="overlay",
-      text="273 КОММИТА", subtitle="ЗА 13 ДНЕЙ",
-      scene=Scene(kind="video", src="data/infographics/bar_demo.mp4"))
-```
-
-Run `dl check` after connecting generated assets. Run `dl assets --width 4k` before final.
+Requires Node 22+ / npx. Wire into `beats.py` as
+`VideoShot(src="data/infographics/<asset>.mp4")` or
+`Scene(kind="video", src=...)`. Generated assets are inputs to the normal
+Beat/Chunk pipeline — never replace the pipeline with HyperFrames/Remotion.
+Math/whiteboard needs (Manim etc.): ask before adding a dependency.
 
 ## Improve-loop discipline
 
-When running `/dl-improve` or auto-iterating on review feedback, the
-orchestrator may **auto-apply** these `beats.py` changes without asking:
+Loop: draft (`dl2 preview`) → blind review → safe fixes → re-preview.
+**Max 3 iterations by default, 5 hard cap** — then summarize and hand back.
 
-- `size`, `bg_opacity`, `subtitle_color`, `line_gap_ratio`, `sub_ratio`
-- `red_underline`, `ken_burns`, `framed_card` flag toggles
-- `position`, `style`, `fit`, `label_style`
-- `src` (image swap) — **only if the new path exists in `data/`**
-- Clear typos in `text` / `subtitle`
+Safe to apply without asking (PLAN_STUDIO_V2 §2.2): clear typos; `size`,
+`bg_opacity`, `sub_ratio`, `line_gap_ratio`, `subtitle_color`; safe-zone
+`position`, `style`, `fit`; decoration / `ken_burns` toggles; `src` swap
+**only if the new path exists in `data/`**; wiring an existing asset;
+creating/editing HyperFrames assets; re-rendering drafts; running review.
 
-The orchestrator must **stop and ask** for:
-
-- Any VO change (re-record needed)
-- New asset that doesn't exist yet
-- Structural changes (split/merge chunks, new chunk/beat)
-- Word-index re-mappings
-- Cross-beat changes
-
-**Max 5 improve iterations per beat.** After 5, summarize and hand back to user.
+Stop and ask the user (§2.3): new real footage; final VO or any VO change;
+meaning or structure changes (split/merge beats, new chunks/beats);
+word-index re-mappings; contested product claims; a critical asset that
+can't be substituted; reviewer demands a 6th iteration.
 
 ## Spawning reviewer agents
 
-Reviewers persist verdicts to `<project>/data/review/feedback.json` so the
-studio UI displays them. Use Write tool inside the agent. Merge with existing
-`vo` / `video` keys — don't overwrite.
+- Reviewers are **blind by default**: artifact + neutral context, no prior
+  user corrections. The orchestrator runs a separate regression checklist
+  against known user constraints afterward.
+- Reviewers ground claims in facts: `dl2 ir <edit> --out ir.json` for
+  timings, `dl2 check` output, ffprobe numbers, and the `data/review/`
+  artifacts (contact sheet, keyframes) — never "looks fine".
+- Verdicts persist to `data/review/feedback.json` — POST to the running
+  `dl2 studio` `/api/feedback` (deep-merges; don't clobber other keys) or
+  write the file directly, merging. **Every verdict must name the
+  `artifact_path` of the exact MP4/take reviewed** plus `artifact_sha256`,
+  `timestamp`, `verdict` (the server computes sha/timestamp from
+  `artifact_path` when omitted — still always name the path).
+- **Stale-feedback rule:** before trusting a stored verdict, recompute the
+  artifact's sha256; a mismatch with `artifact_sha256` means the file
+  changed since the review — the verdict is STALE, re-review it.
+- Before final handoff the orchestrator runs the regression checklist:
+  music present and mixed, VO joins clean, no visual glitches, text inside
+  safe zones, real product visuals where promised, deliberate ending,
+  thumbnail QA for YouTube packaging.
 
-Reviewer agents should be isolated from prior user corrections by default. Give them the artifact and neutral context, let them produce a blind verdict, then let the orchestrator run a separate regression checklist against known user constraints.
+## Quality rules
 
-Before final handoff, the orchestrator must run the regression checklist: audio/music present and mixed, VO joins clean, no visual glitches, text/overlays inside safe zones, real product visuals where promised, thumbnail QA for YouTube packaging, and deliberate ending.
-
-Canonical workspace agent templates:
-- `.claude/agents/vo-reviewer.md` — audio take review (.webm)
-- `.claude/agents/video-reviewer.md` — composed beat / full video / plan review
-- `.claude/agents/motion-infographic-designer.md` — plans and generates chart/motion assets via `dl gen` / `dl gen-html`
-- `.claude/agents/devlog-reflector.md` — post-run reflection: bottlenecks, missed gates, and pipeline improvements
-- `.claude/agents/thumbnail-designer.md` — YouTube thumbnail concept, real-product compositing, and feed-size QA
-
-Project-local copies/overrides live in `<project>/.claude/agents/`. The
-current `trolley/.claude/agents/` files are a project-local copy for the
-first project, not the canonical source. `dl new` copies from root
-`.claude/agents/` into each new project.
-
-## Studio v2 (dlstudio)
-
-A second engine is being built alongside the one above: `common/dlstudio/`
-(Python package) plus the `dl2` CLI. It does not replace `dl` yet.
-
-| | v1 — `dl` (`common/devlog`) | v2 — `dl2` (`common/dlstudio`) |
-|---|---|---|
-| Status | **Frozen.** Bugfix-only, no adapter layer. | In active build (see `docs/ARCHITECTURE_V2.md` phases). |
-| Use for | Existing projects: `trolley`, `neotolis_diary` | **New** videos going forward |
-| Render backend | FFmpeg + MoviePy fallback | FFmpeg only, no fallback |
-
-`dl2` command groups mirror the `dl` cheat-sheet in `common/PIPELINE.md`:
-`check`, `ir`, `compose`, `iter`, `render`, `final`, `audio`, `transcribe`,
-`scratch-tts`, `studio`, `beats`, `doctor`.
-
-**Quality rules** live in `common/quality/` (`VQ-*` catalog: sync, audio,
-motion, hook, safe zones, ending, real-product proof, resolution, word
-indices, assets). Mechanical parts of VQ-SYNC/VQ-RES/VQ-WORDS/VQ-ASSET are
-enforced in code (`common/dlstudio/src/dlstudio/check/`); the rest is
-judgment, checked against the rule files — never assumed from "looks fine."
-
-**Engine work** (not content work) routes to two new agents: `deep-reasoner`
-(Opus — architecture, render/ffmpeg debugging, adversarial review of engine
-changes) and `fast-worker` (Sonnet — mechanical edits, applying an
-already-decided plan, test boilerplate). Content work (beats.py, reel
-pacing, VO/video review) keeps using the five agents already listed above.
-
-**The contract**: `docs/ARCHITECTURE_V2.md` is the source of truth for v2
-layering (`model -> compile -> IR -> check -> render`) and phase status.
-Read it before touching `common/dlstudio/`.
+`common/quality/` holds the VQ-* catalog (sync, audio, motion, hook, safe
+zones, ending, real-product proof, resolution, word indices, assets).
+Mechanical parts of VQ-SYNC/VQ-RES/VQ-WORDS/VQ-ASSET are enforced in code
+(`common/dlstudio/src/dlstudio/check/`); the rest is judgment, checked
+against the rule files — never assumed from "looks fine". Unverified ≠ pass.
 
 ## Don't
 
-- Don't render at 4K during iteration (slow + separate cache entry).
-- Don't `--no-cache` unless debugging cache.
-- Don't write rendered MP4s, raw recordings, or large images into git (`.gitignore` covers this — verify if adding new asset types).
-- Don't commit generated `data/infographics/*.mp4`, `data/hyperframes/*`, or `.build_cache.json` unless the user explicitly wants assets versioned.
-- Don't invent file paths when applying `src` changes — always Glob/Read first.
-- Don't use Hyperframes for simple counters/charts that `dl gen` can produce faster.
-- Don't add Manim/Matplotlib/Remotion dependencies without asking; prefer the native generator first.
-- Don't loop the improve cycle past 5 iterations without checking in with the user.
-- Don't recommend `--engine moviepy` unless ffmpeg engine has a verified visual bug.
-- Don't run `dl concat` separately from `dl render` — render handles concat unless `--no-concat`.
+- Don't render 4K during iteration.
+- Don't `--no-cache` unless debugging the cache.
+- Don't commit rendered MP4s, recordings, `data/hyperframes/*` or
+  `data/infographics/*` outputs unless the user wants assets versioned.
+- Don't invent file paths for `src` changes — Glob/Read first (VQ-ASSET).
+- Don't invent `dl2` commands or flags — `dl2 --help` is the surface.
+- Don't reuse a feedback verdict whose `artifact_sha256` no longer matches.
+- Don't loop improve iterations past the cap without checking in.
+- Don't touch `common/dlstudio` internals for content work — engine changes
+  route to `deep-reasoner` / `fast-worker` and end with `dl2 verify --changed`.
 
-## Where the orchestrator lives
+## Where things live
 
-Pipeline docs:
-- `common/PIPELINE.md` — full orchestrator playbook (improve loop, free-form-to-action map, stop conditions)
-- `common/README.md` — pipeline reference, CLI, structure
-- This file (`AGENTS.md`) — at-a-glance defaults
-- `trolley/CLAUDE.md` — trolley project history (legacy, but useful for context)
-
-Skills:
-- `~/.claude/skills/dl-*` — user-level skills, work across all devlog projects in this workspace
-
-Agents:
-- `.claude/agents/` — canonical workspace templates copied by `dl new`
+- `docs/QUICKSTART_V2.md` — full draft path (commands + output paths)
+- `docs/ARCHITECTURE_V2.md` — engine contract and phase status
+- `docs/PLAN_STUDIO_V2.md` — production plan, safe-fix/stop rules
+- `.claude/agents/` — canonical workspace agent templates
 - `<project>/.claude/agents/` — project-local copies/overrides
