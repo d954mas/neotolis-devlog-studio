@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dlstudio"
+version = "0.1.0"
+description = "Studio v2 - code-first video production engine for devlogs, reels, and trailers"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.7",
+    "pillow>=10",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+studio = ["fastapi>=0.111", "uvicorn>=0.30"]
+dev = ["pytest>=8"]
+# Heavy service deps (whisperx, deepfilternet, piper) are lazy-imported by
+# their service module and installed on demand — never listed here.
+
+[project.scripts]
+dl2 = "dlstudio.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
