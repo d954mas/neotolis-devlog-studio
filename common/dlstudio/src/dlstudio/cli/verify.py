@@ -124,6 +124,7 @@ _SRC_PREFIX_DOMAINS: tuple[tuple[str, str], ...] = (
     ("api/", "api"),
     ("services/", "services"),
     ("template/", "template"),
+    ("__main__.py", "cli"),      # python -m dlstudio == the dl2 entry point
 )
 
 
