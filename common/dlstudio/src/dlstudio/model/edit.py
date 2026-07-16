@@ -37,6 +37,10 @@ class Beat(_Model):
     stage: str | None = None         # stage direction for the voice actor
     sfx: list[SfxEvent] = Field(default_factory=list)
     transition_out: Transition | None = None   # into the NEXT beat (assemble)
+    # Phrase-level subtitles auto-generated from the beat's words (reels):
+    # compile groups words into phrases at pauses/length and render draws
+    # them in the bottom safe zone, styled by Design.captions.
+    subtitles: bool = False
 
 
 class Duck(_Model):

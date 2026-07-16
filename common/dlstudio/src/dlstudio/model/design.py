@@ -47,12 +47,27 @@ class TextStyle(_Model):
     caps: bool = False
 
 
+class CaptionStyle(_Model):
+    """The ONE subtitle look (`beat.subtitles=True`, PLAN_STUDIO_V2 1.6):
+    a centered, wrapped text line over a soft backdrop pill in the bottom
+    safe zone. One primitive, one position, one style — projects tune the
+    knobs, they don't get a general titling system."""
+
+    size: int = 96                  # authored for 1920-wide; scaled via Design.px
+    color: str = "text"             # palette token (or literal #rrggbb)
+    font: str = "main"              # "main" | "bold" | "accent"
+    y_ratio: float = 0.78           # text-block center as a fraction of height
+    max_width_ratio: float = 0.86   # wrap width as a fraction of frame width
+    bg_opacity: float = 0.55        # backdrop pill opacity; 0 disables the pill
+
+
 class Design(_Model):
     resolution: tuple[int, int]
     fps: int = 30
     palette: Palette
     fonts: Fonts
     styles: dict[str, TextStyle] = Field(default_factory=dict)
+    captions: CaptionStyle = Field(default_factory=CaptionStyle)
     crossfade_dur: float = 0.3
     safe_margin_ratio: float = 0.05
 

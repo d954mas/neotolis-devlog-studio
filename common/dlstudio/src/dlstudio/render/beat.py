@@ -46,7 +46,7 @@ from dlstudio.render.graph import (
     color_source,
     scene_input_args,
 )
-from dlstudio.render.raster import render_chunk_png
+from dlstudio.render.raster import render_caption_png, render_chunk_png
 
 if TYPE_CHECKING:                      # avoid a package<->submodule import cycle
     from dlstudio.render import RenderOpts
@@ -407,6 +407,46 @@ def _build_overlays(beat: IRBeat, design: Design, graph: Graph,
     return bg_label
 
 
+def _build_captions(beat: IRBeat, design: Design, graph: Graph,
+                    inputs: InputList, tmp_dir: Path, bg_label: str) -> str:
+    """Composite the beat's subtitle phrases (compiled from words when
+    `beat.subtitles` is set) ABOVE all chunk overlays. Each caption is a
+    full-frame RGBA PNG (raster) with a quick alpha fade in/out and the
+    standard PTS-shift/enable-window placement. Returns final label."""
+    fade = 0.08
+    for i, cap in enumerate(beat.captions):
+        png = tmp_dir / f"cap_{i}.png"
+        render_caption_png(cap.text, design, png)
+
+        dur = max(cap.t1 - cap.t0, 0.05)
+        idx = inputs.add(["-loop", "1", "-t", f"{dur:.3f}", "-i", str(png)])
+
+        src_label = graph.new_label("cap")
+        fi = min(fade, dur * 0.4)
+        graph.add(Chain(
+            inputs=[f"{idx}:v"],
+            filters=[
+                FilterNode("format", positional=["rgba"]),
+                FilterNode("fade", args={"t": "in", "st": 0.0, "d": fi, "alpha": 1}),
+                FilterNode("fade", args={"t": "out", "st": max(0.0, dur - fi),
+                                         "d": fi, "alpha": 1}),
+                # PTS-SHIFT invariant (same as overlays): frames land at t0..t1.
+                FilterNode("setpts", positional=[f"PTS+{cap.t0:.3f}/TB"]),
+            ],
+            outputs=[src_label],
+        ))
+        out_label = graph.new_label("cc")
+        enable = f"between(t,{cap.t0:.3f},{cap.t1:.3f})"
+        graph.add(FilterNode(
+            "overlay",
+            args={"x": 0, "y": 0, "enable": enable, "eof_action": "pass"},
+            inputs=[bg_label, src_label],
+            outputs=[out_label],
+        ))
+        bg_label = out_label
+    return bg_label
+
+
 # ─── postcondition ─────────────────────────────────────────────────────────
 
 def _postcondition(path: Path, expected: float) -> None:
@@ -453,6 +493,7 @@ def render_beat(beat: IRBeat, design: Design, _timeline: Timeline | None,
 
         bg_label = _build_background(beat, design, graph, inputs, bg_color)
         bg_label = _build_overlays(beat, design, graph, inputs, tmp_dir, bg_label)
+        bg_label = _build_captions(beat, design, graph, inputs, tmp_dir, bg_label)
 
         filter_complex = graph.render()
         vcodec, abitrate = codec_args(opts.quality, opts.gpu)

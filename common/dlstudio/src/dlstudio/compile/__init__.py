@@ -35,6 +35,7 @@ from dlstudio.ir import (
     CheckIssue,
     IRAnim,
     IRBeat,
+    IRCaption,
     IRMix,
     IRMusicSpan,
     IROverlayItem,
@@ -112,6 +113,7 @@ def _compile_beat(
         beat.chunks, windows, beat.scene, duration, edit.design, assets)
     overlays = _build_overlays(beat.chunks, windows)
     sfx = _build_sfx(beat, words)
+    captions = _build_captions(words, duration) if beat.subtitles else []
 
     ir_beat = IRBeat(
         id=beat_id,
@@ -124,6 +126,7 @@ def _compile_beat(
         face=beat.face,
         sfx=sfx,
         transition_out=beat.transition_out,
+        captions=captions,
     )
     warnings = [f"[{beat_id}] {w}" for w in (*word_issues, *seg_warnings)]
     diagnostics = [
@@ -192,6 +195,50 @@ def _build_overlays(
         ))
         z += 1
     return overlays
+
+
+# Phrase grouping for `beat.subtitles` (PLAN_STUDIO_V2 1.6). Tuned for
+# spoken-word reels: split on a real breath pause, cap the line length so a
+# phrase always fits one wrapped caption in the bottom safe zone.
+CAPTION_PAUSE_SPLIT = 0.6     # inter-word gap (s) that starts a new phrase
+CAPTION_MAX_CHARS = 34        # max joined text length before a forced split
+CAPTION_LAST_TAIL = 0.3       # how long the final phrase lingers after its word
+
+
+def _build_captions(words: list[WordSpan], duration: float) -> list[IRCaption]:
+    """Group the beat's words into phrase-level caption windows.
+
+    A new phrase starts at a pause > CAPTION_PAUSE_SPLIT or when the joined
+    text would exceed CAPTION_MAX_CHARS. Each caption HOLDS until the next
+    phrase begins (no flicker between words); the last one lingers
+    CAPTION_LAST_TAIL, clamped to the beat duration."""
+    phrases: list[list[WordSpan]] = []
+    cur: list[WordSpan] = []
+    for w in words:
+        if cur:
+            gap = w.t0 - cur[-1].t1
+            joined_len = len(" ".join(x.text for x in cur)) + 1 + len(w.text)
+            if gap > CAPTION_PAUSE_SPLIT or joined_len > CAPTION_MAX_CHARS:
+                phrases.append(cur)
+                cur = []
+        cur.append(w)
+    if cur:
+        phrases.append(cur)
+
+    captions: list[IRCaption] = []
+    for i, ph in enumerate(phrases):
+        t0 = ph[0].t0
+        if i + 1 < len(phrases):
+            t1 = phrases[i + 1][0].t0
+        else:
+            t1 = min(duration, ph[-1].t1 + CAPTION_LAST_TAIL)
+        if t1 <= t0:                      # degenerate transcript timing
+            continue
+        captions.append(IRCaption(
+            text=" ".join(w.text for w in ph),
+            t0=round(t0, 4), t1=round(t1, 4),
+        ))
+    return captions
 
 
 def _build_sfx(beat: Beat, words: list[WordSpan]) -> list[IRSfx]:

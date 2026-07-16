@@ -107,6 +107,18 @@ class IRSfx(_Model):
     gain_db: float = 0.0
 
 
+class IRCaption(_Model):
+    """One phrase-level subtitle window (compiled from `beat.words` when the
+    beat sets `subtitles=True`). Rendered by render.beat as a full-frame
+    raster overlay above all chunk overlays; styling comes from
+    `Design.captions`. Text rides in the IR so the beat cache key changes
+    whenever the transcript (and thus the captions) changes."""
+
+    text: str
+    t0: float               # beat-relative seconds
+    t1: float
+
+
 class IRBeat(_Model):
     id: str
     duration: float         # authoritative: VO audio duration
@@ -118,6 +130,7 @@ class IRBeat(_Model):
     face: Literal["full", "pip", "none"] = "none"
     sfx: list[IRSfx] = Field(default_factory=list)
     transition_out: Transition | None = None
+    captions: list[IRCaption] = Field(default_factory=list)
 
 
 class BeatPlacement(_Model):

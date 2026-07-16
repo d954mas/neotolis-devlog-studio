@@ -80,3 +80,22 @@ def render_chunk_png(chunk: Chunk, design: Design, out_path: Path) -> Path:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(out_path, format="PNG")
     return out_path
+
+
+def render_caption_image(text: str, design: Design) -> Image.Image:
+    """Render ONE subtitle phrase (`Design.captions` style) to a full-frame
+    RGBA image: wrapped, centered text over a soft backdrop pill in the
+    bottom safe zone. The caption primitive for `beat.subtitles`
+    (PLAN_STUDIO_V2 1.6) — one primitive, one position, one style."""
+    from ._captions import render_caption
+
+    return render_caption(text, design)
+
+
+def render_caption_png(text: str, design: Design, out_path: Path) -> Path:
+    """Same as render_caption_image but writes an RGBA PNG to out_path."""
+    img = render_caption_image(text, design)
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    img.save(out_path, format="PNG")
+    return out_path
