@@ -200,7 +200,7 @@ def _render_beat_job(
     from dlstudio import cache as dl_cache
     from dlstudio import compile as dl_compile
     from dlstudio import render as dl_render
-    from dlstudio.cli import _resize_design
+    from dlstudio.cli import CliError, _resize_design, gate_pre_render_checks
     from dlstudio.render import beat as render_beat_mod
 
     timeline = dl_compile.build_timeline(edit)
@@ -212,6 +212,10 @@ def _render_beat_job(
         )
 
     design = _resize_design(timeline.design, width)
+    try:
+        gate_pre_render_checks(timeline, design)   # defect 0.4: no gate, no render
+    except CliError as e:
+        raise ValueError(str(e)) from e
     width_px = design.resolution[0]
     quality = quality or "standard"
 

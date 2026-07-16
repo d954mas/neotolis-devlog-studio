@@ -229,6 +229,29 @@ def _add_render_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--no-cache", action="store_true", help="bypass the render cache")
 
 
+def gate_pre_render_checks(timeline, design: Design) -> None:
+    """Defect 0.4: the mechanical gate every render path MUST pass first —
+    `resolve profile -> compile -> run checks -> render -> verify output`.
+
+    Checks run on the EFFECTIVE timeline (the design swapped for the resolved
+    render resolution) so VQ-RES judges the real target, not the native size.
+    Errors always block, at every quality tier (a draft built on a missing
+    asset or an unloadable font is a wrong video, not a fast one); warnings
+    are printed and never block. Shared with the Studio API render job."""
+    from dlstudio import check as dl_check
+
+    effective = timeline.model_copy(update={"design": design})
+    report = dl_check.run_checks(effective)
+    for issue in report.issues:
+        print(f"[dl2] [{issue.severity.upper()}] {issue.code} {issue.where}: {issue.message}")
+    errors = report.errors
+    if errors:
+        raise CliError(
+            f"pre-render checks failed with {len(errors)} error(s) — "
+            f"fix the errors above (see `dl2 check`); nothing was rendered"
+        )
+
+
 # ─── compose worker (top-level so it's picklable for -j N) ────────────────
 
 def _compose_worker(
@@ -419,6 +442,7 @@ def cmd_compose(args: argparse.Namespace) -> int:
         raise CliError(f"beat {beat_id!r} not in edit {edit.name!r}; available: {available}")
 
     design = _resize_design(timeline.design, args.width)
+    gate_pre_render_checks(timeline, design)
     # width is redundant with design.resolution (already hashed inside
     # beat_key via design.model_dump_json()) -- always use the resolved
     # value so identical resolutions hash identically whether or not
@@ -477,6 +501,7 @@ def _iterate_render(
     from dlstudio import render as dl_render
 
     design = _resize_design(timeline.design, width_spec)
+    gate_pre_render_checks(timeline, design)
     width_px = design.resolution[0]
 
     all_beats = list(timeline.beats)

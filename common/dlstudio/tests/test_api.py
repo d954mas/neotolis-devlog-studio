@@ -636,3 +636,30 @@ def test_render_beat_unknown_beat_404(light_client):
     client, _, _ = light_client
     r = client.post("/api/actions/render-beat", json={"beat_id": "nope"})
     assert r.status_code == 404
+
+
+def test_render_beat_job_blocks_on_check_errors(light_client, monkeypatch):
+    """0.4: the Studio API render path runs the same pre-render gate as the
+    CLI — a timeline with a mechanical ERROR must fail the job before
+    render_beat is ever invoked."""
+    client, _, _ = light_client
+
+    from conftest import make_ir_beat, make_timeline
+    from dlstudio.ir import AssetProbe
+
+    tl = make_timeline([make_ir_beat("b01", duration=4.0)])
+    tl = tl.model_copy(update={"assets": {
+        "data/gone.png": AssetProbe(path="data/gone.png", kind="image", exists=False),
+    }})
+    monkeypatch.setattr("dlstudio.compile.build_timeline", lambda edit, **kw: tl)
+
+    def must_not_render(*a, **k):
+        raise AssertionError("render must not start when checks error")
+
+    monkeypatch.setattr("dlstudio.render.render_beat", must_not_render)
+
+    r = client.post("/api/actions/render-beat", json={"beat_id": "b01"})
+    assert r.status_code == 200
+    job = _await_job(client, r.json()["job_id"])
+    assert job["status"] == "error", job
+    assert "pre-render checks failed" in job["error"]

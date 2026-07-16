@@ -860,6 +860,108 @@ def test_cmd_iter_no_cache_bypasses_existing_cache_entry(tmp_path, monkeypatch):
     assert out_file.read_bytes() == b"freshly-rendered-bytes"
 
 
+# ─── 0.4: checks are a mandatory pre-render gate on every render path ─────
+#
+# resolve profile -> compile -> RUN CHECKS -> render -> verify output.
+# Errors always block (draft included); warnings never block.
+
+def _timeline_with_missing_asset(beat):
+    from dlstudio.ir import AssetProbe
+
+    tl = make_timeline([beat], design=make_design())
+    return tl.model_copy(update={"assets": {
+        "data/gone.png": AssetProbe(path="data/gone.png", kind="image", exists=False),
+    }})
+
+
+def _timeline_with_warning_only(beat):
+    from dlstudio.ir import CheckIssue
+
+    tl = make_timeline([beat], design=make_design())
+    return tl.model_copy(update={"diagnostics": [
+        CheckIssue(severity="warn", code="VQ-OFFSET",
+                   message="scene offset clamped", where="b01"),
+    ]})
+
+
+def test_cmd_iter_blocks_on_check_errors(tmp_path, monkeypatch):
+    pkg = _unique_pkg("proj_iter_gate")
+    dotted = _make_fake_project(tmp_path, pkg)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+    beat = make_ir_beat("b01")
+    monkeypatch.setattr(dl_compile_mod, "build_timeline",
+                        lambda edit: _timeline_with_missing_asset(beat))
+    monkeypatch.setattr(dl_render_mod, "render_beat",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            AssertionError("render must not start when checks error")))
+
+    args = cli._build_parser().parse_args(["iter", dotted])
+    with pytest.raises(cli.CliError, match="pre-render checks failed"):
+        cli.cmd_iter(args)
+
+
+def test_cmd_compose_blocks_on_check_errors(tmp_path, monkeypatch):
+    pkg = _unique_pkg("proj_compose_gate")
+    dotted = _make_fake_project(tmp_path, pkg)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+    beat = make_ir_beat("b01")
+    monkeypatch.setattr(dl_compile_mod, "build_timeline",
+                        lambda edit: _timeline_with_missing_asset(beat))
+    monkeypatch.setattr(dl_render_mod, "render_beat",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            AssertionError("render must not start when checks error")))
+
+    args = cli._build_parser().parse_args(["compose", dotted, "b01", "--no-cache"])
+    with pytest.raises(cli.CliError, match="pre-render checks failed"):
+        cli.cmd_compose(args)
+
+
+@pytest.mark.parametrize("command", ["render", "final"])
+def test_cmd_render_and_final_block_on_check_errors(tmp_path, monkeypatch, command):
+    pkg = _unique_pkg(f"proj_{command}_gate")
+    dotted = _make_fake_project(tmp_path, pkg)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+    beat = make_ir_beat("b01")
+    monkeypatch.setattr(dl_compile_mod, "build_timeline",
+                        lambda edit: _timeline_with_missing_asset(beat))
+    monkeypatch.setattr(dl_render_mod, "render_beat",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            AssertionError("render must not start when checks error")))
+
+    args = cli._build_parser().parse_args([command, dotted])
+    with pytest.raises(cli.CliError, match="pre-render checks failed"):
+        args.func(args)
+
+
+def test_cmd_iter_proceeds_when_only_warnings(tmp_path, monkeypatch, capsys):
+    """Draft may proceed on warnings — only mechanical ERRORS block."""
+    pkg = _unique_pkg("proj_iter_warnok")
+    dotted = _make_fake_project(tmp_path, pkg)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    project_root = (tmp_path / pkg).resolve()
+
+    beat = make_ir_beat("b01")
+    monkeypatch.setattr(dl_compile_mod, "build_timeline",
+                        lambda edit: _timeline_with_warning_only(beat))
+    monkeypatch.setattr(dl_render_mod, "render_beat", _realistic_fake_render_beat)
+    monkeypatch.setattr(dl_render_mod, "assemble",
+                        lambda _tl, beat_files, _o: beat_files["b01"])
+
+    args = cli._build_parser().parse_args(["iter", dotted, "--no-cache"])
+    code = cli.cmd_iter(args)
+
+    assert code == 0
+    assert (project_root / "data" / "finalize" / "b01.mp4").exists()
+    assert "[WARN] VQ-OFFSET" in capsys.readouterr().out
+
+
 # ─── M4: `dl2 beats` defaults must match `dl2 iter`'s (draft/540p) ────────
 #
 # cmd_beats used to default to quality="standard" / native width while
