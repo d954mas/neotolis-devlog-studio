@@ -27,6 +27,8 @@ resolution lives here.
 """
 from __future__ import annotations
 
+import hashlib
+
 from dlstudio.ir import (
     AssetProbe,
     BeatPlacement,
@@ -41,9 +43,9 @@ from dlstudio.ir import (
     WordSpan,
 )
 from dlstudio.model import Beat, Chunk, Edit
-from dlstudio.model.content import ImageShot, Overlay, Plate, VideoShot
 
 from .probe import Kind, build_registry
+from .roles import content_role
 from .segments import build_segments, resolve_windows
 from .words import load_words
 
@@ -146,14 +148,30 @@ def _build_overlays(
     chunks: list[Chunk],
     windows: list[tuple[float, float]],
 ) -> list[IROverlayItem]:
-    """Every Plate/Overlay chunk becomes an IROverlayItem (z by list order).
-    ImageShot/VideoShot chunks are backgrounds (segments), not overlays.
-    Anim `t` (normalized 0..1 within the window) resolves to beat-relative
-    absolute seconds."""
+    """Resolve chunks to z-ordered IROverlayItems (see compile.roles).
+
+    - overlay-role content (Plate/Overlay) is its own raster visual -> always
+      an overlay item.
+    - segment-role content (ImageShot/VideoShot) is an ffmpeg background, so it
+      is an overlay item ONLY when the chunk carries decorations (H1): the
+      decorations composite over a TRANSPARENT frame, letting the moving scene
+      segment supply the image/video pixels (raster must not double-draw a
+      static copy over the Ken Burns segment).
+
+    Each item gets `content_hash` = sha1(chunk model_dump_json)[:16] so the
+    beat cache key (which hashes the IRBeat) changes whenever rasterized
+    content — text, style, decorations, bg — changes, even though the Chunk
+    itself reaches the rasterizer out-of-band via the chunk resolver.
+    `asset_paths` lists the files the raster pass reads (Plate.bg_image) so the
+    cache tracks their identity too. Anim `t` (normalized 0..1 within the
+    window) resolves to beat-relative absolute seconds."""
     overlays: list[IROverlayItem] = []
     z = 0
     for ci, ch in enumerate(chunks):
-        if not isinstance(ch.content, (Plate, Overlay)):
+        role = content_role(ch.content)
+        if role is None:
+            continue
+        if role.role != "overlay" and not ch.decorations:
             continue
         t0, t1 = windows[ci]
         dur = t1 - t0
@@ -165,9 +183,12 @@ def _build_overlays(
             )
             for a in ch.anims
         ]
+        content_hash = hashlib.sha1(ch.model_dump_json().encode("utf-8")).hexdigest()[:16]
         overlays.append(IROverlayItem(
             chunk_index=ci, z=z, t0=t0, t1=t1,
             anims=anims, transition_in=ch.transition,
+            content_hash=content_hash,
+            asset_paths=role.raster_asset_paths(ch.content),
         ))
         z += 1
     return overlays
@@ -274,11 +295,8 @@ def _referenced_paths(edit: Edit) -> dict[str, Kind]:
         for ch in beat.chunks:
             if ch.scene is not None:
                 add(ch.scene.src, ch.scene.kind)
-            c = ch.content
-            if isinstance(c, Plate):
-                add(c.bg_image, "image")
-            elif isinstance(c, ImageShot):
-                add(c.src, "image")
-            elif isinstance(c, VideoShot):
-                add(c.src, "video")
+            role = content_role(ch.content)
+            if role is not None:
+                for path, kind in role.referenced_paths(ch.content):
+                    add(path, kind)
     return paths

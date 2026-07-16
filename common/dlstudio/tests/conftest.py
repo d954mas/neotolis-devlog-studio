@@ -14,6 +14,7 @@ from dlstudio.ir import (
     BeatPlacement,
     IRBeat,
     IRMix,
+    IROverlayItem,
     IRSegment,
     IRSfx,
     Timeline,
@@ -52,6 +53,7 @@ def make_ir_beat(
     audio: str = "assets/b01.wav",
     words_path: str = "assets/b01_words.json",
     segments: list[IRSegment] | None = None,
+    overlays: list[IROverlayItem] | None = None,
     sfx: list[IRSfx] | None = None,
 ) -> IRBeat:
     if segments is None:
@@ -65,7 +67,7 @@ def make_ir_beat(
         words_path=words_path,
         words=[],
         segments=segments,
-        overlays=[],
+        overlays=overlays or [],
         sfx=sfx,
     )
 

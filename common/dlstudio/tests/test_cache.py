@@ -7,6 +7,7 @@ implemented.
 from __future__ import annotations
 
 import itertools
+import json
 import os
 import threading
 import time
@@ -15,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from dlstudio import cache
-from dlstudio.ir import IRSegment, IRSfx
+from dlstudio.ir import IROverlayItem, IRSegment, IRSfx
 
 from conftest import make_design, make_ir_beat
 
@@ -125,6 +126,85 @@ def test_walk_asset_paths_covers_audio_words_segments_sfx():
         sfx=[IRSfx(src="sfx1.wav", t=0.5)],
     )
     assert cache._walk_asset_paths(beat) == ["a.wav", "w.json", "seg1.png", "seg2.mp4", "sfx1.wav"]
+
+
+def test_walk_asset_paths_includes_overlay_asset_paths():
+    # C1: raster-input files an overlay reads (e.g. a Plate's bg_image) must be
+    # walked so an on-disk edit of that file changes the beat key.
+    beat = make_ir_beat(
+        audio="a.wav", words_path="w.json", segments=[],
+        overlays=[
+            IROverlayItem(chunk_index=0, z=0, t0=0.0, t1=1.0,
+                          asset_paths=["plate_bg1.png"]),
+            IROverlayItem(chunk_index=1, z=1, t0=1.0, t1=2.0,
+                          asset_paths=["plate_bg2.png"]),
+        ],
+    )
+    walked = cache._walk_asset_paths(beat)
+    assert "plate_bg1.png" in walked and "plate_bg2.png" in walked
+
+
+# ─── C1: overlay content_hash + overlay asset identity feed the key ────────
+
+def test_beat_key_changes_with_overlay_content_hash():
+    """C1 pin: two beats identical except an overlay's content_hash yield
+    different keys — content_hash rides inside beat.model_dump_json(), so
+    editing rasterized content (text/style/decorations) invalidates the key
+    even though timing is unchanged."""
+    design = make_design()
+    beat_a = make_ir_beat(overlays=[
+        IROverlayItem(chunk_index=0, z=0, t0=0.0, t1=5.0, content_hash="1111aaaa2222bbbb")])
+    beat_b = make_ir_beat(overlays=[
+        IROverlayItem(chunk_index=0, z=0, t0=0.0, t1=5.0, content_hash="9999cccc8888dddd")])
+    k1 = cache.beat_key(beat_a, design, quality="draft", width=None, gpu=False)
+    k2 = cache.beat_key(beat_b, design, quality="draft", width=None, gpu=False)
+    assert k1 != k2
+
+
+def test_beat_key_changes_with_overlay_asset_mtime(tmp_path):
+    """C1 pin: bumping an overlay's raster-input file (bg_image) mtime — same
+    IR, same content_hash — changes the key via _walk_asset_paths(ov.asset_paths)."""
+    bg = tmp_path / "plate_bg.png"
+    _write(bg, b"v1")
+    beat = make_ir_beat(overlays=[
+        IROverlayItem(chunk_index=0, z=0, t0=0.0, t1=5.0,
+                      content_hash="deadbeefdeadbeef", asset_paths=[str(bg)])])
+    design = make_design()
+    k1 = cache.beat_key(beat, design, quality="draft", width=None, gpu=False)
+
+    time.sleep(0.01)
+    bg.write_bytes(b"v2-longer-content")
+    k2 = cache.beat_key(beat, design, quality="draft", width=None, gpu=False)
+    assert k1 != k2
+
+
+def test_c1_editing_plate_text_changes_beat_key(tmp_path):
+    """THE C1 regression pin (end-to-end): compile the same edit twice with
+    ONLY Plate.text changed (timing identical) -> different beat_key. Before the
+    fix the IRBeat carried no chunk content, so the key was identical and a
+    stale render was served."""
+    from dlstudio.compile import build_timeline
+    from dlstudio.ir import AssetProbe
+    from dlstudio.model import Beat, Chunk, Edit, Plate
+
+    wp = tmp_path / "w.json"
+    wp.write_text(json.dumps({"words": [{"word": "a", "start": 0.0, "end": 0.4}]}),
+                  encoding="utf-8")
+    design = make_design()
+    probes = {
+        "vo.wav": AssetProbe(path="vo.wav", kind="audio", exists=True, duration=4.0),
+        "fonts/main.ttf": AssetProbe(path="fonts/main.ttf", kind="font", exists=True),
+    }
+
+    def _key(text: str) -> str:
+        beat = Beat(audio="vo.wav", words=str(wp),
+                    chunks=[Chunk(words=(0, 0), content=Plate(text=text))])
+        edit = Edit(name="e", design=design, beats={"b1": beat},
+                    order=["b1"], output="o.mp4")
+        tl = build_timeline(edit, probe=False, probes=probes)
+        return cache.beat_key(tl.beats[0], tl.design, quality="draft", width=None, gpu=False)
+
+    assert _key("HELLO") != _key("GOODBYE")
 
 
 # ─── get/put roundtrip ──────────────────────────────────────────────────

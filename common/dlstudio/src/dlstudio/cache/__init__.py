@@ -84,15 +84,20 @@ def _asset_identity(path: str) -> str:
 def _walk_asset_paths(beat: IRBeat) -> list[str]:
     """Every filesystem path referenced by an IRBeat.
 
-    Covers VO audio, the words JSON, background segment sources, and SFX
-    sources. Overlay chunk visuals are not filesystem paths at the IR
-    level (the PNG is produced at render time by render.raster from the
-    beat/chunk data already folded into `beat.model_dump_json()`), so they
-    are not walked here separately.
+    Covers VO audio, the words JSON, background segment sources, SFX sources,
+    and every raster-input path an overlay reads (`IROverlayItem.asset_paths`,
+    e.g. a Plate's bg_image). The overlay PNG itself is produced at render time
+    by render.raster and is not a persisted path, but the SOURCE files the
+    rasterizer reads are — so a bg_image edited on disk (same path, new bytes)
+    changes the beat's cache key via its identity (size+mtime). The overlay's
+    non-file content (text/style/decorations) is tracked separately by
+    `IROverlayItem.content_hash`, which rides inside `beat.model_dump_json()`.
     """
     paths: list[str] = [beat.audio, beat.words_path]
     paths.extend(seg.src for seg in beat.segments)
     paths.extend(sfx.src for sfx in beat.sfx)
+    for ov in beat.overlays:
+        paths.extend(ov.asset_paths)
     return paths
 
 

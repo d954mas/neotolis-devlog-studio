@@ -32,7 +32,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from dlstudio.ir import IRBeat, Timeline
+from dlstudio.ir import IRBeat
 from dlstudio.model import Design, Edit
 
 CONFIG_NAME = "devlog.toml"
@@ -175,21 +175,31 @@ def _add_render_flags(p: argparse.ArgumentParser) -> None:
 def _compose_worker(
     beat: IRBeat,
     design: Design,
-    timeline: Timeline,
     quality: str,
     gpu: bool,
     width_px: int | None,
     out_path: str,
     cache_dir_override: str | None,
     beat_chunks: list | None = None,
+    no_cache: bool = False,
 ) -> str:
-    """Render one beat to `out_path`, cache-aware. Runs in a worker process
-    under -j N (each worker is a fresh interpreter; the cache's atomic
-    publish makes concurrent workers safe even on a shared key).
+    """Render one beat to `out_path`, cache-aware unless `no_cache` is set.
+    Runs in a worker process under -j N (each worker is a fresh interpreter;
+    the cache's atomic publish makes concurrent workers safe even on a
+    shared key).
+
+    No `timeline` parameter on purpose: render_beat's `timeline` argument is
+    unused (see render/beat.py), so shipping the whole Timeline to every
+    worker was pure O(N^2) IPC overhead (N workers each pickling all N
+    beats) for nothing. render_beat is called with `None` in its place.
 
     `beat_chunks` is this beat's source Chunk list — workers are fresh
     interpreters, so the chunk resolver must be re-registered here, not in
-    the parent process."""
+    the parent process.
+
+    `no_cache`, when set, bypasses BOTH the cache read and the cache write
+    entirely (matches `dl2 compose --no-cache`'s bypass semantics) — every
+    call renders fresh and nothing is published to the cache."""
     if cache_dir_override:
         os.environ[_cache_dir_env_var()] = cache_dir_override
     from dlstudio import cache as dl_cache
@@ -200,12 +210,24 @@ def _compose_worker(
 
         render_beat_mod.set_chunk_resolver(lambda _bid, ci: beat_chunks[ci])
 
-    key = dl_cache.beat_key(beat, design, quality=quality, width=width_px, gpu=gpu)
+    # width is redundant with design.resolution (already hashed via
+    # design.model_dump_json() inside beat_key) -- normalize to the resolved
+    # resolution so a caller-supplied None vs an explicit-but-equal pixel
+    # width never produce two different cache keys for identical output.
+    width_px = design.resolution[0]
     out = Path(out_path)
+
+    if no_cache:
+        opts = dl_render.RenderOpts(width=width_px, quality=quality, gpu=gpu, workdir=out.parent)
+        rendered = dl_render.render_beat(beat, design, None, opts)
+        shutil.copyfile(rendered, out)
+        return f"rendered (no-cache) -> {out}"
+
+    key = dl_cache.beat_key(beat, design, quality=quality, width=width_px, gpu=gpu)
     if dl_cache.get(key, out):
         return f"cache hit {key} -> {out}"
     opts = dl_render.RenderOpts(width=width_px, quality=quality, gpu=gpu, workdir=out.parent)
-    rendered = dl_render.render_beat(beat, design, timeline, opts)
+    rendered = dl_render.render_beat(beat, design, None, opts)
     dl_cache.put(key, rendered)
     dl_cache.get(key, out)
     return f"rendered {key} -> {out}"
@@ -220,7 +242,6 @@ def _cache_dir_env_var() -> str:
 def _render_targets(
     targets: list[IRBeat],
     design: Design,
-    timeline: Timeline,
     *,
     quality: str,
     gpu: bool,
@@ -228,10 +249,18 @@ def _render_targets(
     beat_files: dict[str, Path],
     jobs: int,
     chunks_by_beat: dict[str, list] | None = None,
+    no_cache: bool = False,
 ) -> None:
     """Render every beat in `targets` to beat_files[beat.id]. Serial when
     jobs <= 1 or there's nothing to parallelize; otherwise fans out across
-    `jobs` worker processes via ProcessPoolExecutor."""
+    `jobs` worker processes via ProcessPoolExecutor.
+
+    No `timeline` parameter on purpose (see _compose_worker): it was never
+    used by render_beat, so pickling the whole Timeline out to every worker
+    was O(N^2) IPC for nothing.
+
+    `no_cache` is forwarded to every worker call unchanged; `dl2 iter
+    --no-cache` (cmd_iter) is what threads it in here."""
     cache_dir_override = os.environ.get(_cache_dir_env_var())
     by_beat = chunks_by_beat or {}
     if jobs > 1 and len(targets) > 1:
@@ -239,8 +268,9 @@ def _render_targets(
         with concurrent.futures.ProcessPoolExecutor(max_workers=jobs) as pool:
             futures = {
                 pool.submit(
-                    _compose_worker, b, design, timeline, quality, gpu, width_px,
+                    _compose_worker, b, design, quality, gpu, width_px,
                     str(beat_files[b.id]), cache_dir_override, by_beat.get(b.id),
+                    no_cache,
                 ): b.id
                 for b in targets
             }
@@ -251,8 +281,9 @@ def _render_targets(
     else:
         for b in targets:
             msg = _compose_worker(
-                b, design, timeline, quality, gpu, width_px,
+                b, design, quality, gpu, width_px,
                 str(beat_files[b.id]), cache_dir_override, by_beat.get(b.id),
+                no_cache,
             )
             print(f"[dl2] {b.id}: {msg}")
 
@@ -325,7 +356,13 @@ def cmd_compose(args: argparse.Namespace) -> int:
         raise CliError(f"beat {beat_id!r} not in edit {edit.name!r}; available: {available}")
 
     design = _resize_design(timeline.design, args.width)
-    width_px = design.resolution[0] if args.width else None
+    # width is redundant with design.resolution (already hashed inside
+    # beat_key via design.model_dump_json()) -- always use the resolved
+    # value so identical resolutions hash identically whether or not
+    # --width was explicit (e.g. native resolution vs an equal explicit
+    # --width no longer produce two different cache entries for the same
+    # output; see beat_key in dlstudio.cache).
+    width_px = design.resolution[0]
     quality = args.quality or "standard"
 
     out_dir = Path("data/finalize")
@@ -343,7 +380,7 @@ def cmd_compose(args: argparse.Namespace) -> int:
     render_beat_mod.set_chunk_resolver(lambda bid, ci: edit.beats[bid].chunks[ci])
 
     opts = dl_render.RenderOpts(width=width_px, quality=quality, gpu=args.gpu, workdir=out_dir)
-    rendered = dl_render.render_beat(beat, design, timeline, opts)
+    rendered = dl_render.render_beat(beat, design, None, opts)
     if cache_enabled:
         dl_cache.put(key, rendered)
         dl_cache.get(key, out_path)
@@ -395,10 +432,11 @@ def cmd_iter(args: argparse.Namespace) -> int:
 
     jobs = max(1, args.jobs or 1)
     _render_targets(
-        targets, design, timeline,
+        targets, design,
         quality=quality, gpu=args.gpu, width_px=width_px,
         beat_files=beat_files, jobs=jobs,
         chunks_by_beat={bid: b.chunks for bid, b in edit.beats.items()},
+        no_cache=args.no_cache,
     )
 
     missing = [bid for bid, p in beat_files.items() if not p.exists()]
@@ -430,9 +468,18 @@ def cmd_beats(args: argparse.Namespace) -> int:
     from dlstudio import compile as dl_compile
 
     timeline = dl_compile.build_timeline(edit)
-    design = _resize_design(timeline.design, args.width)
-    width_px = design.resolution[0] if args.width else None
-    quality = args.quality or "standard"
+    # Mirror cmd_iter's own defaults (draft/540p): `dl2 beats` exists to show
+    # whether the iterate loop's beats are cached, so its cache-key inputs
+    # must default to exactly what cmd_iter defaults to, or every beat shows
+    # cached=no right after a plain `dl2 iter` even though iter just cached
+    # every one of them under its own (draft/540p) key.
+    width_spec = args.width or "540p"
+    quality = args.quality or "draft"
+    design = _resize_design(timeline.design, width_spec)
+    # width is redundant with design.resolution (see cmd_compose) -- always
+    # resolved, never None, so the key lines up regardless of whether
+    # --width was passed explicitly.
+    width_px = design.resolution[0]
 
     rows = []
     for b in timeline.beats:

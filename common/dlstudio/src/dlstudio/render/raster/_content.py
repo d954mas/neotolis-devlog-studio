@@ -13,8 +13,14 @@ Port notes (v1 -> v2), see raster-agent final report for the full list:
   decoration over ANY content raster now, not an image-specific parameter.
 - Motion (punch-in scale, Ken Burns) is never rasterized here — v2 renders
   the static frame; `graph.py` applies motion via ffmpeg.
-- VideoShot renders a fully transparent frame; the video pixels come from
-  the ffmpeg scene layer, never from raster.
+- ImageShot AND VideoShot render a fully transparent frame (finding H1): the
+  image/video pixels come from the ffmpeg scene segment, never from raster.
+  A chunk's decorations composite over that transparent frame, so a decorated
+  image/video chunk still gets its badges/captions without raster double-
+  drawing a frozen copy over the moving segment.
+
+Content dispatch is a registry (CONTENT_RENDERERS in __init__.py), not an
+isinstance ladder — see that module's docstring for how to add a type.
 """
 from __future__ import annotations
 
@@ -366,69 +372,21 @@ def _overlay_hero(canvas, design, style, text, subtitle, main_rgb, sub_rgb, acce
         draw.text((sx, sy), subtitle, fill=(*sub_rgb, 255), font=sub_font, anchor="lt")
 
 
-# ─── ImageShot ───────────────────────────────────────────────────────────
+# ─── ImageShot / VideoShot ─────────────────────────────────────────────────
 
 def render_image_shot(content: ImageShot, design: Design) -> tuple[Image.Image, Layout]:
+    """Raster renders nothing for the image itself — the ffmpeg scene layer
+    composites the (possibly Ken Burns-moving) image as a background segment.
+    Rastering a static copy here would double-draw a frozen image over the
+    moving segment (finding H1). Returns a fully transparent frame; a chunk's
+    decorations then composite over it in render_chunk_image."""
     W, H = design.resolution
-    path = Path(content.src)
-    if not path.exists():
-        print(f"[dlstudio.raster] warn: missing image {content.src!r}, using placeholder")
-        return _placeholder(content.src, design), Layout()
-    try:
-        pil = Image.open(path).convert("RGB")
-    except Exception as exc:
-        print(f"[dlstudio.raster] warn: failed to load image {content.src!r} ({exc}), using placeholder")
-        return _placeholder(content.src, design), Layout()
+    return Image.new("RGBA", (W, H), (0, 0, 0, 0)), Layout()
 
-    iw, ih = pil.size
-    target_ratio = W / H
-    src_ratio = (iw / ih) if ih else target_ratio
-
-    if content.fit == "cover":
-        if src_ratio > target_ratio:
-            new_h = H
-            new_w = max(1, round(H * src_ratio))
-        else:
-            new_w = W
-            new_h = max(1, round(W / src_ratio))
-        pil = pil.resize((new_w, new_h), Image.LANCZOS)
-        left = (new_w - W) // 2
-        top = (new_h - H) // 2
-        pil = pil.crop((left, top, left + W, top + H))
-    else:  # contain
-        if src_ratio > target_ratio:
-            new_w = W
-            new_h = max(1, round(W / src_ratio))
-        else:
-            new_h = H
-            new_w = max(1, round(H * src_ratio))
-        pil = pil.resize((new_w, new_h), Image.LANCZOS)
-        bg_rgb = hex_to_rgb(design.palette.color("bg"))
-        matte = Image.new("RGB", (W, H), bg_rgb)
-        matte.paste(pil, ((W - new_w) // 2, (H - new_h) // 2))
-        pil = matte
-
-    return pil.convert("RGBA"), Layout()
-
-
-def _placeholder(src: str, design: Design) -> Image.Image:
-    W, H = design.resolution
-    bg_rgb = hex_to_rgb(design.palette.color("bg"))
-    text_rgb = hex_to_rgb(design.palette.color("text"))
-    img = Image.new("RGBA", (W, H), (*bg_rgb, 255))
-    draw = ImageDraw.Draw(img)
-    label = f"[MISSING:\n{Path(src).name}]"
-    font = load_font(design, "bold", design.px(70))
-    bbox = draw.multiline_textbbox((0, 0), label, font=font)
-    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    draw.multiline_text(((W - tw) // 2, (H - th) // 2), label, fill=(*text_rgb, 255), font=font, align="center")
-    return img
-
-
-# ─── VideoShot ───────────────────────────────────────────────────────────
 
 def render_video_shot(content: VideoShot, design: Design) -> tuple[Image.Image, Layout]:
     """Raster renders nothing for video content — the ffmpeg scene layer
-    supplies the actual video pixels. Fully transparent placeholder frame."""
+    supplies the actual video pixels. Fully transparent placeholder frame;
+    decorations composite over it (finding H1)."""
     W, H = design.resolution
     return Image.new("RGBA", (W, H), (0, 0, 0, 0)), Layout()

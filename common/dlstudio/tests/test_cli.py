@@ -413,12 +413,11 @@ def test_compose_worker_cache_miss_falls_through_to_render(tmp_path, monkeypatch
         audio=str(tmp_path / "nope.wav"), words_path=str(tmp_path / "nope.json")
     )
     design = make_design()
-    timeline = make_timeline([beat], design=design)
     out_path = tmp_path / "out" / "b01.mp4"
 
     with pytest.raises(NotImplementedError):
         cli._compose_worker(
-            beat, design, timeline, "draft", False, None,
+            beat, design, "draft", False, None,
             str(out_path), str(tmp_path / "cache"),
         )
 
@@ -436,11 +435,10 @@ def test_compose_worker_cache_miss_renders_and_populates_cache(tmp_path, monkeyp
 
     beat = make_ir_beat()
     design = make_design()
-    timeline = make_timeline([beat], design=design)
     out_path = tmp_path / "out" / "b01.mp4"
 
     msg = cli._compose_worker(
-        beat, design, timeline, "draft", False, None, str(out_path), str(cache_dir)
+        beat, design, "draft", False, None, str(out_path), str(cache_dir)
     )
     assert "rendered" in msg
     assert out_path.read_bytes() == b"freshly-rendered"
@@ -456,24 +454,63 @@ def test_compose_worker_cache_hit_short_circuits_render(tmp_path, monkeypatch):
 
     beat = make_ir_beat()
     design = make_design()
-    timeline = make_timeline([beat], design=design)
 
-    key = dl_cache.beat_key(beat, design, quality="draft", width=None, gpu=False)
+    # width normalized to the resolved design resolution (L3): _compose_worker
+    # always hashes width=design.resolution[0], never None, so the key here
+    # must match that, not the raw (possibly-None) width_px a caller passes.
+    key = dl_cache.beat_key(beat, design, quality="draft", width=design.resolution[0], gpu=False)
     rendered = tmp_path / "prerendered.mp4"
     rendered.write_bytes(b"already-rendered")
     dl_cache.put(key, rendered)
 
     out_path = tmp_path / "out" / "b01.mp4"
-    msg = cli._compose_worker(beat, design, timeline, "draft", False, None, str(out_path), None)
+    msg = cli._compose_worker(beat, design, "draft", False, None, str(out_path), None)
     assert "cache hit" in msg
     assert out_path.read_bytes() == b"already-rendered"
+
+
+def test_compose_worker_no_cache_skips_cache_get_and_put(tmp_path, monkeypatch):
+    """M2: `no_cache=True` must bypass BOTH the cache read and the cache
+    write entirely -- dl2 iter --no-cache was a silent no-op before this
+    flag was threaded through _compose_worker."""
+    cache_calls = {"get": 0, "put": 0}
+
+    def spy_get(key, out):
+        cache_calls["get"] += 1
+        return False
+
+    def spy_put(key, path):
+        cache_calls["put"] += 1
+
+    monkeypatch.setattr(dl_cache, "get", spy_get)
+    monkeypatch.setattr(dl_cache, "put", spy_put)
+
+    def fake_render_beat(beat, design, timeline, opts):
+        p = Path(opts.workdir) / f"{beat.id}_rendered.mp4"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"fresh-no-cache-bytes")
+        return p
+
+    monkeypatch.setattr(dl_render_mod, "render_beat", fake_render_beat)
+
+    beat = make_ir_beat()
+    design = make_design()
+    out_path = tmp_path / "out" / "b01.mp4"
+
+    msg = cli._compose_worker(
+        beat, design, "draft", False, None, str(out_path), None, None, True,
+    )
+
+    assert cache_calls == {"get": 0, "put": 0}
+    assert "no-cache" in msg
+    assert out_path.read_bytes() == b"fresh-no-cache-bytes"
 
 
 def test_render_targets_serial_calls_worker_per_beat(tmp_path, monkeypatch):
     calls = []
 
-    def fake_worker(beat, design, timeline, quality, gpu, width_px, out_path,
-                    cache_dir_override, beat_chunks=None):
+    def fake_worker(beat, design, quality, gpu, width_px, out_path,
+                    cache_dir_override, beat_chunks=None, no_cache=False):
         calls.append(beat.id)
         Path(out_path).parent.mkdir(parents=True, exist_ok=True)
         Path(out_path).write_bytes(b"rendered")
@@ -483,11 +520,10 @@ def test_render_targets_serial_calls_worker_per_beat(tmp_path, monkeypatch):
 
     beats = [make_ir_beat("b01"), make_ir_beat("b02")]
     design = make_design()
-    timeline = make_timeline(beats, design=design)
     beat_files = {b.id: tmp_path / f"{b.id}.mp4" for b in beats}
 
     cli._render_targets(
-        beats, design, timeline,
+        beats, design,
         quality="draft", gpu=False, width_px=None,
         beat_files=beat_files, jobs=1,
     )
@@ -496,27 +532,56 @@ def test_render_targets_serial_calls_worker_per_beat(tmp_path, monkeypatch):
     assert all(p.exists() for p in beat_files.values())
 
 
+def test_render_targets_propagates_no_cache_to_worker(tmp_path, monkeypatch):
+    """M2: cmd_iter --no-cache must actually reach the worker call, not
+    silently stop at _render_targets."""
+    seen_no_cache = []
+
+    def fake_worker(beat, design, quality, gpu, width_px, out_path,
+                    cache_dir_override, beat_chunks=None, no_cache=False):
+        seen_no_cache.append(no_cache)
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(out_path).write_bytes(b"rendered")
+        return "ok"
+
+    monkeypatch.setattr(cli, "_compose_worker", fake_worker)
+
+    beats = [make_ir_beat("b01"), make_ir_beat("b02")]
+    design = make_design()
+    beat_files = {b.id: tmp_path / f"{b.id}.mp4" for b in beats}
+
+    cli._render_targets(
+        beats, design,
+        quality="draft", gpu=False, width_px=None,
+        beat_files=beat_files, jobs=1, no_cache=True,
+    )
+
+    assert seen_no_cache == [True, True]
+
+
 @pytest.mark.slow
 def test_render_targets_parallel_real_subprocess_boundary(tmp_path):
     """-j 2 really spawns worker processes -- a monkeypatch in this
     process can't reach across that boundary, so this exercises whatever
     dlstudio.render.render_beat actually is right now (stub or real).
     Either way, these beats reference nonexistent audio/asset paths, so
-    the real worker call is guaranteed to fail; the point of this test is
-    that ProcessPoolExecutor + the lazy import correctly propagate that
-    failure back to the parent via fut.result() instead of silently
-    losing it or hanging."""
+    the real worker call is guaranteed to fail with ffmpeg unable to read
+    the missing source. The point of this test is that ProcessPoolExecutor
+    + the lazy import correctly propagate THAT SPECIFIC failure back to the
+    parent via fut.result() instead of silently losing it, hanging, or
+    surfacing some unrelated error (e.g. a pickling/import failure) -- so
+    the assertion is pinned to the real render failure's own message
+    (render_beat's "ffmpeg failed" RuntimeError), not just "some Exception"."""
     beat_a, beat_b = make_ir_beat("b01"), make_ir_beat("b02")
     design = make_design()
-    timeline = make_timeline([beat_a, beat_b], design=design)
     beat_files = {"b01": tmp_path / "b01.mp4", "b02": tmp_path / "b02.mp4"}
 
     old = os.environ.get("DLSTUDIO_CACHE_DIR")
     os.environ["DLSTUDIO_CACHE_DIR"] = str(tmp_path / "cache")
     try:
-        with pytest.raises(Exception):
+        with pytest.raises(RuntimeError, match="ffmpeg failed"):
             cli._render_targets(
-                [beat_a, beat_b], design, timeline,
+                [beat_a, beat_b], design,
                 quality="draft", gpu=False, width_px=None,
                 beat_files=beat_files, jobs=2,
             )
@@ -640,3 +705,138 @@ def test_cmd_iter_stale_skips_restore_when_file_already_present(tmp_path, monkey
     assert code == 0
     assert get_calls == []                       # no restore needed
     assert existing.read_bytes() == b"already-on-disk"
+
+
+# ─── M2: `dl2 iter --no-cache` must actually bypass the cache ─────────────
+#
+# --no-cache was wired onto the argparser but cmd_iter never read
+# args.no_cache -- it was a silent no-op. Prime the cache under exactly the
+# key cmd_iter's own (draft/540p) defaults would compute, then run
+# `iter --no-cache` and prove render_beat runs anyway (the pre-existing
+# cache hit is bypassed) and the output is the freshly rendered bytes, not
+# the stale cached ones.
+
+def test_cmd_iter_no_cache_bypasses_existing_cache_entry(tmp_path, monkeypatch):
+    cache_dir = tmp_path / "cache"
+    monkeypatch.setattr(dl_cache, "CACHE_DIR", cache_dir)
+
+    pkg = _unique_pkg("proj_iter_no_cache")
+    dotted = _make_fake_project(tmp_path, pkg)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    project_root = (tmp_path / pkg).resolve()
+
+    beat = make_ir_beat("b01")
+    raw_design = make_design()
+    timeline = make_timeline([beat], design=raw_design)
+    monkeypatch.setattr(dl_compile_mod, "build_timeline", lambda edit: timeline)
+
+    resized_design = cli._resize_design(raw_design, "540p")
+    key = dl_cache.beat_key(
+        beat, resized_design, quality="draft",
+        width=resized_design.resolution[0], gpu=False,
+    )
+    prerendered = tmp_path / "prerendered.mp4"
+    prerendered.write_bytes(b"stale-cached-bytes")
+    dl_cache.put(key, prerendered)
+
+    render_calls = []
+
+    def fake_render_beat(beat, design, timeline, opts):
+        render_calls.append(beat.id)
+        p = Path(opts.workdir) / f"{beat.id}_fresh.mp4"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"freshly-rendered-bytes")
+        return p
+
+    put_calls = []
+    real_put = dl_cache.put
+
+    def spy_put(k, p):
+        put_calls.append(k)
+        real_put(k, p)
+
+    monkeypatch.setattr(dl_render_mod, "render_beat", fake_render_beat)
+    monkeypatch.setattr(dl_cache, "put", spy_put)
+    monkeypatch.setattr(dl_render_mod, "assemble",
+                        lambda _tl, beat_files, _o: beat_files["b01"])
+
+    args = cli._build_parser().parse_args(["iter", dotted, "--no-cache"])
+    code = cli.cmd_iter(args)
+
+    assert code == 0
+    assert render_calls == ["b01"]       # the existing cache hit was bypassed
+    assert put_calls == []               # and nothing was (re-)published to it
+    out_file = project_root / "data" / "finalize" / "b01.mp4"
+    assert out_file.read_bytes() == b"freshly-rendered-bytes"
+
+
+# ─── M4: `dl2 beats` defaults must match `dl2 iter`'s (draft/540p) ────────
+#
+# cmd_beats used to default to quality="standard" / native width while
+# cmd_iter renders (and caches) at draft/540p, so beat_key never lined up
+# between the two commands and `dl2 beats` always reported cached=no right
+# after a plain `dl2 iter`. Both commands must now compute the identical
+# key for the identical (no-flags) invocation.
+
+def test_cmd_beats_default_key_matches_cmd_iter_default_key():
+    beat = make_ir_beat("b01")
+    raw_design = make_design()  # 1920x1080 native
+
+    beats_args = cli._build_parser().parse_args(["beats", "some.edit"])
+    iter_args = cli._build_parser().parse_args(["iter", "some.edit"])
+
+    beats_width_spec = beats_args.width or "540p"
+    beats_quality = beats_args.quality or "draft"
+    beats_design = cli._resize_design(raw_design, beats_width_spec)
+    beats_width_px = beats_design.resolution[0]
+
+    iter_width_spec = iter_args.width or "540p"
+    iter_quality = iter_args.quality or "draft"
+    iter_design = cli._resize_design(raw_design, iter_width_spec)
+    iter_width_px = iter_design.resolution[0]
+
+    beats_key = dl_cache.beat_key(
+        beat, beats_design, quality=beats_quality, width=beats_width_px, gpu=False,
+    )
+    iter_key = dl_cache.beat_key(
+        beat, iter_design, quality=iter_quality, width=iter_width_px, gpu=False,
+    )
+    assert beats_key == iter_key
+
+
+def test_cmd_beats_reports_cached_after_plain_iter(tmp_path, monkeypatch, capsys):
+    """End-to-end: cache a beat exactly as a plain `dl2 iter` (no flags)
+    would, then run `dl2 beats` with no flags and confirm it reports
+    cached=yes for that beat."""
+    cache_dir = tmp_path / "cache"
+    monkeypatch.setattr(dl_cache, "CACHE_DIR", cache_dir)
+
+    pkg = _unique_pkg("proj_beats_match_iter")
+    dotted = _make_fake_project(tmp_path, pkg)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+    beat = make_ir_beat("b01")
+    raw_design = make_design()
+    timeline = make_timeline([beat], design=raw_design)
+    monkeypatch.setattr(dl_compile_mod, "build_timeline", lambda edit: timeline)
+
+    # Prime the cache exactly as cmd_iter's own (draft/540p) defaults would.
+    resized_design = cli._resize_design(raw_design, "540p")
+    key = dl_cache.beat_key(
+        beat, resized_design, quality="draft",
+        width=resized_design.resolution[0], gpu=False,
+    )
+    prerendered = tmp_path / "prerendered.mp4"
+    prerendered.write_bytes(b"cached-bytes")
+    dl_cache.put(key, prerendered)
+
+    args = cli._build_parser().parse_args(["beats", dotted])
+    code = cli.cmd_beats(args)
+
+    assert code == 0
+    out = capsys.readouterr().out
+    lines = [ln for ln in out.splitlines() if ln.startswith("b01")]
+    assert len(lines) == 1
+    assert lines[0].split()[-1] == "yes"   # cached column

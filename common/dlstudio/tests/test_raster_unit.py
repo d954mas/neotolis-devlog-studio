@@ -10,10 +10,12 @@ from PIL import Image
 
 from dlstudio.model import (
     Badge,
+    CaptionPill,
     Chunk,
     Design,
     Fonts,
     FramedCard,
+    ImageShot,
     Overlay,
     Palette,
     Plate,
@@ -80,7 +82,7 @@ def test_palette_known_token_resolves(design):
     assert design.palette.color("accent") == "#d4a941"
 
 
-# ─── VideoShot: raster renders nothing ────────────────────────────────────
+# ─── VideoShot / ImageShot: raster renders nothing but decorations ─────────
 
 def test_video_shot_is_fully_transparent(design):
     chunk = Chunk(words=(0, 1), content=VideoShot(src="unused.mp4"))
@@ -89,6 +91,32 @@ def test_video_shot_is_fully_transparent(design):
     assert img.size == design.resolution
     alpha = np.array(img)[:, :, 3]
     assert alpha.max() == 0, "VideoShot must rasterize to a fully transparent frame"
+
+
+def test_image_shot_is_fully_transparent(design):
+    # H1: the image itself comes from the ffmpeg scene segment; raster must not
+    # draw a static copy of it.
+    chunk = Chunk(words=(0, 1), content=ImageShot(src="unused.png"))
+    img = render_chunk_image(chunk, design)
+    assert img.mode == "RGBA"
+    assert img.size == design.resolution
+    assert np.array(img)[:, :, 3].max() == 0, "ImageShot must rasterize transparent"
+
+
+def test_image_shot_with_caption_pill_transparent_except_pill(design):
+    # H1: decorations DO composite over the transparent image frame — the PNG
+    # is transparent everywhere except the (top-left) CaptionPill.
+    chunk = Chunk(words=(0, 1), content=ImageShot(src="unused.png"),
+                  decorations=[CaptionPill(text="GAMEPLAY")])
+    img = render_chunk_image(chunk, design)
+    alpha = np.array(img)[:, :, 3]
+    W, H = design.resolution
+    # the pill is a small top-left badge: some ink there, but the frame is
+    # overwhelmingly transparent, and the image body (centre) stays empty.
+    assert alpha.max() == 255                       # the pill drew opaque ink
+    assert (alpha > 0).mean() < 0.25, "only the pill should be opaque, not the image"
+    assert (alpha[:H // 4, :W // 3] > 0).any()      # ink in the top-left pill region
+    assert alpha[H // 2, W // 2] == 0               # centre (image body) transparent
 
 
 # ─── Determinism: same inputs -> byte-identical PNG ───────────────────────

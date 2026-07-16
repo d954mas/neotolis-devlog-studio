@@ -7,6 +7,15 @@ render/raster/ is owned separately by the raster-agent.
                string templating. Every v1 trap (setpts PTS-shift,
                eof_action=pass, EOF clamps) is an encoded invariant.
 - beat.py      one ffmpeg subprocess per beat -> beat MP4 + VO stem wav.
+               render_beat(beat, design, _timeline, opts): the third
+               positional param is ACCEPTED BUT IGNORED (a single beat
+               render never needs the whole Timeline). Kept only so
+               Phase-1 call sites that still pass a real Timeline
+               positionally don't break; pass None. Do NOT ship the whole
+               Timeline to render workers under -j N -- that was the actual
+               bug (N workers each pickling all N beats == O(N^2) IPC); cli's
+               _compose_worker/_render_targets carry no timeline argument at
+               all for this reason.
 - assemble.py  edit-level pass: concat + beat transitions + music beds
                across beat boundaries + sidechain ducking + SFX + final
                loudness normalization. Phase 1 ships concat + duration

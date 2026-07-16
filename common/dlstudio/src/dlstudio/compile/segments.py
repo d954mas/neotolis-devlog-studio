@@ -11,9 +11,14 @@ from dataclasses import dataclass
 
 from dlstudio.ir import CheckIssue, IRSegment, WordSpan
 from dlstudio.model import Chunk, Design, Scene
-from dlstudio.model.content import ImageShot, Plate, VideoShot
+
+from .roles import BgSpec, content_role
 
 _EPS = 1e-4
+
+# A content-derived background is described by the same shape whether it comes
+# from a Scene or a segment-role content variant (compile.roles.BgSpec).
+_Bg = BgSpec
 
 
 def _round(v: float) -> float:
@@ -136,34 +141,18 @@ def _clamp_idx(idx: int, n: int) -> int:
 
 # ─── Background segments ────────────────────────────────────────────────────
 
-@dataclass
-class _Bg:
-    """A chunk's resolved background source (scene- or content-derived)."""
-    kind: str          # "image" | "video"
-    src: str
-    offset: float
-    ken_burns: bool
-    loop: bool
-    fit: str
-
-
 def _bg_from_scene(scene: Scene) -> _Bg:
     return _Bg(kind=scene.kind, src=scene.src, offset=scene.offset,
                ken_burns=scene.ken_burns, loop=scene.loop, fit=scene.fit)
 
 
 def _content_bg(chunk: Chunk) -> _Bg | None:
-    """ImageShot/VideoShot content is the chunk's own visual — it acts as the
-    background segment for its window (v1 image/video chunks were their own
-    visual). Returns None for Plate/Overlay (those use a scene)."""
-    c = chunk.content
-    if isinstance(c, ImageShot):
-        return _Bg(kind="image", src=c.src, offset=0.0,
-                   ken_burns=c.ken_burns, loop=False, fit=c.fit)
-    if isinstance(c, VideoShot):
-        return _Bg(kind="video", src=c.src, offset=c.offset,
-                   ken_burns=False, loop=False, fit="cover")
-    return None
+    """The chunk's own visual as a background segment, if its content is a
+    segment-role variant (ImageShot/VideoShot). Returns None for overlay-role
+    content (Plate/Overlay), which use a scene. Dispatch via compile.roles so a
+    new content variant registers its background once (finding L4)."""
+    role = content_role(chunk.content)
+    return role.background(chunk.content) if role is not None else None
 
 
 def resolve_backgrounds(

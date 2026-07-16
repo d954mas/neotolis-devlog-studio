@@ -28,6 +28,8 @@ content raster rather than being coupled to one content renderer's layout:
 """
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from PIL import Image, ImageDraw, ImageFilter
 
 from dlstudio.model import Badge, CaptionPill, Decoration, Design, FramedCard, Label, Underline, Vignette
@@ -45,19 +47,13 @@ _BADGE_NUMERALS = {
 
 
 def apply_decoration(img: Image.Image, deco: Decoration, design: Design, layout: Layout) -> Image.Image:
-    if isinstance(deco, Underline):
-        return _underline(img, deco, design, layout)
-    if isinstance(deco, Badge):
-        return _badge(img, deco, design, layout)
-    if isinstance(deco, FramedCard):
-        return _framed_card(img, deco, design, layout)
-    if isinstance(deco, Vignette):
-        return _vignette(img, deco, design, layout)
-    if isinstance(deco, Label):
-        return _label(img, deco, design, layout)
-    if isinstance(deco, CaptionPill):
-        return _caption_pill(img, deco, design, layout)
-    raise TypeError(f"unknown decoration type: {type(deco).__name__}")  # pragma: no cover — union is closed
+    """Composite one decoration. Dispatch via DECORATION_RENDERERS (registered
+    at module bottom) so a new Decoration type is one registry entry + its pass
+    here, not an isinstance-ladder edit (finding L4)."""
+    renderer = DECORATION_RENDERERS.get(type(deco))
+    if renderer is None:  # pragma: no cover — union is closed
+        raise TypeError(f"unknown decoration type: {type(deco).__name__}")
+    return renderer(img, deco, design, layout)
 
 
 def _underline(img: Image.Image, deco: Underline, design: Design, layout: Layout) -> Image.Image:
@@ -254,3 +250,18 @@ def _caption_pill(img: Image.Image, deco: CaptionPill, design: Design, layout: L
     draw.text((tx + design.px(2), ty + design.px(2)), deco.text, fill=(0, 0, 0, 255), font=font, anchor="lt")
     draw.text((tx, ty), deco.text, fill=(*accent_rgb, 255), font=font, anchor="lt")
     return canvas
+
+
+# ─── Registry ──────────────────────────────────────────────────────────────
+# Decoration type -> pass. Dead-simple dict dispatch (no plugin framework):
+# adding a decoration is one line here plus its `_<x>` pass above.
+DecorationPass = Callable[[Image.Image, Decoration, Design, Layout], Image.Image]
+
+DECORATION_RENDERERS: dict[type, DecorationPass] = {
+    Underline: _underline,
+    Badge: _badge,
+    FramedCard: _framed_card,
+    Vignette: _vignette,
+    Label: _label,
+    CaptionPill: _caption_pill,
+}

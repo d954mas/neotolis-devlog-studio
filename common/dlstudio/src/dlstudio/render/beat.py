@@ -169,6 +169,12 @@ def _bg_color(design: Design) -> str:
     except Exception:
         hexv = "#000000"
     hexv = hexv.lstrip("#")
+    if len(hexv) == 3:
+        # 3->6 digit shorthand expansion (e.g. "#abc" -> "aabbcc"), duplicated
+        # from render.raster._util.hex_to_rgb -- kept inline rather than
+        # imported so beat.py doesn't reach into raster/ (layering: raster is
+        # owned separately and beat.py must not depend on it).
+        hexv = "".join(ch * 2 for ch in hexv)
     if len(hexv) == 6:
         return "0x" + hexv.upper()
     return "0x000000"
@@ -380,35 +386,36 @@ def _build_overlays(beat: IRBeat, design: Design, graph: Graph,
 
 # ─── postcondition ─────────────────────────────────────────────────────────
 
-def _verify_duration(path: Path, expected: float,
-                     tol: float = DEFAULT_VERIFY_TOL) -> None:
-    """Local ffprobe duration postcondition (VQ-SYNC), used until
-    check.verify_output is implemented by the compile-agent."""
-    actual = _probe_duration(str(path))
-    if abs(actual - expected) > tol:
-        raise RuntimeError(
-            f"VQ-SYNC duration mismatch for {path}: probed {actual:.3f}s vs "
-            f"expected {expected:.3f}s (tol {tol}s)"
-        )
-
-
 def _postcondition(path: Path, expected: float) -> None:
-    try:
-        from dlstudio.check import verify_output
-        verify_output(str(path), expected)
-    except NotImplementedError:
-        _verify_duration(path, expected)
+    """VQ-SYNC duration postcondition. check.verify_output is fully
+    implemented (compile-agent) -- call it directly with this module's
+    looser single-beat tolerance (a beat is one ffmpeg encode's worth of
+    AAC priming/rounding, not the accumulated concat drift assemble.py has
+    to budget for)."""
+    from dlstudio.check import verify_output
+    verify_output(str(path), expected, tolerance=DEFAULT_VERIFY_TOL)
 
 
 # ─── main entry ────────────────────────────────────────────────────────────
 
-def render_beat(beat: IRBeat, design: Design, timeline: Timeline,
+def render_beat(beat: IRBeat, design: Design, _timeline: Timeline | None,
                 opts: "RenderOpts") -> Path:
     """Render one beat to MP4 (+ sibling `<stem>_vo_stem.wav`). Returns MP4.
 
     One ffmpeg subprocess: background (scene xfade chain) -> overlays
     (composited in z order) -> VO audio (aac). Verifies output duration vs
-    `beat.duration` before returning."""
+    `beat.duration` before returning.
+
+    `_timeline` is ACCEPTED BUT IGNORED: render_beat only ever needs the one
+    `IRBeat` + `Design` (compile already resolved every t0/t1 onto the beat
+    itself; nothing here is re-derived across beat boundaries). It stays in
+    the signature -- positionally, third -- only so existing Phase-1 call
+    sites that still pass a real `Timeline` object don't break; callers
+    should pass `None` (the cli does). Shipping the *whole* Timeline to every
+    `-j N` worker process was itself the bug (O(N^2) IPC: N workers each
+    pickling all N beats) -- see cli._compose_worker/_render_targets, which
+    no longer carry a timeline argument at all. Slated to be dropped from
+    this signature entirely in Phase 2."""
     workdir = Path(opts.workdir)
     workdir.mkdir(parents=True, exist_ok=True)
     out_path = workdir / f"{beat.id}.mp4"

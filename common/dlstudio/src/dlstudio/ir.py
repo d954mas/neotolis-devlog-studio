@@ -66,7 +66,15 @@ class IRAnim(_Model):
 class IROverlayItem(_Model):
     """One raster overlay (rendered chunk visual) on the beat timeline.
     The PNG itself is produced at render time by render.raster; the IR
-    carries the chunk reference and placement."""
+    carries the chunk reference and placement.
+
+    `content_hash` is a stable digest of the SOURCE Chunk (model_dump_json)
+    stamped by compile. It exists so the beat cache key — which hashes the
+    IRBeat — changes whenever rasterized content (text, style, decorations,
+    bg) changes, even though the Chunk itself travels to the rasterizer
+    out-of-band via the chunk resolver. `asset_paths` lists file paths the
+    raster pass reads (e.g. Plate.bg_image) so the cache can include their
+    identity (size+mtime)."""
 
     chunk_index: int
     z: int
@@ -74,6 +82,8 @@ class IROverlayItem(_Model):
     t1: float
     anims: list[IRAnim] = Field(default_factory=list)
     transition_in: Transition | None = None
+    content_hash: str | None = None
+    asset_paths: list[str] = Field(default_factory=list)
 
 
 class IRSegment(_Model):

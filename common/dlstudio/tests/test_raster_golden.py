@@ -50,6 +50,12 @@ GOLDEN_DIR.mkdir(exist_ok=True)
 
 RESOLUTION = (960, 540)
 
+# Real system TTF for the T3 typography golden. The rest of the suite uses a
+# nonexistent TTF (PIL default-font fallback); this one variant pins real
+# FreeType rendering — including Cyrillic shaping — so a font/hinting change is
+# caught. Skipped where the font isn't installed (CI without Windows fonts).
+ARIAL = Path("C:/Windows/Fonts/arial.ttf")
+
 
 def _design() -> Design:
     """Test-only design + style registry (styling discipline: the engine
@@ -186,3 +192,16 @@ def test_golden_vignette_pass(design, tmp_path, gradient_path):
     chunk = Chunk(words=(0, 4), content=ImageShot(src=str(gradient_path), fit="cover"),
                   decorations=[Vignette(strength=0.6)])
     _check_golden("vignette_pass", render_chunk_image(chunk, design), tmp_path)
+
+
+# ─── T3: real-TTF typography (Cyrillic), pinned separately ──────────────────
+
+@pytest.mark.skipif(not ARIAL.exists(), reason="system arial.ttf not installed")
+def test_golden_plate_real_font_cyrillic(design, tmp_path):
+    """Pins real FreeType typography (not the PIL bitmap fallback the rest of
+    the suite uses), including Cyrillic glyph shaping + the diacritic-aware
+    vertical centering path in render_plate."""
+    real = design.model_copy(update={"fonts": Fonts(main=str(ARIAL))})
+    chunk = Chunk(words=(0, 4), content=Plate(text="30 000\nСТРОК", style="plate.climax"),
+                  decorations=[Underline()])
+    _check_golden("plate_real_font_cyrillic", render_chunk_image(chunk, real), tmp_path)

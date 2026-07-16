@@ -9,7 +9,15 @@ import pytest
 from _builders import mk_design, probe
 from dlstudio.compile import build_timeline
 from dlstudio.model import Beat, Chunk, Edit, Scene
-from dlstudio.model.content import Anim, ImageShot, Overlay, Plate, Transition
+from dlstudio.model.content import (
+    Anim,
+    CaptionPill,
+    ImageShot,
+    Overlay,
+    Plate,
+    Transition,
+    Underline,
+)
 
 
 def _words(tmp_path, triples):
@@ -61,6 +69,63 @@ def test_only_plate_overlay_become_overlays_with_list_order_z(tmp_path):
     tl = build_timeline(edit, probe=False, probes=probes)
     ov = tl.beats[0].overlays
     assert [(o.chunk_index, o.z) for o in ov] == [(0, 0), (2, 1), (3, 2)]
+
+
+def test_decorated_imageshot_emits_overlay_item(tmp_path):
+    # H1: an ImageShot chunk with decorations ALSO gets an IROverlayItem (the
+    # decorations composite over a transparent frame; the image pixels come
+    # from the scene segment). Its src is NOT a raster asset_path (raster reads
+    # nothing for image content), only the segment walks it.
+    w = _words(tmp_path, [(0.0, 0.4, "a"), (2.0, 2.4, "b")])
+    beat = Beat(audio="vo.wav", words=w, chunks=[
+        Chunk(words=(0, 0), content=ImageShot(src="photo.png"),
+              decorations=[CaptionPill(text="GAMEPLAY")]),
+        Chunk(words=(1, 1), content=ImageShot(src="plain.png")),   # no decorations
+    ])
+    edit, probes = _edit(beat, _base_probes(
+        **{"photo.png": probe("photo.png", "image", width=1080, height=1920),
+           "plain.png": probe("plain.png", "image", width=1080, height=1920)}))
+    tl = build_timeline(edit, probe=False, probes=probes)
+    ov = tl.beats[0].overlays
+    # only the decorated image chunk yields an overlay item
+    assert [(o.chunk_index, o.z) for o in ov] == [(0, 0)]
+    assert ov[0].content_hash is not None and len(ov[0].content_hash) == 16
+    assert ov[0].asset_paths == []       # image src travels as a segment, not raster
+    # the image itself is still a background segment for its window
+    assert any(s.src == "photo.png" for s in tl.beats[0].segments)
+
+
+def test_plate_overlay_stamps_content_hash_and_bg_asset_path(tmp_path):
+    # C1: every overlay item carries content_hash; a Plate with bg_image also
+    # exposes it as a raster asset_path (the file raster actually reads).
+    w = _words(tmp_path, [(0.0, 0.4, "a"), (2.0, 2.4, "b")])
+    beat = Beat(audio="vo.wav", words=w, chunks=[
+        Chunk(words=(0, 0), content=Plate(text="A", bg_image="plate_bg.png"),
+              decorations=[Underline()]),
+        Chunk(words=(1, 1), content=Plate(text="B")),   # no bg_image
+    ])
+    edit, probes = _edit(beat, _base_probes(
+        **{"plate_bg.png": probe("plate_bg.png", "image", width=1080, height=1920)}))
+    tl = build_timeline(edit, probe=False, probes=probes)
+    ov = tl.beats[0].overlays
+    assert all(o.content_hash is not None and len(o.content_hash) == 16 for o in ov)
+    assert ov[0].asset_paths == ["plate_bg.png"]
+    assert ov[1].asset_paths == []
+
+
+def test_overlay_content_hash_tracks_text_edit(tmp_path):
+    # C1 at compile level: changing only Plate.text changes the overlay's
+    # content_hash (the digest the cache key rides on).
+    w = _words(tmp_path, [(0.0, 0.4, "a")])
+
+    def _hash(text: str) -> str:
+        beat = Beat(audio="vo.wav", words=w,
+                    chunks=[Chunk(words=(0, 0), content=Plate(text=text))])
+        edit, probes = _edit(beat, _base_probes())
+        tl = build_timeline(edit, probe=False, probes=probes)
+        return tl.beats[0].overlays[0].content_hash
+
+    assert _hash("HELLO") != _hash("WORLD")
 
 
 def test_anim_normalized_t_resolved_to_beat_relative_seconds(tmp_path):

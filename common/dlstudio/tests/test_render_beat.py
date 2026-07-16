@@ -201,3 +201,34 @@ def test_render_beat_missing_resolver_raises(tmp_path, monkeypatch):
     opts = RenderOpts(quality="draft", workdir=tmp_path / "fin")
     with pytest.raises(RuntimeError, match="chunk resolver"):
         render_beat(beat, design, timeline, opts)
+
+
+# ─── _bg_color: 3-digit hex shorthand ──────────────────────────────────────
+#
+# _bg_color used to only handle #rrggbb (6 hex digits); a 3-digit shorthand
+# like "#abc" fell through to the "not exactly 6 digits" branch and silently
+# rendered as black instead of the intended color. Fixed by expanding the
+# shorthand inline (duplicated from render.raster._util.hex_to_rgb's 3->6
+# expansion -- beat.py must not import from raster/, see layering note).
+
+def _design_with_bg(hexv):
+    return Design(
+        resolution=(320, 180), fps=24,
+        palette=Palette(tokens={"bg": hexv, "text": "#ffffff"}),
+        fonts=Fonts(main="none.ttf"),
+    )
+
+
+def test_bg_color_expands_3_digit_hex_shorthand():
+    design = _design_with_bg("#abc")
+    assert beat_mod._bg_color(design) == "0xAABBCC"
+
+
+def test_bg_color_6_digit_hex_still_works():
+    design = _design_with_bg("#101418")
+    assert beat_mod._bg_color(design) == "0x101418"
+
+
+def test_bg_color_invalid_falls_back_to_black():
+    design = _design_with_bg("not-a-color")
+    assert beat_mod._bg_color(design) == "0x000000"
