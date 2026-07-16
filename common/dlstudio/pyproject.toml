@@ -20,6 +20,9 @@ studio = [
     "httpx>=0.27",            # ASGI client used by the API + starlette TestClient
     "python-multipart>=0.0.9", # multipart form parsing for POST /api/takes uploads
 ]
+stock = [
+    "requests>=2.31",         # services/stock.py: Pexels/Pixabay HTTP search + download
+]
 dev = ["pytest>=8"]
 # Heavy service deps (whisperx, deepfilternet, piper) are lazy-imported by
 # their service module and installed on demand — never listed here.

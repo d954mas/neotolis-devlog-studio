@@ -20,6 +20,15 @@ Phase 3 commands (services + Studio backend):
   dl2 scratch-tts <edit> <beat>    scratch VO from beat.vo -> data/scratch/
   dl2 studio [edit] [--port]       serve the FastAPI Studio backend (127.0.0.1)
 
+Phase 4 commands (stock/publish services + owner-domain verification):
+  dl2 publish [edit] [--out]       generate youtube_package.md (title/desc/tags/chapters)
+  dl2 stock search "<q>" [--out]   thin Pexels/Pixabay b-roll search -> JSON results
+  dl2 stock download <manifest>    download search results -> files + manifest.json
+    --out <dir>
+  dl2 verify --changed [--full]    map changed paths -> owning domain -> its
+                                   tests only (see cli/verify.py); --full runs
+                                   the whole suite
+
 Conventions (v1 parity where sensible):
 - <edit> is a dotted module path exposing EDIT (dlstudio.model.Edit);
   CLI auto-detects project root from module location and chdirs there so
@@ -44,6 +53,8 @@ from pathlib import Path
 
 from dlstudio.ir import IRBeat
 from dlstudio.model import Design, Edit
+
+from . import verify as dl_verify
 
 CONFIG_NAME = "devlog.toml"
 
@@ -749,6 +760,61 @@ def cmd_studio(args: argparse.Namespace) -> int:
     return 0
 
 
+# ─── publish / stock commands (Phase 4 services) ─────────────────────────
+
+def cmd_publish(args: argparse.Namespace) -> int:
+    """Generate a youtube_package.md for `edit` (title/description/tags
+    placeholders + chapters derived from the compiled Timeline's beat
+    placements + beat titles). See services.publish.generate_youtube_package
+    for the section shape; this handler only wires CLI args through to it."""
+    v2_config = _load_v2_config(_find_workspace_root())
+    dotted = _resolve_edit_arg(args.edit, v2_config)
+    edit = _load_edit(dotted)
+
+    from dlstudio import compile as dl_compile
+    from dlstudio import services
+
+    timeline = dl_compile.build_timeline(edit)
+    out_path = Path(args.out) if args.out else Path("data/publish/youtube_package.md")
+    result = services.generate_youtube_package(
+        edit, out_path=out_path, chapters_from_timeline=timeline,
+    )
+    print(f"[dl2] youtube package -> {result}")
+    return 0
+
+
+def cmd_stock_search(args: argparse.Namespace) -> int:
+    """`dl2 stock search "<query>"` -- thin Pexels/Pixabay wrapper, no edit
+    context needed. Writes JSON results to --out, or prints to stdout."""
+    from dlstudio import services
+
+    results = services.search(
+        args.query, source=args.source, aspect=args.aspect, per_page=args.per_page,
+    )
+    import json as _json
+
+    payload = _json.dumps([r.to_dict() for r in results], ensure_ascii=False, indent=2)
+    if args.out:
+        out_path = Path(args.out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(payload, encoding="utf-8")
+        print(f"[dl2] stock search: {len(results)} result(s) -> {out_path}")
+    else:
+        print(payload)
+    return 0
+
+
+def cmd_stock_download(args: argparse.Namespace) -> int:
+    """`dl2 stock download <manifest> --out <dir>` -- downloads every result
+    in the manifest JSON (produced by `stock search --out`) to --out, and
+    writes --out/manifest.json with provenance."""
+    from dlstudio import services
+
+    downloaded = services.download(args.manifest, args.out)
+    print(f"[dl2] stock download: {len(downloaded)} file(s) -> {args.out}")
+    return 0
+
+
 # ─── argparse wiring ───────────────────────────────────────────────────
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -839,6 +905,35 @@ def _build_parser() -> argparse.ArgumentParser:
     p_studio.add_argument(
         "--dev", action="store_true", help="print the Vite dev-server hint before serving")
     p_studio.set_defaults(func=cmd_studio)
+
+    p_publish = sub.add_parser(
+        "publish", help="generate a YouTube upload package (title/desc/tags/chapters)")
+    p_publish.add_argument("edit", nargs="?", help="dotted edit module path")
+    p_publish.add_argument(
+        "--out", help="output path (default: data/publish/youtube_package.md)")
+    p_publish.set_defaults(func=cmd_publish)
+
+    p_stock = sub.add_parser("stock", help="stock b-roll search/download (thin Pexels/Pixabay wrapper)")
+    stock_sub = p_stock.add_subparsers(dest="stock_command", required=True)
+
+    p_stock_search = stock_sub.add_parser("search", help="search a stock provider for b-roll")
+    p_stock_search.add_argument("query", help="search query")
+    p_stock_search.add_argument(
+        "--source", default="pexels", choices=("pexels", "pixabay"), help="stock provider (default: pexels)")
+    p_stock_search.add_argument("--aspect", default="16:9", help="target aspect ratio (default: 16:9)")
+    p_stock_search.add_argument(
+        "--per-page", type=int, default=10, dest="per_page", help="max results (default: 10)")
+    p_stock_search.add_argument("--out", help="write JSON results to this path instead of stdout")
+    p_stock_search.set_defaults(func=cmd_stock_search)
+
+    p_stock_download = stock_sub.add_parser(
+        "download", help="download stock assets from a search-results manifest")
+    p_stock_download.add_argument("manifest", help="path to a JSON file of search results")
+    p_stock_download.add_argument(
+        "--out", required=True, help="output directory for downloaded files + manifest.json")
+    p_stock_download.set_defaults(func=cmd_stock_download)
+
+    dl_verify.add_subparser(sub)
 
     return parser
 

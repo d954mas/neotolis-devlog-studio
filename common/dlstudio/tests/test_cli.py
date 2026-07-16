@@ -1159,3 +1159,164 @@ def test_parse_studio_defaults():
     args = cli._build_parser().parse_args(["studio"])
     assert args.edit is None and args.port == 8788 and args.dev is False
     assert args.func is cli.cmd_studio
+
+
+# ─── Phase 4: `dl2 publish` / `dl2 stock` CLI wiring ─────────────────────
+#
+# cmd_publish/cmd_stock_search/cmd_stock_download call into
+# dlstudio.services (generate_youtube_package / search / download); these
+# tests monkeypatch the live service attributes (same pattern as
+# cmd_audio/cmd_transcribe/cmd_scratch_tts above) and assert the CLI passes
+# the right args -- no real HTTP, no real markdown generation.
+
+def test_parse_publish_defaults():
+    args = cli._build_parser().parse_args(["publish", "pkg.edit"])
+    assert args.edit == "pkg.edit" and args.out is None
+    assert args.func is cli.cmd_publish
+
+
+def test_parse_publish_with_out():
+    args = cli._build_parser().parse_args(["publish", "pkg.edit", "--out", "custom.md"])
+    assert args.out == "custom.md"
+
+
+def test_parse_stock_search_defaults():
+    args = cli._build_parser().parse_args(["stock", "search", "cats"])
+    assert args.query == "cats"
+    assert args.source == "pexels"
+    assert args.aspect == "16:9"
+    assert args.per_page == 10
+    assert args.out is None
+    assert args.func is cli.cmd_stock_search
+
+
+def test_parse_stock_search_explicit_flags():
+    args = cli._build_parser().parse_args([
+        "stock", "search", "dogs", "--source", "pixabay", "--aspect", "9:16",
+        "--per-page", "3", "--out", "results.json",
+    ])
+    assert (args.source, args.aspect, args.per_page, args.out) == ("pixabay", "9:16", 3, "results.json")
+
+
+def test_parse_stock_download_requires_out():
+    with pytest.raises(SystemExit):
+        cli._build_parser().parse_args(["stock", "download", "manifest.json"])
+
+
+def test_parse_stock_download_defaults():
+    args = cli._build_parser().parse_args(["stock", "download", "manifest.json", "--out", "outdir"])
+    assert args.manifest == "manifest.json" and args.out == "outdir"
+    assert args.func is cli.cmd_stock_download
+
+
+def test_parse_stock_requires_subcommand():
+    with pytest.raises(SystemExit):
+        cli._build_parser().parse_args(["stock"])
+
+
+def test_cmd_publish_uses_default_out_and_passes_timeline(tmp_path, monkeypatch):
+    pkg = _unique_pkg("proj_publish")
+    dotted = _make_fake_project(tmp_path, pkg, edit_body=_BEAT_EDIT_BODY)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+    timeline = make_timeline([make_ir_beat("b01")], design=make_design())
+    monkeypatch.setattr(dl_compile_mod, "build_timeline", lambda edit: timeline)
+
+    calls = {}
+
+    def fake_generate(edit, *, out_path, **kw):
+        calls["edit"] = edit
+        calls["out_path"] = Path(out_path)
+        calls["kw"] = kw
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(out_path).write_text("stub package", encoding="utf-8")
+        return Path(out_path)
+
+    monkeypatch.setattr(dl_services_mod, "generate_youtube_package", fake_generate)
+
+    assert cli.main(["publish", dotted]) == 0
+    # cmd_publish's default out is relative to the project root cli._load_edit
+    # already chdir'd into -- compare the relative form, not an absolute path.
+    assert calls["out_path"] == Path("data") / "publish" / "youtube_package.md"
+    assert calls["kw"]["chapters_from_timeline"] is timeline
+    assert calls["out_path"].exists()
+
+
+def test_cmd_publish_custom_out(tmp_path, monkeypatch):
+    pkg = _unique_pkg("proj_publish_out")
+    dotted = _make_fake_project(tmp_path, pkg, edit_body=_BEAT_EDIT_BODY)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+    timeline = make_timeline([make_ir_beat("b01")], design=make_design())
+    monkeypatch.setattr(dl_compile_mod, "build_timeline", lambda edit: timeline)
+
+    calls = {}
+
+    def fake_generate(edit, *, out_path, **kw):
+        calls["out_path"] = Path(out_path)
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(out_path).write_text("stub", encoding="utf-8")
+        return Path(out_path)
+
+    monkeypatch.setattr(dl_services_mod, "generate_youtube_package", fake_generate)
+
+    assert cli.main(["publish", dotted, "--out", "custom/pkg.md"]) == 0
+    assert calls["out_path"] == Path("custom") / "pkg.md"
+
+
+def test_cmd_stock_search_prints_json_to_stdout(monkeypatch, capsys):
+    class _FakeResult:
+        def to_dict(self):
+            return {"source": "pexels", "id": "1", "url": "https://x/1.mp4"}
+
+    calls = {}
+
+    def fake_search(query, *, source, aspect, per_page):
+        calls["args"] = (query, source, aspect, per_page)
+        return [_FakeResult()]
+
+    monkeypatch.setattr(dl_services_mod, "search", fake_search)
+    assert cli.main(["stock", "search", "cats"]) == 0
+    assert calls["args"] == ("cats", "pexels", "16:9", 10)
+    out = capsys.readouterr().out
+    assert '"id": "1"' in out
+
+
+def test_cmd_stock_search_writes_out_file(tmp_path, monkeypatch):
+    class _FakeResult:
+        def to_dict(self):
+            return {"source": "pixabay", "id": "9", "url": "https://y/9.mp4"}
+
+    monkeypatch.setattr(
+        dl_services_mod, "search",
+        lambda query, *, source, aspect, per_page: [_FakeResult()],
+    )
+    monkeypatch.chdir(tmp_path)
+    assert cli.main(["stock", "search", "dogs", "--out", "results.json"]) == 0
+    written = (tmp_path / "results.json").read_text(encoding="utf-8")
+    assert '"id": "9"' in written
+
+
+def test_cmd_stock_download_calls_service_with_right_args(tmp_path, monkeypatch):
+    calls = {}
+
+    def fake_download(manifest, out_dir):
+        calls["args"] = (manifest, out_dir)
+        return [{"id": "1"}, {"id": "2"}]
+
+    monkeypatch.setattr(dl_services_mod, "download", fake_download)
+    monkeypatch.chdir(tmp_path)
+    assert cli.main(["stock", "download", "manifest.json", "--out", "outdir"]) == 0
+    assert calls["args"] == ("manifest.json", "outdir")
+
+
+def test_cmd_stock_search_env_key_error_surfaces_cleanly(tmp_path, monkeypatch):
+    """Missing API key raises services.stock.StockConfigError -- the CLI's
+    generic error boundary must surface it as a clean one-liner naming the
+    env var, not a raw traceback."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("PEXELS_API_KEY", raising=False)
+    code = cli.main(["stock", "search", "cats"])
+    assert code == 1
