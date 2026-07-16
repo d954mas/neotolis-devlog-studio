@@ -152,7 +152,15 @@ def put_cached(beat: Beat, design: Design, out_path: str,
     key = beat_hash(beat, design, draft=draft, gpu=gpu, quality=quality)
     cp = cache_path(key)
     cp.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(out_path, cp)
+    # Atomic publish: parallel workers (-j N) may race on the same key, and a
+    # crash mid-copy must never leave a truncated MP4 behind as a false hit.
+    tmp = cp.with_suffix(f".tmp-{os.getpid()}")
+    try:
+        shutil.copyfile(out_path, tmp)
+        os.replace(tmp, cp)
+    finally:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
     print(f"[cache] saved {key}")
 
 
