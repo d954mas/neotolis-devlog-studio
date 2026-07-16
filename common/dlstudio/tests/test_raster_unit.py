@@ -156,6 +156,30 @@ def test_renders_without_project_fonts(design):
     assert (arr != np.array(bg)).any(), "expected the fallback font to actually draw ink"
 
 
+def test_corrupt_font_file_raises_instead_of_silent_fallback(tmp_path):
+    """0.11 regression: a font file that EXISTS but cannot be loaded must be
+    a loud render error — before the fix it silently degraded every plate to
+    the tiny PIL bitmap font while check and render both stayed green.
+    (A MISSING font path still falls back — that case is a VQ-ASSET check
+    error, and the fallback keeps fontless test environments rendering.)"""
+    from dlstudio.render.raster import _util
+
+    corrupt = tmp_path / "broken.ttf"
+    corrupt.write_bytes(b"this is definitely not a truetype font")
+    design = Design(
+        resolution=RESOLUTION,
+        palette=Palette(tokens={"bg": "#141210", "text": "#f5f0e6"}),
+        fonts=Fonts(main=str(corrupt)),
+    )
+    _util._load_font_cached.cache_clear()
+    with pytest.raises(RuntimeError, match="exists but cannot be loaded"):
+        _util.load_font(design, "main", 40)
+
+    chunk = Chunk(words=(0, 2), content=Plate(text="Broken font"))
+    with pytest.raises(RuntimeError, match="exists but cannot be loaded"):
+        render_chunk_image(chunk, design)
+
+
 # ─── 0.10: the process font cache must notice an on-disk font replacement ──
 
 def test_font_cache_invalidates_when_file_replaced(tmp_path, monkeypatch):

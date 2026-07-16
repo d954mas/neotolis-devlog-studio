@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -45,12 +46,29 @@ def test_missing_file_readable_undetermined():
     assert p.readable is None
 
 
-def test_font_kind_not_probed_readable_undetermined(tmp_path):
+def test_font_corrupt_file_readable_false(tmp_path):
+    """0.11 regression: an existing-but-broken TTF used to leave
+    readable=None and sail through VQ-ASSET while render degraded every
+    plate to the tiny PIL bitmap font. Fonts are now loadability-validated.
+
+    (Replaces test_font_kind_not_probed_readable_undetermined, which pinned
+    the defective readable=None behaviour for fonts.)"""
     f = tmp_path / "font.ttf"
     f.write_bytes(b"not a real font, but it exists")
     p = probe_asset(str(f), "font")
     assert p.exists is True
-    assert p.readable is None
+    assert p.readable is False
+
+
+def test_font_real_file_readable_true():
+    from _builders import find_system_font
+
+    font = find_system_font()
+    if font is None:
+        pytest.skip("no known system font found to load")
+    p = probe_asset(font, "font")
+    assert p.exists is True
+    assert p.readable is True
 
 
 def test_other_kind_not_probed_readable_undetermined(tmp_path):

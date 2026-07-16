@@ -140,7 +140,14 @@ def compiled_client(tmp_path, monkeypatch):
     (data / "words.json").write_text(json.dumps(_WORDS), encoding="utf-8")
     img = Image.new("RGB", (640, 360), (40, 80, 160))
     img.save(data / "scene.png")
-    (data / "font.ttf").write_bytes(b"placeholder-font")
+    # 0.11 validates font loadability at check time — placeholder bytes would
+    # (correctly) raise VQ-ASSET, so stage a real system font.
+    from _builders import find_system_font
+
+    system_font = find_system_font()
+    if system_font is None:
+        pytest.skip("no known system font found (0.11 validates loadability)")
+    shutil.copyfile(system_font, data / "font.ttf")
 
     monkeypatch.syspath_prepend(str(tmp_path))
     monkeypatch.chdir(tmp_path)

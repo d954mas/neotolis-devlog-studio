@@ -79,7 +79,14 @@ def probe_asset(path: str, kind: Kind, *,
     p = Path(path)
     if not p.exists():
         return AssetProbe(path=path, kind=kind, exists=False)
-    if kind in ("font", "other"):
+    if kind == "font":
+        # Defect 0.11: an existing-but-broken TTF used to leave readable=None,
+        # sail through VQ-ASSET, and render every plate in the tiny PIL bitmap
+        # fallback. Fonts are validated by actually loading them (PIL, not
+        # ffprobe) so check reports present-but-unloadable as an error.
+        return AssetProbe(path=path, kind=kind, exists=True,
+                          readable=_font_readable(path))
+    if kind == "other":
         return AssetProbe(path=path, kind=kind, exists=True)
 
     st = p.stat()
@@ -97,6 +104,18 @@ def probe_asset(path: str, kind: Kind, *,
     if _session is None:
         session.flush()
     return result
+
+
+def _font_readable(path: str) -> bool:
+    """Whether PIL can actually load the font file — the only loadability
+    test that matches what render.raster will do with it."""
+    from PIL import ImageFont
+
+    try:
+        ImageFont.truetype(path, 12)
+        return True
+    except Exception:
+        return False
 
 
 def _ffprobe(path: str, kind: Kind) -> AssetProbe:

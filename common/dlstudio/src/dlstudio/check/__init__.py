@@ -143,16 +143,47 @@ def _promote_warnings(timeline: Timeline) -> list[CheckIssue]:
 
 # ─── VQ-SYNC postcondition ───────────────────────────────────────────────────
 
+def _stream_duration(stream: dict) -> float | None:
+    """A stream's own duration in seconds, or None when the container does
+    not carry one (some formats only stamp it as a tags.DURATION string)."""
+    raw = stream.get("duration")
+    if raw not in (None, "N/A"):
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            pass
+    tag = (stream.get("tags") or {}).get("DURATION")
+    if isinstance(tag, str) and tag.count(":") == 2:   # "HH:MM:SS.micros"
+        try:
+            hh, mm, ss = tag.split(":")
+            return int(hh) * 3600 + int(mm) * 60 + float(ss)
+        except ValueError:
+            pass
+    return None
+
+
 def verify_output(
     video_path: str,
     expected_duration: float,
     *,
     tolerance: float = 0.25,
+    require_audio: bool = True,
 ) -> None:
-    """ffprobe the rendered file; raise RuntimeError on duration mismatch or a
-    missing/zero video stream. Renderers MUST call this after writing an MP4 —
-    it is the postcondition that would have caught the v1 bug that produced a
-    silent audio-only/truncated file for 22 blind iterations.
+    """ffprobe the rendered file; raise RuntimeError when it disagrees with
+    the expected Timeline duration. Renderers MUST call this after writing an
+    MP4 — it is the postcondition that would have caught the v1 bug that
+    produced a silent audio-only/truncated file for 22 blind iterations.
+
+    Checked separately (defect 0.5 — the container duration is the MAX of
+    the stream durations, so `video=1s, audio=3s, container=3s` sailed
+    through a container-only check while the video track was truncated):
+      - video stream presence
+      - audio stream presence (`require_audio=False` for video-only files)
+      - video stream duration vs expected
+      - audio stream duration vs expected
+      - container duration vs expected
+    A stream that carries no readable duration skips its own duration check
+    (the container check still applies); MP4 always carries both.
     """
     p = Path(video_path)
     if not p.exists():
@@ -181,11 +212,16 @@ def verify_output(
             f"VQ-SYNC: ffprobe returned no parseable data for {video_path}") from e
 
     streams = data.get("streams", [])
-    has_video = any(s.get("codec_type") == "video" for s in streams)
-    if not has_video:
+    video_streams = [s for s in streams if s.get("codec_type") == "video"]
+    audio_streams = [s for s in streams if s.get("codec_type") == "audio"]
+    if not video_streams:
         raise RuntimeError(
             f"VQ-SYNC: {video_path} has no video stream "
             f"(expected {expected_duration:.3f}s of video)")
+    if require_audio and not audio_streams:
+        raise RuntimeError(
+            f"VQ-SYNC: {video_path} has no audio stream "
+            f"(expected {expected_duration:.3f}s of VO audio)")
 
     dur_raw = data.get("format", {}).get("duration")
     try:
@@ -203,3 +239,17 @@ def verify_output(
             f"VQ-SYNC: duration mismatch for {video_path}: "
             f"actual {actual:.3f}s vs expected {expected_duration:.3f}s "
             f"(delta {delta:.3f}s > tolerance {tolerance:.3f}s)")
+
+    for kind, kind_streams in (("video", video_streams), ("audio", audio_streams)):
+        if not kind_streams:
+            continue
+        sdur = _stream_duration(kind_streams[0])
+        if sdur is None:
+            continue
+        sdelta = abs(sdur - expected_duration)
+        if sdelta > tolerance:
+            raise RuntimeError(
+                f"VQ-SYNC: {kind} STREAM duration mismatch for {video_path}: "
+                f"{kind} stream is {sdur:.3f}s vs expected "
+                f"{expected_duration:.3f}s (delta {sdelta:.3f}s > tolerance "
+                f"{tolerance:.3f}s); container duration alone hid this")

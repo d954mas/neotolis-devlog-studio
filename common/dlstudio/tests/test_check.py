@@ -257,17 +257,32 @@ def media(tmp_path_factory):
     if shutil.which("ffmpeg") is None:      # pragma: no cover
         pytest.skip("ffmpeg not on PATH")
     d = tmp_path_factory.mktemp("media")
-    mp4 = d / "clip.mp4"
+    mp4 = d / "clip.mp4"                     # 2s video + 2s audio (a real beat shape)
+    video_only = d / "video_only.mp4"        # 2s video, no audio track
+    torn = d / "torn.mp4"                    # 1s VIDEO inside a 3s container (0.5)
     wav = d / "silent.wav"
     subprocess.run(
         ["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=d=2:s=320x240:r=30",
-         "-pix_fmt", "yuv420p", str(mp4)],
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+         "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(mp4)],
+        check=True, capture_output=True)
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=d=2:s=320x240:r=30",
+         "-pix_fmt", "yuv420p", str(video_only)],
+        check=True, capture_output=True)
+    # The exact PLAN_STUDIO_V2 counterexample: video=1s, audio=3s,
+    # container=3s. A container-only check calls this fine at expected=3s.
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=d=1:s=320x240:r=30",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=3",
+         "-pix_fmt", "yuv420p", "-c:a", "aac", str(torn)],
         check=True, capture_output=True)
     subprocess.run(
         ["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono",
          "-t", "2", str(wav)],
         check=True, capture_output=True)
-    return {"mp4": str(mp4), "wav": str(wav), "dir": str(d)}
+    return {"mp4": str(mp4), "video_only": str(video_only), "torn": str(torn),
+            "wav": str(wav), "dir": str(d)}
 
 
 def test_verify_output_passes_within_tolerance(media):
@@ -289,3 +304,22 @@ def test_verify_output_missing_file_raises():
 def test_verify_output_no_video_stream_raises(media):
     with pytest.raises(RuntimeError, match="no video stream"):
         verify_output(media["wav"], 2.0)
+
+
+def test_verify_output_stream_duration_mismatch_raises(media):
+    """0.5 regression — the mandated counterexample: video=1s, audio=3s,
+    container=3s, expected=3s MUST fail. The container duration is the max
+    of the streams, so only a per-stream check can see the truncated video."""
+    with pytest.raises(RuntimeError, match="video STREAM duration mismatch"):
+        verify_output(media["torn"], 3.0, tolerance=0.35)
+
+
+def test_verify_output_missing_audio_stream_raises(media):
+    """0.5: every render output carries VO audio; its absence is an error by
+    default (a beat that lost its audio track used to pass verify)."""
+    with pytest.raises(RuntimeError, match="no audio stream"):
+        verify_output(media["video_only"], 2.0)
+
+
+def test_verify_output_require_audio_false_allows_video_only(media):
+    verify_output(media["video_only"], 2.0, require_audio=False)  # no raise

@@ -32,6 +32,25 @@ from dlstudio.model.content import (
 FIXTURES = Path(__file__).parent / "fixtures"
 WORDS_BASIC = FIXTURES / "words_basic.json"
 
+# Since 0.11 fonts are loadability-validated (probe + render), so tests whose
+# design must pass checks need a REAL font file, not placeholder bytes. No
+# TTF ships with PIL or this repo — borrow a system one, skip when absent.
+_SYSTEM_FONT_CANDIDATES = (
+    "C:/Windows/Fonts/arial.ttf",
+    "C:/Windows/Fonts/segoeui.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    "/System/Library/Fonts/Helvetica.ttc",
+)
+
+
+def find_system_font() -> str | None:
+    """A loadable system TTF for tests that need checks to pass, else None."""
+    for c in _SYSTEM_FONT_CANDIDATES:
+        if Path(c).exists():
+            return c
+    return None
+
 
 def mk_design(resolution=(1080, 1920), *, crossfade=0.3, fps=30) -> Design:
     return Design(

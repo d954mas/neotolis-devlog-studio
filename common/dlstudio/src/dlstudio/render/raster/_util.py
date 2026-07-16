@@ -95,10 +95,19 @@ def _load_font_cached(path: str | None, size: int,
     if path:
         try:
             return ImageFont.truetype(path, size)
-        except Exception:
-            pass
-    # Fall back to PIL's built-in font — tests (and any environment without
-    # the project's TTFs installed) still render deterministically.
+        except Exception as e:
+            if os.path.exists(path):
+                # Defect 0.11: an existing-but-unloadable font must be a loud
+                # error, not a silent bitmap-font degradation of every plate.
+                # (check flags it too, via compile.probe._font_readable.)
+                raise RuntimeError(
+                    f"font file exists but cannot be loaded: {path} ({e}); "
+                    f"fix or replace the font — refusing to fall back to the "
+                    f"PIL bitmap font"
+                ) from e
+            # Missing file: VQ-ASSET reports it at check time; fall through to
+            # the deterministic PIL default so fontless test environments
+            # still render.
     try:
         return ImageFont.load_default(size=size)
     except TypeError:
