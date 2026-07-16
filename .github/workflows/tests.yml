@@ -34,3 +34,44 @@ jobs:
         env:
           PYTHONPATH: .
         run: pytest tests/ -v --ignore=tests/test_visual_regression.py
+
+  # The ONE mandatory Studio v2 job (PLAN_STUDIO_V2 0.8): Python 3.12, the
+  # full common/dlstudio suite (includes the real-FFmpeg E2E and integration
+  # tests — ffmpeg is installed below), plus the webui typecheck/build.
+  # Windows-specific smoke stays a local command by design (see the plan).
+  dlstudio:
+    name: dlstudio v2 (Python 3.12 + ffmpeg + webui)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core
+          ffmpeg -version | head -1
+
+      - name: Install dlstudio (editable, studio+dev extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e "common/dlstudio[studio,dev]"
+
+      - name: Run the full dlstudio suite (incl. real-FFmpeg E2E)
+        working-directory: common/dlstudio
+        run: pytest tests -q
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Web UI typecheck + build
+        working-directory: common/dlstudio/webui
+        run: |
+          npm ci
+          npm run build
