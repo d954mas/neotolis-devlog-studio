@@ -389,17 +389,24 @@ def vo_stem_chain(in_stream: str, out_label: str, delay_t: float) -> Chain:
 
 
 def sfx_chain(in_stream: str, out_label: str, *, gain_db: float,
-              delay_t: float) -> Chain:
-    """One SFX one-shot -> stereo/48k, gain, delayed to its absolute anchor."""
-    return Chain(
-        inputs=[in_stream],
-        filters=[
-            _aformat_node(),
-            FilterNode("volume", positional=[f"{gain_db}dB"]),
-            _adelay_node(delay_t),
-        ],
-        outputs=[out_label],
-    )
+              delay_t: float, max_len: float | None = None) -> Chain:
+    """One SFX one-shot -> stereo/48k, gain, delayed to its absolute anchor.
+
+    `max_len` (when given) caps the SFX with an `atrim` BEFORE the delay, so a
+    clip whose natural length would push it past the edit end is clamped: after
+    the `adelay=delay_t`, the trimmed SFX ends no later than
+    `delay_t + max_len`. The caller passes `max(0, total_duration - delay_t)` so
+    a long SFX anchored near the finale can't extend the mixed audio (and thus
+    the muxed output) past the video track. `None` (the default) keeps the SFX
+    untrimmed — the legacy behaviour the pure unit tests assert on."""
+    filters: list[FilterNode] = [
+        _aformat_node(),
+        FilterNode("volume", positional=[f"{gain_db}dB"]),
+    ]
+    if max_len is not None and max_len > 0.0:
+        filters.append(FilterNode("atrim", args={"duration": round(max_len, 4)}))
+    filters.append(_adelay_node(delay_t))
+    return Chain(inputs=[in_stream], filters=filters, outputs=[out_label])
 
 
 def music_span_chain(in_stream: str, out_label: str, *, span_len: float,

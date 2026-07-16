@@ -4,9 +4,23 @@
 `<beat>_vo_stem.wav`) into the final edit MP4 with a real audio mix laid across
 beat boundaries. Two paths:
 
-FAST PATH — no music, no SFX, no non-cut transitions: stream-copy concat of the
-beat MP4s (video + their own VO audio), exactly the Phase-1 behaviour. Iterate
-speed is preserved: nothing is re-encoded and no mix graph is built.
+FAST PATH — no music, no SFX, no non-cut transitions. Two sub-cases, gated on
+quality so iterate speed and final quality don't fight:
+
+- draft/preview/standard: pure stream-copy concat of the beat MP4s (video +
+  their own VO audio), exactly the Phase-1 behaviour. Nothing is re-encoded,
+  no mix graph, no loudness pass — the iterate-speed path.
+- upload/master: ARCHITECTURE_V2 promises finals at `mix.target_lufs` (-14
+  LUFS). A silent stream-copy would ship whatever loudness the raw VO takes
+  happened to have, so for these FINAL tiers we still stream-copy the VIDEO
+  (fast) but re-encode ONLY the audio through the same two-pass loudnorm the
+  mix path uses (`_fast_concat_normalized`). Video quality/speed is untouched;
+  only the audio gets normalized.
+
+The trigger that forces the mix path deliberately IGNORES a `transition_out`
+carried solely by the LAST beat: a beat's transition fades INTO the next beat,
+and the last beat has no next beat, so its tail transition is a no-op that must
+neither dip the finale to black nor drag the edit onto the (slower) mix path.
 
 MIX PATH — anything else. Three stages:
 
@@ -16,7 +30,11 @@ MIX PATH — anything else. Three stages:
    the boundary fades below); every other beat is stream-copied and all
    segments are concat-copied together. Concat-copy of copied + freshly
    re-encoded segments is compatible because both keep the render_beat codec
-   params (libx264/yuv420p, same resolution, `-r fps` timebase).
+   params (libx264/yuv420p, same resolution, `-r fps` timebase) AND the SAME
+   pinned video timescale (`render.beat.VIDEO_TIMESCALE`, set on both the beat
+   encode and `_reencode_fade_segment`) — without a common timescale a copied
+   and a re-encoded segment can carry different timebases and trip the concat
+   demuxer.
 
 2. AUDIO MIX (the core). One ffmpeg `-filter_complex` built from the typed AST
    in graph.py — no string templating. On one ABSOLUTE edit timeline:
@@ -59,13 +77,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from dlstudio.ir import IRBeat, Timeline
-from dlstudio.render.beat import codec_args
+from dlstudio.render.beat import VIDEO_TIMESCALE, codec_args
 from dlstudio.render.graph import (
     FilterNode,
     Graph,
     InputList,
     amix_sum_node,
     asplit_node,
+    db_to_linear,
     music_span_chain,
     sfx_chain,
     sidechain_duck_node,
@@ -91,6 +110,10 @@ _LOUDNORM_LRA = 11.0
 # Quality tiers that skip the (heavier) two-pass measured loudnorm and use a
 # single dynamic pass — acceptable for draft-quality previews.
 _DRAFT_QUALITIES = {"draft", "preview"}
+# FINAL quality tiers. Per ARCHITECTURE_V2 these ship at -14 LUFS, so even a
+# no-music/no-sfx/no-transition edit runs the loudnorm audio pass (video still
+# stream-copies). draft/preview/standard keep the pure fast path.
+_FINAL_QUALITIES = {"upload", "master"}
 
 
 def _scaled_tolerance(n_beats: int) -> float:
@@ -145,17 +168,32 @@ def assemble(timeline: Timeline, beat_files: dict[str, Path],
 
     has_music = bool(timeline.mix.music)
     has_sfx = any(b.sfx for b in beats)
-    has_transition = any(
-        b.transition_out and b.transition_out.kind != "cut" and b.transition_out.dur > 0
-        for b in beats
-    )
 
+    def _is_transition(b: IRBeat) -> bool:
+        t = b.transition_out
+        return bool(t and t.kind != "cut" and t.dur > 0)
+
+    # A transition_out on the LAST beat has no next beat to transition into: it
+    # would only fade the finale to black AND needlessly force the mix path.
+    # Drop it (with a warning) — the trigger only counts transitions on
+    # non-last beats, and _boundary_fades independently zeroes the last tail.
+    if beats and _is_transition(beats[-1]):
+        print(f"[assemble] WARNING: last beat {beats[-1].id!r} transition_out "
+              f"({beats[-1].transition_out.kind}) has no next beat to transition "
+              f"into — dropping it (no tail fade, no mix-path trigger).")
+    has_transition = any(_is_transition(b) for b in beats[:-1])
+
+    # Quality gate: draft/preview/standard keep the pure fast path (iterate
+    # speed); upload/master finals always run the loudnorm audio pass so they
+    # hit ARCHITECTURE_V2's -14 LUFS promise even with nothing else to mix.
     if not (has_music or has_sfx or has_transition):
+        if opts.quality in _FINAL_QUALITIES:
+            return _fast_concat_normalized(ordered, timeline, opts, out_path)
         return _fast_concat(ordered, timeline, out_path)
 
     print(f"[assemble] mix path: music={len(timeline.mix.music)} "
           f"sfx={sum(len(b.sfx) for b in beats)} "
-          f"transitions={sum(1 for b in beats if b.transition_out and b.transition_out.kind != 'cut' and b.transition_out.dur > 0)}")
+          f"transitions={sum(1 for b in beats[:-1] if _is_transition(b))}")
 
     temps: list[Path] = []
     try:
@@ -194,22 +232,64 @@ def _fast_concat(ordered: list[Path], timeline: Timeline, out_path: Path) -> Pat
     return out_path
 
 
+def _fast_concat_normalized(ordered: list[Path], timeline: Timeline,
+                            opts: "RenderOpts", out_path: Path) -> Path:
+    """Quality-gated fast path for FINAL tiers (upload/master): the VIDEO is
+    still stream-copy concatenated (fast, no re-encode), but the concatenated
+    audio is re-encoded through the SAME two-pass loudnorm the mix path uses so
+    finals land at `mix.target_lufs` (ARCHITECTURE_V2's -14 LUFS promise). No
+    mix graph is built — there's nothing to mix, only to normalize."""
+    tmp = out_path.parent
+    combined = tmp / f".{out_path.stem}_fastcat.mp4"
+    list_file = tmp / f".{out_path.stem}_concat.txt"
+    _concat_list(ordered, list_file)
+    try:
+        # 1. stream-copy concat (video + the beats' own VO audio), no re-encode.
+        _run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(list_file),
+              "-c", "copy", "-movflags", "+faststart", str(combined)],
+             out_path, "fast concat (pre-loudnorm)")
+        # 2. copy the video, re-encode ONLY the audio through loudnorm.
+        _, abitrate = codec_args(opts.quality, opts.gpu)
+        ln = _loudnorm_apply_arg(timeline, opts, combined)
+        _run(["ffmpeg", "-y", "-i", str(combined), "-map", "0:v", "-map", "0:a",
+              "-c:v", "copy", "-af", ln, "-c:a", "aac", "-b:a", abitrate,
+              "-ar", "48000", "-movflags", "+faststart", str(out_path)],
+             out_path, "fast concat loudnorm mux")
+    finally:
+        for t in (combined, list_file):
+            try:
+                t.unlink()
+            except OSError:
+                pass
+    _postcondition(out_path, timeline.duration, _scaled_tolerance(len(ordered)))
+    _verify_audio_stream(out_path)
+    return out_path
+
+
 # ─── video track ───────────────────────────────────────────────────────────
 
 def _boundary_fades(beats: list[IRBeat]) -> list[tuple[float, float]]:
     """Per-beat `(fade_in, fade_out)` durations from the dip-to-black model:
     a beat's own non-cut `transition_out.dur` splits in half between its tail
-    (fade-out) and the NEXT beat's head (fade-in)."""
+    (fade-out) and the NEXT beat's head (fade-in).
+
+    The LAST beat's tail fade is forced to 0: its `transition_out` would fade
+    into a next beat that doesn't exist, so honouring it would dip the finale
+    to black. (assemble() already warns and drops it from the mix-path
+    trigger; this is the defensive twin so a last-beat transition can never
+    produce a tail fade even when the mix path is reached for other reasons.)"""
     def half(b: IRBeat) -> float:
         t = b.transition_out
         if t is not None and t.kind != "cut" and t.dur > 0:
             return t.dur / 2.0
         return 0.0
 
+    last = len(beats) - 1
     fades: list[tuple[float, float]] = []
     for i, b in enumerate(beats):
         fade_in = half(beats[i - 1]) if i > 0 else 0.0
-        fades.append((fade_in, half(b)))
+        fade_out = 0.0 if i == last else half(b)
+        fades.append((fade_in, fade_out))
     return fades
 
 
@@ -260,23 +340,49 @@ def _build_video_track(timeline: Timeline, beat_files: dict[str, Path],
     return vtrack
 
 
+def _probe_segment_duration(path: Path) -> float | None:
+    """Actual container duration of a rendered segment (seconds), or None if
+    ffprobe fails/returns nothing parseable. Used to anchor the tail fade to
+    the segment's REAL length rather than the IR's nominal beat duration —
+    render_beat's `-t` and AAC priming can leave the encoded segment a frame
+    or two off the IR value, and a fade-out anchored to the IR duration would
+    then start slightly early or late relative to the actual last frame."""
+    r = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "csv=p=0", str(path)],
+        capture_output=True, text=True,
+    )
+    try:
+        return float(r.stdout.strip())
+    except ValueError:
+        return None
+
+
 def _reencode_fade_segment(src: Path, dst: Path, dur: float, fade_in: float,
                            fade_out: float, design, opts: "RenderOpts",
                            out_path: Path) -> None:
     """Re-encode one beat video (audio dropped) with dip-to-black fades. Filter
-    strings come from the graph AST (`FilterNode.render_filter`), not templates."""
+    strings come from the graph AST (`FilterNode.render_filter`), not templates.
+
+    The tail fade is anchored to the segment's ACTUAL probed duration (falling
+    back to the IR `dur` on probe failure), and the encode pins the same
+    `VIDEO_TIMESCALE` as render_beat so this re-encoded segment shares a
+    timebase with the stream-copied segments it's concatenated with."""
     nodes: list[FilterNode] = []
     if fade_in > 0:
         nodes.append(FilterNode("fade", args={"t": "in", "st": 0.0,
                                               "d": round(fade_in, 3), "color": "black"}))
     if fade_out > 0:
-        st = round(max(0.0, dur - fade_out), 3)
+        actual = _probe_segment_duration(src)
+        anchor = actual if actual is not None else dur
+        st = round(max(0.0, anchor - fade_out), 3)
         nodes.append(FilterNode("fade", args={"t": "out", "st": st,
                                               "d": round(fade_out, 3), "color": "black"}))
     vf = ",".join(n.render_filter() for n in nodes)
     vcodec, _ = codec_args(opts.quality, opts.gpu)
     _run(["ffmpeg", "-y", "-i", str(src), "-an", "-vf", vf, *vcodec,
           "-r", str(design.fps),
+          "-video_track_timescale", str(VIDEO_TIMESCALE),
           "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709",
           str(dst)], out_path, f"fade re-encode {src.name}")
 
@@ -363,14 +469,20 @@ def _build_audio_mix(timeline: Timeline, beat_files: dict[str, Path],
         else:
             music_labels.append(pre)
 
-    # 4. SFX one-shots: gain + place at placement.t0 + sfx.t.
+    # 4. SFX one-shots: gain + place at placement.t0 + sfx.t. Each SFX is
+    #    capped with atrim so a clip that would naturally run past the edit end
+    #    can't extend the mixed audio (and thus the muxed output) beyond the
+    #    video track — max length = timeline total minus the SFX's absolute
+    #    anchor.
+    total = timeline.duration
     sfx_labels: list[str] = []
     for b in beats:
         for s in b.sfx:
+            anchor = placements[b.id] + s.t
             idx = inputs.add(["-i", s.src])
             lbl = graph.new_label("sfx")
             graph.add(sfx_chain(f"{idx}:a", lbl, gain_db=s.gain_db,
-                                delay_t=placements[b.id] + s.t))
+                                delay_t=anchor, max_len=max(0.0, total - anchor)))
             sfx_labels.append(lbl)
 
     # 5. Sum every bus. A single input (e.g. transitions-only, no music/sfx)
@@ -395,11 +507,28 @@ def _build_audio_mix(timeline: Timeline, beat_files: dict[str, Path],
 _LOUDNORM_JSON_RE = re.compile(r'\{[^{}]*"input_i"[^{}]*\}', re.DOTALL)
 
 
-def _loudnorm_measure(audio: Path, target_lufs: float, true_peak: float) -> dict:
-    """loudnorm pass 1: measure the input's loudness (JSON to stderr)."""
+def _limiter_prefix(true_peak_db: float) -> str:
+    """A documented `alimiter` node (comma-terminated so it prefixes a
+    filterchain) capping the summed bus to the true-peak target as a LINEAR
+    amplitude (`db_to_linear(true_peak_db)`; e.g. -1 dBTP -> ~0.891).
+
+    It sits BEFORE loudnorm in BOTH the measure and the apply passes so heavy
+    VO+music+SFX overlap can't drive the loudnorm input into clipping, and —
+    critically — loudnorm measures the exact post-limiter signal it will
+    normalize, keeping the two passes on one identical chain for predictable
+    output. `measure_loudness()` (ground-truth diagnostics on a finished file)
+    deliberately does NOT use this prefix."""
+    return f"alimiter=limit={round(db_to_linear(true_peak_db), 6)},"
+
+
+def _loudnorm_measure(audio: Path, target_lufs: float, true_peak: float,
+                      *, prefix: str = "") -> dict:
+    """loudnorm pass 1: measure the input's loudness (JSON to stderr). `prefix`
+    (e.g. the alimiter chain) is prepended to the `-af` filterchain so the
+    measure pass sees the same signal the apply pass will normalize."""
     r = subprocess.run(
         ["ffmpeg", "-i", str(audio), "-af",
-         f"loudnorm=I={target_lufs}:TP={true_peak}:LRA={_LOUDNORM_LRA}:print_format=json",
+         f"{prefix}loudnorm=I={target_lufs}:TP={true_peak}:LRA={_LOUDNORM_LRA}:print_format=json",
          "-f", "null", "-"],
         capture_output=True, text=True,
     )
@@ -413,14 +542,16 @@ def _loudnorm_measure(audio: Path, target_lufs: float, true_peak: float) -> dict
 
 def _loudnorm_apply_arg(timeline: Timeline, opts: "RenderOpts",
                         mix_raw: Path) -> str:
-    """The `-af loudnorm=...` argument for the mux. Non-draft = two-pass
-    (measured values + linear=true, the legacy pattern); draft = single dynamic
-    pass."""
+    """The `-af` argument for the mux: an `alimiter` headroom cap (see
+    `_limiter_prefix`) followed by loudnorm. Non-draft = two-pass (measured
+    values + linear=true, the legacy pattern), where the measure pass is fed
+    the SAME limiter+loudnorm chain; draft = single dynamic pass."""
     target, tp = timeline.mix.target_lufs, timeline.mix.true_peak_db
-    base = f"loudnorm=I={target}:TP={tp}:LRA={_LOUDNORM_LRA}"
+    limiter = _limiter_prefix(tp)
+    base = f"{limiter}loudnorm=I={target}:TP={tp}:LRA={_LOUDNORM_LRA}"
     if opts.quality in _DRAFT_QUALITIES:
         return base
-    m = _loudnorm_measure(mix_raw, target, tp)
+    m = _loudnorm_measure(mix_raw, target, tp, prefix=limiter)
     return (f"{base}:measured_I={m['input_i']}:measured_TP={m['input_tp']}:"
             f"measured_LRA={m['input_lra']}:measured_thresh={m['input_thresh']}:"
             f"offset={m['target_offset']}:linear=true")

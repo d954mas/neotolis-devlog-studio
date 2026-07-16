@@ -19,6 +19,8 @@ import importlib
 import re
 import shutil
 import subprocess
+import types
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -149,6 +151,71 @@ def test_amix_sum_node_is_a_sum_not_average():
 def test_asplit_node_fans_out():
     r = asplit_node("vosum", ["vofin", "vok1", "vok2"]).render()
     assert r == "[vosum]asplit=3[vofin][vok1][vok2]"
+
+
+def test_sfx_chain_no_maxlen_is_untrimmed():
+    r = sfx_chain("4:a", "s", gain_db=0.0, delay_t=1.0).render()
+    assert "atrim" not in r
+
+
+def test_sfx_chain_maxlen_inserts_atrim_before_delay():
+    r = sfx_chain("4:a", "s", gain_db=0.0, delay_t=1.3, max_len=0.7).render()
+    # atrim caps the clip, and it precedes the adelay that places it.
+    assert "atrim=duration=0.700" in r
+    assert r.index("atrim") < r.index("adelay")
+
+
+def test_sfx_chain_maxlen_zero_or_none_skips_atrim():
+    assert "atrim" not in sfx_chain("4:a", "s", gain_db=0.0, delay_t=1.0,
+                                    max_len=0.0).render()
+    assert "atrim" not in sfx_chain("4:a", "s", gain_db=0.0, delay_t=1.0,
+                                    max_len=None).render()
+
+
+# ─── loudnorm headroom limiter (feeds both measure + apply passes) ──────────
+
+def test_limiter_prefix_is_true_peak_as_linear_amplitude():
+    # -1 dBTP -> alimiter limit expressed as a LINEAR amplitude, comma-suffixed
+    # so it prefixes the loudnorm filterchain.
+    assert assemble_mod._limiter_prefix(-1.0) == \
+        f"alimiter=limit={round(db_to_linear(-1.0), 6)},"
+
+
+def test_loudnorm_apply_feeds_same_limiter_to_both_passes(monkeypatch):
+    captured = {}
+
+    def fake_measure(audio, target, tp, *, prefix=""):
+        captured["prefix"] = prefix
+        return {"input_i": "-20.0", "input_tp": "-3.0", "input_lra": "5.0",
+                "input_thresh": "-30.0", "target_offset": "0.0"}
+
+    monkeypatch.setattr(assemble_mod, "_loudnorm_measure", fake_measure)
+
+    tl = types.SimpleNamespace(mix=IRMix(target_lufs=-14.0, true_peak_db=-1.0))
+    arg = assemble_mod._loudnorm_apply_arg(
+        tl, RenderOpts(quality="standard"), Path("mix.wav"))
+
+    limiter = assemble_mod._limiter_prefix(-1.0)
+    # apply pass: the limiter precedes loudnorm
+    assert arg.startswith(limiter + "loudnorm=")
+    # measure pass: fed the IDENTICAL limiter prefix (same chain both passes)
+    assert captured["prefix"] == limiter
+    assert "measured_I=-20.0" in arg and "linear=true" in arg
+
+
+def test_loudnorm_apply_draft_is_single_pass_with_limiter(monkeypatch):
+    called = {"measure": 0}
+    monkeypatch.setattr(
+        assemble_mod, "_loudnorm_measure",
+        lambda *a, **k: called.__setitem__("measure", called["measure"] + 1) or {})
+
+    tl = types.SimpleNamespace(mix=IRMix(target_lufs=-14.0, true_peak_db=-1.0))
+    arg = assemble_mod._loudnorm_apply_arg(
+        tl, RenderOpts(quality="draft"), Path("m.wav"))
+
+    limiter = assemble_mod._limiter_prefix(-1.0)
+    assert arg == f"{limiter}loudnorm=I=-14.0:TP=-1.0:LRA=11.0"
+    assert called["measure"] == 0          # draft: no measure pass at all
 
 
 # ─── boundary-fade split (dip-to-black transition model) ────────────────────
@@ -412,3 +479,122 @@ def test_sfx_placed_in_mix(tmp_path):
     at_sfx = _band_mean_db(out, 1.25, 0.2, 1200)
     before = _band_mean_db(out, 0.2, 0.5, 1200)
     assert at_sfx > before + 6.0, f"sfx={at_sfx} before={before}"
+
+
+@pytestmark_integration
+def test_last_beat_only_transition_takes_fast_path(tmp_path, monkeypatch, capsys):
+    """A transition_out carried ONLY by the last beat must NOT trigger the mix
+    path (it has no next beat to transition into): the fast path is taken, a
+    warning is printed, and the finale is never dipped to black."""
+    design = _design(bg="#ffffff")
+    a1, a2 = tmp_path / "p1.wav", tmp_path / "p2.wav"
+    _sine(a1, 300, 1.0)
+    _sine(a2, 400, 1.0)
+
+    b1 = IRBeat(id="b1", duration=1.0, audio=str(a1), words_path="w.json",
+                words=[WordSpan(t0=0.0, t1=1.0, text="x")], segments=[], overlays=[])
+    b2 = IRBeat(id="b2", duration=1.0, audio=str(a2), words_path="w.json",
+                words=[WordSpan(t0=0.0, t1=1.0, text="y")], segments=[], overlays=[],
+                transition_out=Transition(kind="dip_black", dur=0.4))
+    opts = RenderOpts(quality="standard", workdir=tmp_path / "fin")
+    f1 = render_beat(b1, design, None, opts)
+    f2 = render_beat(b2, design, None, opts)
+
+    out = tmp_path / "final.mp4"
+    tl = _timeline([b1, b2], IRMix(), out, design=design)
+
+    # Spy: taking the mix path would call these; the fast path must not.
+    def boom(*a, **k):
+        raise AssertionError("mix path taken for a last-beat-only transition")
+
+    monkeypatch.setattr(assemble_mod, "_build_video_track", boom)
+    monkeypatch.setattr(assemble_mod, "_build_audio_mix", boom)
+
+    assemble(tl, {"b1": f1, "b2": f2}, opts)
+
+    out_text = capsys.readouterr().out
+    assert out.exists()
+    assert "mix path" not in out_text
+    assert "last beat" in out_text and "dropping it" in out_text
+    # No tail fade: the finale (end of b2) stays bright white, not dipped black.
+    assert _frame_luma(out, 1.9) > 180
+
+
+@pytestmark_integration
+def test_fast_path_upload_normalizes_audio(tmp_path):
+    """No music/sfx/transition, but quality=upload -> the video still
+    stream-copy concats while the audio is loudnorm'd to the target, so the
+    final lands within +/-1.5 LU of -14 LUFS (ARCHITECTURE_V2's promise)."""
+    design = _design()
+    a1, a2 = tmp_path / "u1.wav", tmp_path / "u2.wav"
+    _sine(a1, 300, 1.0)
+    _sine(a2, 440, 1.0)
+
+    beats, beat_files = _render_two_beats(tmp_path, design, a1, a2)
+    out = tmp_path / "final.mp4"
+    tl = _timeline(beats, IRMix(target_lufs=-14.0, true_peak_db=-1.0), out,
+                   design=design)
+
+    assemble(tl, beat_files, RenderOpts(quality="upload", workdir=tmp_path / "fin"))
+
+    assert out.exists() and _has_audio(out)
+    assert abs(_probe_dur(out) - 2.0) < 0.5
+    measured = measure_loudness(out, target_lufs=-14.0, true_peak=-1.0)
+    assert abs(float(measured["input_i"]) - (-14.0)) <= 1.5, measured["input_i"]
+
+
+@pytestmark_integration
+def test_fast_path_draft_skips_normalization(tmp_path, monkeypatch, capsys):
+    """The same no-mix edit at draft quality takes the PURE fast path: audio is
+    stream-copied untouched, loudnorm is never invoked."""
+    design = _design()
+    a1, a2 = tmp_path / "d1.wav", tmp_path / "d2.wav"
+    _sine(a1, 300, 1.0)
+    _sine(a2, 440, 1.0)
+
+    beats, beat_files = _render_two_beats(tmp_path, design, a1, a2)
+    out = tmp_path / "final.mp4"
+    tl = _timeline(beats, IRMix(), out, design=design)
+
+    calls = {"n": 0}
+    real = assemble_mod._loudnorm_apply_arg
+    monkeypatch.setattr(
+        assemble_mod, "_loudnorm_apply_arg",
+        lambda *a, **k: calls.__setitem__("n", calls["n"] + 1) or real(*a, **k))
+
+    assemble(tl, beat_files, RenderOpts(quality="draft", workdir=tmp_path / "fin"))
+
+    assert out.exists() and _has_audio(out)
+    assert calls["n"] == 0                       # pure fast path: no loudnorm
+    assert "mix path" not in capsys.readouterr().out
+
+
+@pytestmark_integration
+def test_long_sfx_trimmed_to_timeline_duration(tmp_path):
+    """A long SFX anchored near the finale is capped so it can't extend the
+    mixed audio (and thus the muxed output) past the video track."""
+    design = _design()
+    a1, a2 = tmp_path / "g1.wav", tmp_path / "g2.wav"
+    _silence(a1, 1.0)
+    _silence(a2, 1.0)
+    # 1.5s SFX at abs t=1.3 would naturally run to 2.8s without a trim.
+    ding = tmp_path / "long_ding.wav"
+    _sine(ding, 1200, 1.5)
+
+    b1 = IRBeat(id="b1", duration=1.0, audio=str(a1), words_path="w.json",
+                words=[WordSpan(t0=0.0, t1=1.0, text="x")], segments=[], overlays=[])
+    b2 = IRBeat(id="b2", duration=1.0, audio=str(a2), words_path="w.json",
+                words=[WordSpan(t0=0.0, t1=1.0, text="y")], segments=[], overlays=[],
+                sfx=[IRSfx(src=str(ding), t=0.3, gain_db=0.0)])
+    opts = RenderOpts(quality="draft", workdir=tmp_path / "fin")
+    f1 = render_beat(b1, design, None, opts)
+    f2 = render_beat(b2, design, None, opts)
+
+    out = tmp_path / "final.mp4"
+    tl = _timeline([b1, b2], IRMix(), out, design=design)
+    assemble(tl, {"b1": f1, "b2": f2}, opts)
+
+    assert out.exists() and _has_audio(out)
+    # Trimmed to the timeline total -> output stays ~2.0s, not ~2.8s (an
+    # untrimmed SFX would blow the duration postcondition).
+    assert abs(_probe_dur(out) - 2.0) < 0.5

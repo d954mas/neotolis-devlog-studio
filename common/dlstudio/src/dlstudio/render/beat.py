@@ -54,6 +54,17 @@ if TYPE_CHECKING:                      # avoid a package<->submodule import cycl
 KB_ZOOM = 0.06                     # Ken Burns zoom-over-duration factor (legacy)
 DEFAULT_VERIFY_TOL = 0.35          # local fallback duration tolerance (s)
 
+# Common MP4 video timescale (ticks/sec) pinned on EVERY beat encode. assemble
+# stream-copies non-boundary beats but RE-ENCODES the beats adjacent to a
+# dip-to-black transition (assemble._reencode_fade_segment); a re-encode
+# invents a fresh timebase, so a copied beat and a re-encoded beat could land
+# in the same concat with different timescales and trip the concat demuxer
+# (non-monotonic DTS / timestamp jitter). Pinning the SAME timescale here AND
+# in _reencode_fade_segment keeps every segment on one timebase so copy+
+# re-encode concat is provably clean. 12800 is ffmpeg's conventional MP4 video
+# timescale and is shared via assemble importing this constant.
+VIDEO_TIMESCALE = 12800
+
 
 # ─── chunk resolver seam ───────────────────────────────────────────────────
 
@@ -453,6 +464,9 @@ def render_beat(beat: IRBeat, design: Design, _timeline: Timeline | None,
                # sample rates broke the demuxer's packet timing downstream).
                "-c:a", "aac", "-b:a", abitrate, "-ar", "48000",
                "-movflags", "+faststart",
+               # Pin a common video timescale so assemble's copy+re-encode
+               # concat stays on one timebase (see VIDEO_TIMESCALE).
+               "-video_track_timescale", str(VIDEO_TIMESCALE),
                "-color_primaries", "bt709", "-color_trc", "bt709",
                "-colorspace", "bt709",
                # -t caps to VO length; NEVER -shortest (an overlay PNG EOF

@@ -314,6 +314,80 @@ def test_memo_env_var_override(tmp_path, monkeypatch):
     assert not probe_mod.MEMO_PATH.exists()   # the (unused) default must stay untouched
 
 
+# ─── batched memo writes: N misses through build_registry -> 1 file write ──
+#
+# build_registry shares one _MemoSession across the whole pass, so the memo is
+# read once and written once instead of read-prune-rewritten per miss.
+
+def test_build_registry_batches_memo_to_one_write(tmp_path, monkeypatch):
+    files = {}
+    for i in range(5):
+        f = tmp_path / f"clip{i}.mp4"
+        f.write_bytes(f"v{i}".encode())
+        files[str(f)] = "video"
+
+    monkeypatch.setattr(subprocess, "run", _fake_ffprobe_video(duration="2.0"))
+
+    writes = {"n": 0}
+    real_write = probe_mod._atomic_write_memo
+
+    def counting_write(path, memo, **kw):
+        writes["n"] += 1
+        return real_write(path, memo, **kw)
+
+    monkeypatch.setattr(probe_mod, "_atomic_write_memo", counting_write)
+
+    reg = build_registry(files, probe=True, injected=None)
+    assert len(reg) == 5
+    assert all(reg[p].readable for p in files)
+    # 5 misses, but the whole registry flushes exactly once.
+    assert writes["n"] == 1
+
+
+def test_build_registry_second_pass_is_all_memo_hits(tmp_path, monkeypatch):
+    files = {}
+    for i in range(3):
+        f = tmp_path / f"c{i}.mp4"
+        f.write_bytes(f"data{i}".encode())
+        files[str(f)] = "video"
+
+    calls = {"n": 0}
+
+    def fake_run(*a, **k):
+        calls["n"] += 1
+        return subprocess.CompletedProcess(a[0], 0, stdout=json.dumps({
+            "format": {"duration": "2.0"},
+            "streams": [{"codec_type": "video", "width": 10, "height": 20}],
+        }), stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    build_registry(files, probe=True, injected=None)
+    assert calls["n"] == 3                     # first pass: 3 misses
+
+    # Second pass: the memo persisted at the first flush -> all hits, no probes.
+    reg2 = build_registry(files, probe=True, injected=None)
+    assert calls["n"] == 3
+    assert all(reg2[p].duration == 2.0 for p in files)
+
+
+def test_build_registry_no_probes_needed_never_writes(tmp_path, monkeypatch):
+    # Only font/other kinds (never ffprobed) -> the session stays clean and
+    # must not write the memo at all.
+    font = tmp_path / "f.ttf"
+    font.write_bytes(b"x")
+    other = tmp_path / "n.txt"
+    other.write_text("hi", encoding="utf-8")
+
+    writes = {"n": 0}
+    monkeypatch.setattr(probe_mod, "_atomic_write_memo",
+                        lambda *a, **k: writes.__setitem__("n", writes["n"] + 1))
+
+    build_registry({str(font): "font", str(other): "other"},
+                   probe=True, injected=None)
+    assert writes["n"] == 0
+
+
 def test_memo_atomic_write_leaves_no_temp_on_failure(tmp_path, monkeypatch):
     memo_path = tmp_path / "cache2" / "probe_memo.json"
 

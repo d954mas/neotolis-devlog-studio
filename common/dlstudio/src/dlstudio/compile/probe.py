@@ -22,8 +22,10 @@ to ffprobe ~60 times just to confirm nothing changed. `probe_asset` now
 consults an on-disk memo (data/finalize/.cache2/probe_memo.json, same dir the
 render cache uses; override via DLSTUDIO_PROBE_MEMO) keyed by absolute path ->
 {size, mtime_ns, probe fields}. Identical (size, mtime_ns) skips the
-subprocess entirely; anything else re-probes and updates the memo. See
-_memo_lookup/_memo_store/_save_memo below.
+subprocess entirely; anything else re-probes and updates the memo. build_registry
+shares one `_MemoSession` across the whole pass so the memo is read once and
+written once (N misses -> 1 flush) rather than rewritten per miss. See
+_entry_to_probe/_MemoSession/_save_memo below.
 """
 from __future__ import annotations
 
@@ -59,14 +61,21 @@ def classify(path: str) -> Kind:
     return "other"
 
 
-def probe_asset(path: str, kind: Kind) -> AssetProbe:
+def probe_asset(path: str, kind: Kind, *,
+                _session: "_MemoSession | None" = None) -> AssetProbe:
     """Run ffprobe on one asset. Missing files return exists=False with no
     facts; font/other kinds only get an existence check (no ffprobe).
 
-    image/video/audio kinds consult the on-disk memo first: identical
-    (size, mtime_ns) for this path returns the memoized AssetProbe without a
-    subprocess; otherwise ffprobe runs and the memo is updated. Missing files
-    are never memoized (a Path.exists() check above is already cheap)."""
+    image/video/audio kinds consult the memo first: identical (size, mtime_ns)
+    for this path returns the memoized AssetProbe without a subprocess;
+    otherwise ffprobe runs and the memo records the result. Missing files are
+    never memoized (a Path.exists() check above is already cheap).
+
+    `_session` batches memo I/O across a whole build_registry pass: the memo is
+    loaded once, lookups/records mutate it in memory, and the caller flushes it
+    ONCE at the end. When `_session` is None this is a standalone probe: it uses
+    a throwaway session and flushes only on a MISS (a pure hit needs no write —
+    keeping the standalone path's write behaviour identical to before)."""
     p = Path(path)
     if not p.exists():
         return AssetProbe(path=path, kind=kind, exists=False)
@@ -75,12 +84,18 @@ def probe_asset(path: str, kind: Kind) -> AssetProbe:
 
     st = p.stat()
     abs_path = str(p.resolve())
-    cached = _memo_lookup(path, abs_path, kind, st.st_size, st.st_mtime_ns)
+    session = _session if _session is not None else _MemoSession()
+
+    cached = session.lookup(path, abs_path, kind, st.st_size, st.st_mtime_ns)
     if cached is not None:
+        # In-session (build_registry) the LRU-recency bump is persisted at the
+        # batch flush; a standalone pure hit skips the write on purpose.
         return cached
 
     result = _ffprobe(path, kind)
-    _memo_store(abs_path, st.st_size, st.st_mtime_ns, result)
+    session.record(abs_path, st.st_size, st.st_mtime_ns, result)
+    if _session is None:
+        session.flush()
     return result
 
 
@@ -212,13 +227,12 @@ def _save_memo(memo: dict) -> None:
     _atomic_write_memo(_memo_path(), pruned)
 
 
-def _memo_lookup(path: str, abs_path: str, kind: Kind, size: int,
-                 mtime_ns: int) -> AssetProbe | None:
-    """Return the memoized AssetProbe iff (size, mtime_ns) still match --
-    the caller's `path` string (which may differ run-to-run even for the
-    same file, e.g. relative vs absolute) always wins over whatever was
-    stored, so the returned AssetProbe.path matches what the caller passed."""
-    entry = _load_memo().get(abs_path)
+def _entry_to_probe(entry: object, path: str, kind: Kind, size: int,
+                    mtime_ns: int) -> AssetProbe | None:
+    """Decode a memo entry back into an AssetProbe iff (size, mtime_ns) still
+    match. The caller's `path` string (which may differ run-to-run even for the
+    same file, e.g. relative vs absolute) always wins over whatever was stored,
+    so the returned AssetProbe.path matches what the caller passed."""
     if not isinstance(entry, dict):
         return None
     if entry.get("size") != size or entry.get("mtime_ns") != mtime_ns:
@@ -235,13 +249,41 @@ def _memo_lookup(path: str, abs_path: str, kind: Kind, size: int,
     return asset
 
 
-def _memo_store(abs_path: str, size: int, mtime_ns: int, probe: AssetProbe) -> None:
-    """Memoize a successful probe or a stable readable=False result (both
-    hold for as long as size+mtime_ns don't change). Never called for
-    missing files -- probe_asset returns before reaching here."""
-    memo = _load_memo()
-    memo[abs_path] = {"size": size, "mtime_ns": mtime_ns, "probe": probe.model_dump()}
-    _save_memo(memo)
+class _MemoSession:
+    """In-memory memo accumulator for a single probing pass.
+
+    Collapses the old read-prune-rewrite-per-miss into ONE flush: the on-disk
+    memo is loaded once, lookups and records mutate the in-memory copy, and
+    `flush()` prunes-by-existence + writes atomically exactly once at the end
+    (build_registry owns that flush). A hit reinserts its key so the most-
+    recently-used entries sort last and survive the size-cap prune (LRU)."""
+
+    def __init__(self) -> None:
+        self.memo: dict = _load_memo()
+        self.dirty: bool = False
+
+    def lookup(self, path: str, abs_path: str, kind: Kind, size: int,
+               mtime_ns: int) -> AssetProbe | None:
+        asset = _entry_to_probe(self.memo.get(abs_path), path, kind, size, mtime_ns)
+        if asset is not None:
+            # LRU recency bump: move the key to the end (most-recently-used).
+            self.memo[abs_path] = self.memo.pop(abs_path)
+            self.dirty = True
+        return asset
+
+    def record(self, abs_path: str, size: int, mtime_ns: int,
+               probe: AssetProbe) -> None:
+        """Memoize a successful probe or a stable readable=False result (both
+        hold for as long as size+mtime_ns don't change)."""
+        self.memo[abs_path] = {"size": size, "mtime_ns": mtime_ns,
+                               "probe": probe.model_dump()}
+        self.dirty = True
+
+    def flush(self) -> None:
+        """Prune-by-existence + atomic write, but only if anything changed."""
+        if self.dirty:
+            _save_memo(self.memo)
+            self.dirty = False
 
 
 def build_registry(
@@ -252,7 +294,9 @@ def build_registry(
 ) -> dict[str, AssetProbe]:
     """Resolve {path: kind} into {path: AssetProbe}.
 
-    probe=True:  ffprobe each path.
+    probe=True:  ffprobe each path, sharing ONE _MemoSession so the memo is
+                 read once and written once for the whole registry (N misses ->
+                 1 file write) instead of a full read-prune-rewrite per miss.
     probe=False: use `injected[path]` when present; otherwise a cheap
                  Path.exists() check with no media facts (lets tests inject
                  only the media probes they assert on and rely on real fixture
@@ -260,11 +304,14 @@ def build_registry(
     """
     injected = injected or {}
     out: dict[str, AssetProbe] = {}
+    session = _MemoSession() if probe else None
     for path, kind in paths.items():
         if probe:
-            out[path] = probe_asset(path, kind)
+            out[path] = probe_asset(path, kind, _session=session)
         elif path in injected:
             out[path] = injected[path]
         else:
             out[path] = AssetProbe(path=path, kind=kind, exists=Path(path).exists())
+    if session is not None:
+        session.flush()
     return out
