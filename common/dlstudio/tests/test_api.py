@@ -597,13 +597,46 @@ def test_parallel_process_take_jobs_same_beat_serialize(light_client, monkeypatc
         job_ids.append(r.json()["job_id"])
 
     for jid in job_ids:
-        assert _await_job(client, jid)["status"] == "done"
+        done = _await_job(client, jid)
+        assert done["status"] == "done", done
     assert state["max_active"] == 1, "two takes of one beat overlapped"
 
 
 def test_jobs_unknown_id_404(light_client):
     client, _, _ = light_client
     assert client.get("/api/jobs/does-not-exist").status_code == 404
+
+
+# ─── safe_join vs Windows extended-length resolution (0.7/0.9 flake) ─────────
+
+def test_safe_join_tolerates_extended_length_resolution(tmp_path, monkeypatch):
+    """Under concurrent dir churn (two Studio jobs racing in data/finalize),
+    Windows Path.resolve() transiently returns the `\\\\?\\`-prefixed
+    extended form for one path and the plain form for another; relative_to
+    then fails and safe_join rejected the beat's OWN declared paths. Pin
+    that the containment check canonicalizes the prefix."""
+    from dlstudio.api.paths import safe_join
+
+    real_resolve = Path.resolve
+
+    def extended_for_wav(self, strict=False):
+        r = real_resolve(self, strict)
+        if self.name.endswith(".wav") and not str(r).startswith("\\\\?\\"):
+            return Path("\\\\?\\" + str(r))
+        return r
+
+    monkeypatch.setattr(Path, "resolve", extended_for_wav)
+    got = safe_join(tmp_path, "data/finalize/b01_audio.wav")
+    assert got is not None
+    assert not str(got).startswith("\\\\?\\")
+
+
+def test_safe_join_still_rejects_traversal(tmp_path):
+    from dlstudio.api.paths import safe_join
+
+    assert safe_join(tmp_path, "../evil.wav") is None
+    assert safe_join(tmp_path, "C:/evil.wav") is None
+    assert safe_join(tmp_path, "data/../../evil.wav") is None
 
 
 def test_jobmanager_caps_finished_jobs():

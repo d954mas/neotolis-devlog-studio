@@ -32,6 +32,25 @@ def safe_component(name: str) -> str | None:
     return name
 
 
+def _strip_extended_prefix(p: Path) -> Path:
+    """Normalize Windows extended-length forms (`\\\\?\\C:\\...`,
+    `\\\\?\\UNC\\host\\...`) back to the plain form.
+
+    Under CONCURRENT directory creation/removal (two Studio jobs churning
+    data/finalize), `Path.resolve()` on Windows can transiently return the
+    `\\\\?\\`-prefixed form for one path and the plain form for another —
+    making `relative_to` fail for a path that IS inside the root, so
+    `safe_join` intermittently rejected the beat's own declared wav/words
+    paths. Canonicalizing the prefix keeps the containment check about the
+    actual path, not about which form the resolver happened to emit."""
+    s = str(p)
+    if s.startswith("\\\\?\\UNC\\"):
+        return Path("\\\\" + s[8:])
+    if s.startswith("\\\\?\\"):
+        return Path(s[4:])
+    return p
+
+
 def safe_join(root: Path, rel: str) -> Path | None:
     """Resolve `rel` under `root`. Returns the resolved absolute Path (which
     need not exist) when it stays inside `root`, else None.
@@ -48,10 +67,17 @@ def safe_join(root: Path, rel: str) -> Path | None:
     # "under root" — reject before any resolution.
     if p.is_absolute() or p.drive or p.anchor not in ("", "/", "\\"):
         return None
-    root_r = root.resolve()
-    candidate = (root_r / p).resolve()
-    try:
-        candidate.relative_to(root_r)
-    except ValueError:
-        return None
-    return candidate
+    root_r = _strip_extended_prefix(root.resolve())
+    # Two attempts: under concurrent create/delete churn Windows can also
+    # transiently resolve THROUGH a just-deleted directory (an NTFS
+    # `C:\\$Extend\\$Deleted\\...` tombstone path). One immediate re-resolve
+    # sees the settled tree; a genuine traversal fails both times.
+    candidate = None
+    for _ in range(2):
+        candidate = _strip_extended_prefix((root_r / p).resolve())
+        try:
+            candidate.relative_to(root_r)
+            return candidate
+        except ValueError:
+            continue
+    return None
