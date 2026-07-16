@@ -208,7 +208,11 @@ export interface ProcessTakeRequest {
 
 export interface RenderBeatRequest {
   beat_id: string;
-  width?: number;
+  /** Named profile ("540p", "1080p", "4k", …) or a literal pixel width.
+   * Prefer the named profiles: the server resolves them orientation-aware
+   * through ONE table shared with the CLI (defect 0.6), so the webui must
+   * never compute pixel sizes itself. */
+  width?: number | string;
   quality?: string;
 }
 

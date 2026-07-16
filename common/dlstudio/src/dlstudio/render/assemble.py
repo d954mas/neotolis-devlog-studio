@@ -396,12 +396,30 @@ def _vo_stem_path(beat_file: Path) -> Path:
     return beat_file.with_name(beat_file.stem + "_vo_stem.wav")
 
 
+# A beat's IR duration IS its VO audio duration (compile._beat_duration), and
+# the stem is a byte-copy of that audio — so a healthy stem matches the IR
+# duration almost exactly. The tolerance only absorbs container metadata
+# rounding, mirroring render/beat's single-encode budget.
+_STEM_DURATION_TOL = 0.35
+
+
+def _stem_matches_beat(stem: Path, expected_dur: float) -> bool:
+    """Defect 0.2: mere existence of `<beat>_vo_stem.wav` proves nothing —
+    it may be a leftover from a different take/render. Trust it only if its
+    probed duration matches the beat's IR duration."""
+    actual = _probe_segment_duration(stem)
+    if actual is None:
+        return False
+    return abs(actual - expected_dur) <= _STEM_DURATION_TOL
+
+
 def _extract_vo_stem(beat_file: Path, tmp: Path, out_path: Path,
                      temps: list[Path]) -> Path:
-    """Fallback when a beat's VO stem is absent (e.g. the MP4 came straight
-    from the cache, which stores only the video): pull the audio back out of
-    the beat MP4, with a warning."""
-    print(f"[assemble] WARNING: VO stem missing for {beat_file.name}; "
+    """Fallback when a beat's VO stem is absent or fails the duration match
+    (a stale leftover): pull the audio back out of the beat MP4, with a
+    warning. (Cache entries publish/restore the MP4+stem pair since entry
+    format 2, so this mostly covers manually deleted/edited files.)"""
+    print(f"[assemble] WARNING: VO stem missing or stale for {beat_file.name}; "
           f"extracting audio from the beat MP4 (fallback).")
     dst = tmp / f".{out_path.stem}_voext_{beat_file.stem}.wav"
     temps.append(dst)
@@ -421,11 +439,15 @@ def _build_audio_mix(timeline: Timeline, beat_files: dict[str, Path],
     beats = timeline.beats
     placements = {p.beat_id: p.t0 for p in timeline.placements}
 
-    # 1. VO bus: every stem delayed to its beat start, summed.
+    # 1. VO bus: every stem delayed to its beat start, summed. A stem that
+    #    is absent OR fails the duration match (a stale leftover from another
+    #    take) is replaced by audio extracted from the beat MP4 itself — the
+    #    MP4 just passed its own VQ-SYNC postcondition, so it is the ground
+    #    truth the mix may trust (defect 0.2).
     vo_labels: list[str] = []
     for b in beats:
         stem = _vo_stem_path(beat_files[b.id])
-        if not stem.exists():
+        if not stem.exists() or not _stem_matches_beat(stem, b.duration):
             stem = _extract_vo_stem(beat_files[b.id], tmp, out_path, temps)
         idx = inputs.add(["-i", str(stem)])
         lbl = graph.new_label("vo")

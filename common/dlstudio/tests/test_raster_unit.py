@@ -156,6 +156,44 @@ def test_renders_without_project_fonts(design):
     assert (arr != np.array(bg)).any(), "expected the fallback font to actually draw ink"
 
 
+# ─── 0.10: the process font cache must notice an on-disk font replacement ──
+
+def test_font_cache_invalidates_when_file_replaced(tmp_path, monkeypatch):
+    """0.10 regression: a long-lived process (`dl2 studio`) must reload a
+    font file replaced on the SAME path. The old lru_cache keyed on path
+    alone, so the stale font was served forever — even under --no-cache."""
+    from dlstudio.render.raster import _util
+
+    font_file = tmp_path / "main.ttf"
+    font_file.write_bytes(b"not-a-real-font-v1")
+    design = Design(
+        resolution=RESOLUTION,
+        palette=Palette(tokens={"bg": "#000000", "text": "#ffffff"}),
+        fonts=Fonts(main=str(font_file)),
+    )
+
+    loads: list[str] = []
+    sentinel_font = object()
+
+    def counting_truetype(path, size, *a, **k):
+        # A stub, not the real parser: this test pins the CACHE KEYING only
+        # (per-identity misses), independent of how loadability is handled.
+        loads.append(str(path))
+        return sentinel_font
+
+    monkeypatch.setattr(_util.ImageFont, "truetype", counting_truetype)
+    _util._load_font_cached.cache_clear()
+
+    _util.load_font(design, "main", 40)
+    _util.load_font(design, "main", 40)
+    assert len(loads) == 1, "unchanged file must stay cached"
+
+    # Replace the font ON THE SAME PATH (new bytes -> new size/mtime).
+    font_file.write_bytes(b"not-a-real-font-v2-with-longer-bytes")
+    _util.load_font(design, "main", 40)
+    assert len(loads) == 2, "replaced file must be a cache miss and reload"
+
+
 # ─── Decoration Layout coupling: Plate wires text geometry, other content
 # types degrade to a documented generic fallback rather than crashing ──────
 

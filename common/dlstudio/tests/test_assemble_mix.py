@@ -450,6 +450,39 @@ def test_missing_vo_stem_falls_back_to_beat_audio(tmp_path, capsys):
 
 
 @pytestmark_integration
+def test_stale_vo_stem_rejected_and_reextracted(tmp_path, capsys):
+    """0.2 regression: an on-disk `<beat>_vo_stem.wav` whose duration does
+    not match the beat (a leftover from another take/render) must NOT be
+    trusted just because it exists — assemble falls back to extracting the
+    audio from the beat MP4 (the file that just passed VQ-SYNC), keeping the
+    mixed edit at its true duration instead of inheriting stale audio."""
+    design = _design()
+    a1, a2 = tmp_path / "st1.wav", tmp_path / "st2.wav"
+    _sine(a1, 300, 1.0)
+    _sine(a2, 400, 1.0)
+    music = tmp_path / "m.wav"
+    _sine(music, 800, 2.0)
+
+    beats, beat_files = _render_two_beats(tmp_path, design, a1, a2)
+    # Overwrite b1's stem with a 3s wav — same path, wrong duration (the
+    # "video A + audio B" desync shape).
+    stale_stem = beat_files["b1"].with_name("b1_vo_stem.wav")
+    _sine(stale_stem, 999, 3.0)
+
+    mix = IRMix(music=[IRMusicSpan(src=str(music), t0=0.0, t1=2.0, duck=False)])
+    out = tmp_path / "final.mp4"
+    tl = _timeline(beats, mix, out, design=design)
+
+    assemble(tl, beat_files, RenderOpts(quality="draft", workdir=tmp_path / "fin"))
+
+    assert out.exists() and _has_audio(out)
+    # The stale 3s stem would have dragged the mixed audio past the edit's
+    # 2s; the rejected stem keeps the output at the true duration.
+    assert abs(_probe_dur(out) - 2.0) < 0.5
+    assert "VO stem missing or stale" in capsys.readouterr().out
+
+
+@pytestmark_integration
 def test_sfx_placed_in_mix(tmp_path):
     """An SFX one-shot anchored inside beat 2 lands in the mixed output at its
     absolute time (placement.t0 + sfx.t)."""

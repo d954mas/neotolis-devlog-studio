@@ -8,6 +8,7 @@ implementation detail of `render.raster`; the public surface is
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -69,8 +70,27 @@ def font_path(design: Design, role: str) -> str | None:
     return value or fonts.main
 
 
+def _font_identity(path: str | None) -> tuple[int, int] | None:
+    """(size, mtime_ns) of the font file, or None when it's missing.
+
+    Part of the process font-cache key (defect 0.10): a long-lived process
+    (`dl2 studio`, watch mode) must notice a font file replaced on disk under
+    the same path — a path-only lru_cache key served the OLD font forever,
+    even under --no-cache."""
+    if not path:
+        return None
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (st.st_size, st.st_mtime_ns)
+
+
 @lru_cache(maxsize=None)
-def _load_font_cached(path: str | None, size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+def _load_font_cached(path: str | None, size: int,
+                      identity: tuple[int, int] | None) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    """`identity` is unused in the body on purpose — it exists solely to make
+    an edited font file (new size/mtime) a cache MISS."""
     size = max(1, int(size))
     if path:
         try:
@@ -87,7 +107,8 @@ def _load_font_cached(path: str | None, size: int) -> ImageFont.FreeTypeFont | I
 
 
 def load_font(design: Design, role: str, size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    return _load_font_cached(font_path(design, role), size)
+    path = font_path(design, role)
+    return _load_font_cached(path, size, _font_identity(path))
 
 
 # ─── Text measurement ────────────────────────────────────────────────────

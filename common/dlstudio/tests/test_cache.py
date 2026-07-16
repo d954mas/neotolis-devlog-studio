@@ -34,6 +34,15 @@ def _write(path: Path, content: bytes = b"hello") -> None:
     path.write_bytes(content)
 
 
+def _write_pair(mp4: Path, content: bytes = b"hello",
+                stem_content: bytes | None = None) -> None:
+    """A rendered beat on disk is an MP4 + its `<stem>_vo_stem.wav` sibling
+    (render_beat's contract); entry format 2 caches the PAIR, so tests that
+    publish must stage both halves."""
+    _write(mp4, content)
+    _write(cache.vo_stem_sibling(mp4), stem_content or (b"stem:" + content))
+
+
 # ─── beat_key: stability & sensitivity to each input dimension ─────────
 
 def test_beat_key_stable_across_calls():
@@ -207,16 +216,83 @@ def test_c1_editing_plate_text_changes_beat_key(tmp_path):
     assert _key("HELLO") != _key("GOODBYE")
 
 
-# ─── get/put roundtrip ──────────────────────────────────────────────────
+# ─── 0.10: font files are identity inputs; entry format is a key input ────
 
-def test_put_get_roundtrip(tmp_path):
+def _design_with_fonts(main: str, bold: str | None = None,
+                       accent: str | None = None):
+    from dlstudio.model import Design, Fonts, Palette
+
+    return Design(
+        resolution=(1920, 1080),
+        palette=Palette(tokens={"bg": "#000000", "text": "#ffffff"}),
+        fonts=Fonts(main=main, bold=bold, accent=accent),
+    )
+
+
+def test_beat_key_changes_when_font_file_replaced_same_path(tmp_path):
+    """0.10 regression: replacing main.ttf ON THE SAME PATH must invalidate
+    the beat — the design JSON only hashes the path string, so the font FILE
+    identity has to be a separate key input."""
+    font = tmp_path / "main.ttf"
+    font.write_bytes(b"font-v1")
+    design = _design_with_fonts(str(font))
+    beat = make_ir_beat()
+    k1 = cache.beat_key(beat, design, quality="draft", width=None, gpu=False)
+
+    time.sleep(0.01)
+    font.write_bytes(b"font-v2-different-bytes")
+    k2 = cache.beat_key(beat, design, quality="draft", width=None, gpu=False)
+    assert k1 != k2
+
+
+def test_beat_key_covers_bold_and_accent_font_files(tmp_path):
+    main = tmp_path / "main.ttf"
+    bold = tmp_path / "bold.ttf"
+    accent = tmp_path / "accent.ttf"
+    for f in (main, bold, accent):
+        f.write_bytes(b"v1")
+    design = _design_with_fonts(str(main), str(bold), str(accent))
+    beat = make_ir_beat()
+    base = cache.beat_key(beat, design, quality="draft", width=None, gpu=False)
+
+    for f in (bold, accent):
+        time.sleep(0.01)
+        f.write_bytes(f.read_bytes() + b"-changed")
+        k = cache.beat_key(beat, design, quality="draft", width=None, gpu=False)
+        assert k != base, f"replacing {f.name} did not change the key"
+        base = k
+
+
+def test_design_font_paths_role_order_and_none_skipping(tmp_path):
+    d_all = _design_with_fonts("m.ttf", "b.ttf", "a.ttf")
+    assert cache._design_font_paths(d_all) == ["m.ttf", "b.ttf", "a.ttf"]
+    d_main_only = _design_with_fonts("m.ttf")
+    assert cache._design_font_paths(d_main_only) == ["m.ttf"]
+
+
+def test_beat_key_changes_with_entry_format_version(monkeypatch):
+    """The block-2 contract: ONE version bump turns every old entry into a
+    miss. Pin that the version constant really feeds the hash."""
+    beat, design = make_ir_beat(), make_design()
+    k_now = cache.beat_key(beat, design, quality="draft", width=None, gpu=False)
+    monkeypatch.setattr(cache, "ENTRY_FORMAT_VERSION", cache.ENTRY_FORMAT_VERSION + 1)
+    k_next = cache.beat_key(beat, design, quality="draft", width=None, gpu=False)
+    assert k_now != k_next
+
+
+# ─── get/put roundtrip (entry = MP4 + VO stem pair) ─────────────────────
+
+def test_put_get_roundtrip_restores_both_halves(tmp_path):
     rendered = tmp_path / "rendered.mp4"
-    _write(rendered, b"fake-mp4-bytes")
+    _write_pair(rendered, b"fake-mp4-bytes", stem_content=b"fake-stem-bytes")
     cache.put("somekey", rendered)
 
     out = tmp_path / "out" / "beat.mp4"
     assert cache.get("somekey", out) is True
     assert out.read_bytes() == b"fake-mp4-bytes"
+    # 0.2: the hit must materialize the VO stem next to the MP4 too — the
+    # mix path reads <out>_vo_stem.wav, and a stale one desyncs the audio.
+    assert cache.vo_stem_sibling(out).read_bytes() == b"fake-stem-bytes"
 
 
 def test_get_miss_returns_false(tmp_path):
@@ -227,25 +303,51 @@ def test_get_miss_returns_false(tmp_path):
 
 def test_has_reflects_put(tmp_path):
     rendered = tmp_path / "rendered.mp4"
-    _write(rendered)
+    _write_pair(rendered)
     assert cache.has("k1") is False
     cache.put("k1", rendered)
     assert cache.has("k1") is True
+
+
+def test_put_without_stem_sibling_publishes_nothing(tmp_path):
+    """An MP4 whose VO stem sibling is missing must NOT become an entry —
+    an MP4-only entry is exactly the 0.2 defect shape."""
+    rendered = tmp_path / "rendered.mp4"
+    _write(rendered)  # no stem sibling on purpose
+    cache.put("lonely", rendered)
+    assert cache.has("lonely") is False
+    assert not (cache.CACHE_DIR / "lonely.mp4").exists()
+
+
+def test_incomplete_entry_is_a_miss_and_copies_nothing(tmp_path):
+    """A cache dir containing only the MP4 half (e.g. hand-pruned, or a
+    pre-format-2 leftover under a colliding name) must behave as a miss."""
+    rendered = tmp_path / "rendered.mp4"
+    _write_pair(rendered)
+    cache.put("halfkey", rendered)
+    (cache.CACHE_DIR / "halfkey.wav").unlink()
+
+    out = tmp_path / "out" / "beat.mp4"
+    assert cache.has("halfkey") is False
+    assert cache.get("halfkey", out) is False
+    assert not out.exists()
+    assert not cache.vo_stem_sibling(out).exists()
 
 
 # ─── atomicity ──────────────────────────────────────────────────────────
 
 def test_put_leaves_no_tmp_file(tmp_path):
     rendered = tmp_path / "rendered.mp4"
-    _write(rendered)
+    _write_pair(rendered)
     cache.put("atomickey", rendered)
     assert list(cache.CACHE_DIR.glob("*.tmp-*")) == []
     assert (cache.CACHE_DIR / "atomickey.mp4").exists()
+    assert (cache.CACHE_DIR / "atomickey.wav").exists()
 
 
 def test_put_cleans_up_tmp_on_copy_failure(tmp_path, monkeypatch):
     rendered = tmp_path / "rendered.mp4"
-    _write(rendered)
+    _write_pair(rendered)
 
     def boom(src, dst):
         Path(dst).write_bytes(b"partial")  # tmp file gets created...
@@ -256,6 +358,28 @@ def test_put_cleans_up_tmp_on_copy_failure(tmp_path, monkeypatch):
         cache.put("failkey", rendered)
 
     assert not (cache.CACHE_DIR / "failkey.mp4").exists()
+    assert not (cache.CACHE_DIR / "failkey.wav").exists()
+    assert list(cache.CACHE_DIR.glob("*.tmp-*")) == []
+
+
+def test_put_mp4_copy_failure_leaves_no_visible_entry(tmp_path, monkeypatch):
+    """The stem publishes first; if the MP4 copy then fails, `has()` must
+    still be False (the pair is incomplete, the orphan stem is invisible)."""
+    rendered = tmp_path / "rendered.mp4"
+    _write_pair(rendered)
+    real_copyfile = cache.shutil.copyfile
+
+    def boom_on_mp4(src, dst):
+        if str(src).endswith(".mp4"):
+            raise OSError("disk full (simulated)")
+        return real_copyfile(src, dst)
+
+    monkeypatch.setattr(cache.shutil, "copyfile", boom_on_mp4)
+    with pytest.raises(OSError):
+        cache.put("mp4fail", rendered)
+
+    assert cache.has("mp4fail") is False
+    assert not (cache.CACHE_DIR / "mp4fail.mp4").exists()
     assert list(cache.CACHE_DIR.glob("*.tmp-*")) == []
 
 
@@ -264,7 +388,7 @@ def test_put_atomic_visibility_during_slow_copy(tmp_path, monkeypatch):
     absent -- never a partially-written file mid-publish."""
     rendered = tmp_path / "rendered.mp4"
     payload = b"X" * 2_000_000
-    _write(rendered, payload)
+    _write_pair(rendered, payload)
     real_copyfile = cache.shutil.copyfile
 
     def slow_copyfile(src, dst):
@@ -302,8 +426,10 @@ def test_concurrent_put_same_key_different_workers(tmp_path, monkeypatch):
     content_a = b"A" * 300_000
     content_b = b"B" * 300_000
     src_a, src_b = tmp_path / "a.mp4", tmp_path / "b.mp4"
-    src_a.write_bytes(content_a)
-    src_b.write_bytes(content_b)
+    # Real racers on ONE key carry byte-identical stems (the stem is a copy
+    # of the beat's input audio, which is part of the key) — mirror that.
+    _write_pair(src_a, content_a, stem_content=b"same-stem")
+    _write_pair(src_b, content_b, stem_content=b"same-stem")
 
     pid_counter = itertools.count(10_000)
     pid_lock = threading.Lock()
@@ -337,7 +463,7 @@ def test_cache_dir_env_var_override(tmp_path, monkeypatch):
     override_dir = tmp_path / "env-cache"
     monkeypatch.setenv(cache.CACHE_DIR_ENV_VAR, str(override_dir))
     rendered = tmp_path / "rendered.mp4"
-    _write(rendered)
+    _write_pair(rendered)
     cache.put("envkey", rendered)
     assert (override_dir / "envkey.mp4").exists()
     # CACHE_DIR itself (monkeypatched to a *different* tmp dir by the
@@ -358,18 +484,18 @@ def test_info_empty():
 def test_info_counts_entries_and_bytes(tmp_path):
     for i in range(3):
         rendered = tmp_path / f"r{i}.mp4"
-        _write(rendered, b"x" * (100 * (i + 1)))
+        _write_pair(rendered, b"x" * (100 * (i + 1)), stem_content=b"s" * 10)
         cache.put(f"key{i}", rendered)
     result = cache.info()
-    assert result.entries == 3
-    assert result.total_bytes == 100 + 200 + 300
+    assert result.entries == 3  # a pair is ONE entry
+    assert result.total_bytes == (100 + 200 + 300) + 3 * 10
 
 
 def test_prune_removes_old_entries_only(tmp_path):
     old = tmp_path / "old.mp4"
     new = tmp_path / "new.mp4"
-    _write(old)
-    _write(new)
+    _write_pair(old)
+    _write_pair(new)
     cache.put("oldkey", old)
     cache.put("newkey", new)
 
@@ -380,7 +506,9 @@ def test_prune_removes_old_entries_only(tmp_path):
     removed = cache.prune(older_than_days=10)
     assert removed == 1
     assert not old_path.exists()
+    assert not (cache.CACHE_DIR / "oldkey.wav").exists()  # pair goes together
     assert (cache.CACHE_DIR / "newkey.mp4").exists()
+    assert (cache.CACHE_DIR / "newkey.wav").exists()
 
 
 def test_prune_rejects_negative_days():

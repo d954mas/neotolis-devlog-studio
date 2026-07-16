@@ -4,7 +4,6 @@ import type {
   CheckReport,
   Feedback,
   Project,
-  ProjectDesign,
   Timeline,
 } from "./api/types";
 import type { SessionTake } from "./lib/takes";
@@ -21,14 +20,6 @@ type RenderState = "idle" | "running" | "done" | "error";
 interface RenderInfo {
   state: RenderState;
   msg: string;
-}
-
-function draftWidth(design?: ProjectDesign): number {
-  if (!design) return 960;
-  const [w, h] = design.resolution;
-  let dw = Math.round((w * 540) / h);
-  if (dw % 2) dw += 1;
-  return Math.max(2, dw);
 }
 
 function resultPath(result: unknown): string | null {
@@ -164,7 +155,9 @@ export function App() {
 
   // ── render action ────────────────────────────────────────────────────────
   async function renderBeat(beatId: string) {
-    const width = draftWidth(project?.design);
+    // Named profile, resolved server-side through the ONE orientation-aware
+    // table the CLI uses (defect 0.6) — the webui never computes pixels.
+    const width = "540p";
     const ctrl = new AbortController();
     renderAborters.current.add(ctrl);
     setRenderInfo((s) => ({

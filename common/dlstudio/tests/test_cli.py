@@ -189,6 +189,31 @@ def test_resize_design_preset():
     assert resized.resolution == (960, 540)
 
 
+# 0.6: the ONE explicit profile table from PLAN_STUDIO_V2 — presets resolve
+# orientation-aware; a vertical "4k" is the transposed standard (2160x3840),
+# never "width 3840" (which produced the 3840x6826 x264 OOM class).
+@pytest.mark.parametrize("orig, preset, expected", [
+    ((1920, 1080), "540p", (960, 540)),      # landscape draft
+    ((1920, 1080), "1080p", (1920, 1080)),   # landscape final
+    ((1920, 1080), "4k", (3840, 2160)),      # landscape 4k
+    ((1080, 1920), "540p", (304, 540)),      # vertical draft
+    ((1080, 1920), "1080p", (1080, 1920)),   # vertical final
+    ((1080, 1920), "4k", (2160, 3840)),      # vertical 4k
+])
+def test_resize_design_profile_table(orig, preset, expected):
+    design = make_design(*orig)
+    assert cli._resize_design(design, preset).resolution == expected
+
+
+def test_resize_design_vertical_4k_stays_encoder_safe():
+    """Regression pin for the exact defect: vertical 4k used to compute
+    3840x6826 (width-anchored), which exceeds the 4096px VQ-RES ceiling."""
+    design = make_design(1080, 1920)
+    w, h = cli._resize_design(design, "4k").resolution
+    assert (w, h) == (2160, 3840)
+    assert max(w, h) <= 4096
+
+
 def test_resize_design_literal_int_rounds_even():
     design = make_design(1920, 1080)
     resized = cli._resize_design(design, 641)
@@ -422,13 +447,25 @@ def test_compose_worker_cache_miss_falls_through_to_render(tmp_path, monkeypatch
         )
 
 
+def _prime_cache_pair(key: str, base: Path, content: bytes = b"cached-beat-bytes") -> None:
+    """Publish a complete (MP4 + VO stem) pair under `key` — entry format 2
+    requires the pair, so priming tests must stage both halves the way a
+    real render_beat leaves them on disk."""
+    base.parent.mkdir(parents=True, exist_ok=True)
+    base.write_bytes(content)
+    dl_cache.vo_stem_sibling(base).write_bytes(b"stem:" + content)
+    dl_cache.put(key, base)
+
+
 def test_compose_worker_cache_miss_renders_and_populates_cache(tmp_path, monkeypatch):
     cache_dir = tmp_path / "cache"
 
     def fake_render_beat(beat, design, timeline, opts):
-        p = Path(opts.workdir) / f"{beat.id}_rendered.mp4"
+        # Real contract: MP4 in workdir + `<beat>_vo_stem.wav` sibling.
+        p = Path(opts.workdir) / f"{beat.id}.mp4"
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_bytes(b"freshly-rendered")
+        dl_cache.vo_stem_sibling(p).write_bytes(b"freshly-rendered-stem")
         return p
 
     monkeypatch.setattr(dl_render_mod, "render_beat", fake_render_beat)
@@ -442,7 +479,9 @@ def test_compose_worker_cache_miss_renders_and_populates_cache(tmp_path, monkeyp
     )
     assert "rendered" in msg
     assert out_path.read_bytes() == b"freshly-rendered"
-    assert any(cache_dir.glob("*.mp4"))
+    # 0.2: the cache published the PAIR and the hit materialized the stem too.
+    assert dl_cache.vo_stem_sibling(out_path).read_bytes() == b"freshly-rendered-stem"
+    assert any(cache_dir.glob("*.mp4")) and any(cache_dir.glob("*.wav"))
 
 
 def test_compose_worker_cache_hit_short_circuits_render(tmp_path, monkeypatch):
@@ -459,9 +498,7 @@ def test_compose_worker_cache_hit_short_circuits_render(tmp_path, monkeypatch):
     # always hashes width=design.resolution[0], never None, so the key here
     # must match that, not the raw (possibly-None) width_px a caller passes.
     key = dl_cache.beat_key(beat, design, quality="draft", width=design.resolution[0], gpu=False)
-    rendered = tmp_path / "prerendered.mp4"
-    rendered.write_bytes(b"already-rendered")
-    dl_cache.put(key, rendered)
+    _prime_cache_pair(key, tmp_path / "prerendered.mp4", b"already-rendered")
 
     out_path = tmp_path / "out" / "b01.mp4"
     msg = cli._compose_worker(beat, design, "draft", False, None, str(out_path), None)
@@ -681,9 +718,7 @@ def test_cmd_iter_stale_restores_missing_cached_beat_file(tmp_path, monkeypatch)
     )
 
     # Prime the cache as if a prior `dl2 iter` run rendered b01 successfully.
-    prerendered = tmp_path / "prerendered.mp4"
-    prerendered.write_bytes(b"cached-beat-bytes")
-    dl_cache.put(key, prerendered)
+    _prime_cache_pair(key, tmp_path / "prerendered.mp4")
     # ...but data/finalize/b01.mp4 was since deleted (e.g. workdir cleanup) --
     # cmd_iter must not have anything on disk for b01 at this point.
     assert not (project_root / "data" / "finalize" / "b01.mp4").exists()
@@ -707,10 +742,14 @@ def test_cmd_iter_stale_restores_missing_cached_beat_file(tmp_path, monkeypatch)
     assert restored.read_bytes() == b"cached-beat-bytes"
 
 
-def test_cmd_iter_stale_skips_restore_when_file_already_present(tmp_path, monkeypatch):
-    """If the beat file is already on disk, --stale must not needlessly
-    re-copy from cache (dl_cache.get is only a fallback for the missing
-    case)."""
+def test_cmd_iter_stale_replaces_existing_file_with_cache_artifact(tmp_path, monkeypatch):
+    """0.1 regression (PLAN_STUDIO_V2): on a cache hit, --stale must ALWAYS
+    materialize the exact cache artifact. An existing data/finalize/<beat>.mp4
+    may be a leftover from another resolution/quality/edit — its presence
+    proves nothing, and before the fix it silently reached assemble.
+
+    (Replaces test_cmd_iter_stale_skips_restore_when_file_already_present,
+    which pinned the defective skip-if-present behaviour.)"""
     cache_dir = tmp_path / "cache"
     monkeypatch.setattr(dl_cache, "CACHE_DIR", cache_dir)
 
@@ -730,23 +769,16 @@ def test_cmd_iter_stale_skips_restore_when_file_already_present(tmp_path, monkey
         beat, resized_design, quality="draft",
         width=resized_design.resolution[0], gpu=False,
     )
-    prerendered = tmp_path / "prerendered.mp4"
-    prerendered.write_bytes(b"cached-beat-bytes")
-    dl_cache.put(key, prerendered)
+    # The cache holds this key's true artifact (e.g. the 540p draft render)...
+    _prime_cache_pair(key, tmp_path / "prerendered.mp4", b"cached-540p-draft-bytes")
 
+    # ...but data/finalize/b01.mp4 currently holds SOMETHING ELSE (say, a
+    # leftover 1080p render from another invocation).
     out_dir = project_root / "data" / "finalize"
     out_dir.mkdir(parents=True, exist_ok=True)
     existing = out_dir / "b01.mp4"
-    existing.write_bytes(b"already-on-disk")
+    existing.write_bytes(b"leftover-from-another-resolution")
 
-    get_calls = []
-    real_get = dl_cache.get
-
-    def spy_get(k, p):
-        get_calls.append((k, p))
-        return real_get(k, p)
-
-    monkeypatch.setattr(dl_cache, "get", spy_get)
     monkeypatch.setattr(dl_render_mod, "render_beat",
                         lambda *a, **k: (_ for _ in ()).throw(
                             AssertionError("render_beat must not run for a cache-hit beat")))
@@ -757,8 +789,10 @@ def test_cmd_iter_stale_skips_restore_when_file_already_present(tmp_path, monkey
     code = cli.cmd_iter(args)
 
     assert code == 0
-    assert get_calls == []                       # no restore needed
-    assert existing.read_bytes() == b"already-on-disk"
+    # The on-disk file must now BE the cache artifact, not the leftover.
+    assert existing.read_bytes() == b"cached-540p-draft-bytes"
+    # ...and its VO stem pair came with it (0.2).
+    assert dl_cache.vo_stem_sibling(existing).read_bytes() == b"stem:cached-540p-draft-bytes"
 
 
 # ─── M2: `dl2 iter --no-cache` must actually bypass the cache ─────────────
@@ -790,9 +824,7 @@ def test_cmd_iter_no_cache_bypasses_existing_cache_entry(tmp_path, monkeypatch):
         beat, resized_design, quality="draft",
         width=resized_design.resolution[0], gpu=False,
     )
-    prerendered = tmp_path / "prerendered.mp4"
-    prerendered.write_bytes(b"stale-cached-bytes")
-    dl_cache.put(key, prerendered)
+    _prime_cache_pair(key, tmp_path / "prerendered.mp4", b"stale-cached-bytes")
 
     render_calls = []
 
@@ -885,9 +917,7 @@ def test_cmd_beats_reports_cached_after_plain_iter(tmp_path, monkeypatch, capsys
         beat, resized_design, quality="draft",
         width=resized_design.resolution[0], gpu=False,
     )
-    prerendered = tmp_path / "prerendered.mp4"
-    prerendered.write_bytes(b"cached-bytes")
-    dl_cache.put(key, prerendered)
+    _prime_cache_pair(key, tmp_path / "prerendered.mp4", b"cached-bytes")
 
     args = cli._build_parser().parse_args(["beats", dotted])
     code = cli.cmd_beats(args)

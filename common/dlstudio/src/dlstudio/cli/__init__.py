@@ -58,14 +58,20 @@ from . import verify as dl_verify
 
 CONFIG_NAME = "devlog.toml"
 
-_WIDTH_PRESETS = {
-    "360p": 640,
-    "540p": 960,
-    "720p": 1280,
-    "1080p": 1920,
-    "1440p": 2560,
-    "4k": 3840,
-}
+# Named resolution profiles (defect 0.6). CLI, Studio API and webui resolve
+# presets through this ONE table logic so they can never disagree:
+#
+#   draft tiers anchor the output HEIGHT (a 540-tall preview in either
+#   orientation — matches the Studio webui's preview size):
+#     landscape 540p = 960x540      vertical 540p = 304x540
+#   delivery tiers anchor the LONG side to the standard 16:9 long dimension
+#   (a vertical final is the transposed standard, NEVER "width 3840" — the
+#   3840x6826 x264 OOM class):
+#     landscape 1080p = 1920x1080   vertical 1080p = 1080x1920
+#     landscape 4k    = 3840x2160   vertical 4k    = 2160x3840
+_HEIGHT_ANCHORED_PRESETS = {"360p": 360, "540p": 540, "720p": 720}
+_LONG_SIDE_PRESETS = {"1080p": 1920, "1440p": 2560, "4k": 3840}
+_ALL_PRESETS = sorted({**_HEIGHT_ANCHORED_PRESETS, **_LONG_SIDE_PRESETS})
 
 _QUALITY_PRESETS = ("draft", "preview", "standard", "upload", "master")
 
@@ -186,26 +192,34 @@ def _load_edit(dotted: str) -> Edit:
 def _resize_design(design: Design, width_spec: str | int | None) -> Design:
     """Return a copy of `design` scaled to `width_spec`, aspect preserved.
 
-    `width_spec` is a preset name ("540p", "4k", ...) or a literal pixel
-    width. None returns `design` unchanged. Dimensions are rounded to even
-    pixels (x264 requirement).
+    `width_spec` is a preset name (resolved orientation-aware through the
+    profile table above — see the 0.6 note) or a literal pixel WIDTH.
+    None returns `design` unchanged. Dimensions are rounded to even pixels
+    (x264 requirement).
     """
     if width_spec is None:
         return design
-    if isinstance(width_spec, str) and width_spec in _WIDTH_PRESETS:
-        new_w = _WIDTH_PRESETS[width_spec]
+    orig_w, orig_h = design.resolution
+    if isinstance(width_spec, str) and width_spec in _HEIGHT_ANCHORED_PRESETS:
+        new_h = float(_HEIGHT_ANCHORED_PRESETS[width_spec])
+        new_w = new_h * orig_w / orig_h
+    elif isinstance(width_spec, str) and width_spec in _LONG_SIDE_PRESETS:
+        long_side = float(_LONG_SIDE_PRESETS[width_spec])
+        if orig_w >= orig_h:                     # landscape/square
+            new_w, new_h = long_side, long_side * orig_h / orig_w
+        else:                                    # vertical
+            new_h, new_w = long_side, long_side * orig_w / orig_h
     else:
         try:
-            new_w = int(width_spec)
+            new_w = float(int(width_spec))
         except (TypeError, ValueError):
             raise CliError(
-                f"--width must be an int or one of {sorted(_WIDTH_PRESETS)}, got {width_spec!r}"
+                f"--width must be an int or one of {_ALL_PRESETS}, got {width_spec!r}"
             )
-    orig_w, orig_h = design.resolution
-    new_h = round(new_w * orig_h / orig_w)
-    new_w = (new_w // 2) * 2
-    new_h = (new_h // 2) * 2
-    return design.model_copy(update={"resolution": (new_w, new_h)})
+        new_h = new_w * orig_h / orig_w
+    even_w = (round(new_w) // 2) * 2
+    even_h = (round(new_h) // 2) * 2
+    return design.model_copy(update={"resolution": (even_w, even_h)})
 
 
 def _add_render_flags(p: argparse.ArgumentParser) -> None:
@@ -475,13 +489,12 @@ def _iterate_render(
         for b in all_beats:
             key = dl_cache.beat_key(b, design, quality=quality, width=width_px, gpu=gpu)
             if dl_cache.has(key):
-                # Cache hit: nothing to render, but the beat_files[b.id] copy
-                # may have been deleted since the cache entry was written
-                # (e.g. data/finalize got cleaned). Restore it from cache so
-                # the missing-file check below doesn't fail a beat that is
-                # actually still cached.
-                if not beat_files[b.id].exists():
-                    dl_cache.get(key, beat_files[b.id])
+                # Cache hit: ALWAYS materialize from the cache (defect 0.1).
+                # An existing data/finalize/<beat>.mp4 proves nothing — it
+                # may be a leftover from another resolution/quality/edit and
+                # would silently reach assemble. The only file --stale may
+                # trust is the exact cache artifact for THIS key.
+                dl_cache.get(key, beat_files[b.id])
             else:
                 targets.append(b)
         print(f"[dl2] stale beats: {len(targets)}/{len(all_beats)}")
