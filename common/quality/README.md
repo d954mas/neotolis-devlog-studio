@@ -60,7 +60,7 @@ use the same rules advisorily:
 
 | Stage | Hard gate | Advisory only |
 |---|---|---|
-| Draft iteration (`dl iter`, `dl2 iter`, `--draft` compose) | VQ-SYNC/VQ-RES/VQ-WORDS/VQ-ASSET mechanical part (always runs via `check`) | everything else — note issues, don't block |
+| Draft iteration (`dl iter`, `dl2 iter`, `dl2 compose --quality draft`) | VQ-SYNC/VQ-RES/VQ-WORDS/VQ-ASSET mechanical part (always runs via `check`) | everything else — note issues, don't block |
 | Improve-loop review (`video-reviewer`/`vo-reviewer`) | none | whichever rules match what the beat touches |
 | Ship / final / upload render | all ten, plus `PIPELINE.md`'s orchestrator regression checklist and reel gate | — |
 

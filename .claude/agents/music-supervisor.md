@@ -58,22 +58,43 @@ sidechain implementation.
 
 ---
 
-## MUSICREGION PARAMETERS (beats.py-ready)
+## MUSICREGION + MIX.DUCK PARAMETERS (beats.py-ready)
 
-Starting points are the v2 model defaults; adjust and justify any deviation:
+Starting points are the v2 model defaults; adjust and justify any deviation.
+
+**These are two different pydantic models — don't mix them up.** `MusicRegion`
+has `extra=forbid`: passing a `Duck` field (e.g. `amount_db`) as a
+`MusicRegion(...)` kwarg raises a validation error, it does not silently set
+anything. Ducking *depth/threshold/timing* is edit-global
+(`edit.mix.duck`, one `Duck` per edit); a `MusicRegion` only carries a
+`duck: bool` switch for whether *that region* is ducked at all.
+
+### `MusicRegion(...)` — per-region fields
 
 | Field | Default | Note |
 |---|---|---|
+| `src` | *(required)* | path to the music file |
+| `from_beat` / `to_beat` | beat ids from IR `order` | span only the beats that need this cue; use multiple `MusicRegion`s for mood changes; both `None` = whole edit |
 | `gain_db` | **-18.0** | model default; raise toward -15 only for instrumental-only interludes with no VO; never above -12 (competes) |
-| `duck` | `True` | sidechain keyed by the VO stem |
-| `Duck.amount_db` | -12.0 | deepen to -16/-18 for dense or quiet VO sections |
-| `Duck.threshold_db` / attack / release | -30 dB / 120ms / 400ms | model defaults; rarely need changing |
 | `fade_in` | 1.0s | delay entry past the hook's first line unless it's an intentional stinger |
 | `fade_out` | 1.5s | align with the outro's final hold, not a hard cut |
-| `from_beat` / `to_beat` | beat ids from IR `order` | span only the beats that need this cue; use multiple `MusicRegion`s for mood changes |
 | `offset` | 0.0 | seek into the file so its own build/climax lines up with the beat's climax |
+| `duck` | `True` | bool switch only — is *this region* sidechain-ducked at all; the amount/threshold/timing of the duck live on `Mix.duck` below, never here |
 
 Output the actual `MusicRegion(...)` line(s), ready to paste into `beats.py`.
+
+### `Mix.duck` (edit-global `Duck`) fields — set once per edit, not per region
+
+| Field | Default | Note |
+|---|---|---|
+| `amount_db` | -12.0 | deepen to -16/-18 for dense or quiet VO sections |
+| `threshold_db` | -30.0 dB | model default; rarely needs changing |
+| `attack_ms` | 120ms | model default |
+| `release_ms` | 400ms | model default |
+
+If a deviation is needed, output it as `edit.mix.duck = Duck(amount_db=-16.0, ...)`
+(or the equivalent `Mix(duck=Duck(...))` construction) — never as a
+`MusicRegion(amount_db=...)` kwarg.
 
 ---
 
@@ -82,7 +103,7 @@ Output the actual `MusicRegion(...)` line(s), ready to paste into `beats.py`.
 - **Audible but not competing:** loudnorm-probe the assembled mix at a
   VO-heavy region; music must be perceptible without masking speech.
 - **Ducking depth check:** render/assemble the studio mix
-  (`dl2 render <edit> --width 540p --draft` or the assemble step) and
+  (`dl2 render <edit> --width 540p --quality draft` or the assemble step) and
   confirm the music level visibly drops during VO vs. VO-free gaps — cite
   the two loudness numbers, not "it sounds ducked."
 - **Energy curve match:** the climax beat's music section is the track's

@@ -46,9 +46,13 @@ gates weren't actually checked.
 ## WORKFLOW
 
 1. **Generate the skeleton:** run `dl2 publish <edit>` (backed by
-   `services/publish.py`). If unavailable yet in this workspace (Phase 4,
-   may not be built), fall back to reading `beats.py`/the IR directly for
-   beat order, titles, and timestamps — say you used the fallback path.
+   `services/publish.py`). Note the exact path it prints (`[dl2] youtube
+   package -> <path>`; default `data/publish/youtube_package.md`, or
+   wherever `--out` pointed) — step 7 updates this same file, not a new one.
+   If unavailable yet in this workspace (Phase 4, may not be built), fall
+   back to reading `beats.py`/the IR directly for beat order, titles, and
+   timestamps — say you used the fallback path, and target that same
+   default path when you write your own version.
 2. **Chapters:** pull beat `title`/`order`/timestamps from the IR
    (`dl2 ir <edit>`) or `beats.py`. Beat titles are internal shorthand —
    rewrite each into a short, viewer-facing chapter label, don't paste the
@@ -66,8 +70,13 @@ gates weren't actually checked.
 6. **Thumbnail slot:** reference where `thumbnail-designer`'s output lives
    (e.g. `data/publish/thumbnail*.png`); confirm it exists, flag if missing.
    Never generate or edit the thumbnail image yourself.
-7. **Write the package** to `data/publish/<name>_package.md` with the
-   `Write` tool — titles, description, tags, chapters, checklist.
+7. **Fill the skeleton in place:** `Read` the file generated in step 1, then
+   `Write` it back to that SAME path — filling in the judgment sections
+   (titles, description, tags, humanized chapters, checklist evidence) it
+   already scaffolded, keeping the generated chapters/timestamps and any
+   `WARNING (chapters)` block intact. Never write a second, differently-named
+   file (e.g. `<name>_package.md`) alongside it — the generated skeleton and
+   the finished package are the same file, one edit, not two artifacts.
 
 ---
 

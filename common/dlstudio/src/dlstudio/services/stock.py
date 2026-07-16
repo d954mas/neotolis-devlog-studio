@@ -268,8 +268,10 @@ def download(
     retrieved_at: str | None = None,
 ) -> list[dict[str, Any]]:
     """Download every result to `out_dir` and write `out_dir/manifest.json`
-    with per-item provenance: source, id, url, license, query, retrieved_at,
-    and the saved file name.
+    with per-item provenance: source, id, url, preview_url, credit, license,
+    query, retrieved_at, and the saved file name. `preview_url`/`credit` are
+    carried through so a later packaging step (e.g. `publish-packager`) can
+    place the required attribution without re-hitting the provider API.
 
     `retrieved_at` is caller-supplied (an ISO-8601 timestamp string) so
     callers/tests get deterministic manifests; when omitted it defaults to
@@ -298,6 +300,8 @@ def download(
             "source": source,
             "id": item_id,
             "url": url,
+            "preview_url": item.get("preview_url", ""),
+            "credit": item.get("credit", ""),
             "license": item.get("license_note", ""),
             "query": item.get("query", ""),
             "retrieved_at": ts,

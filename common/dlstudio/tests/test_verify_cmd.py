@@ -35,9 +35,6 @@ def _ns(*, changed=False, full=False):
 # ─── classify_path: domain table ───────────────────────────────────────
 
 @pytest.mark.parametrize("path,expected_domain", [
-    ("common/dlstudio/src/dlstudio/model/edit.py", "model_ir"),
-    ("common/dlstudio/src/dlstudio/model/content.py", "model_ir"),
-    ("common/dlstudio/src/dlstudio/ir.py", "model_ir"),
     ("common/dlstudio/src/dlstudio/compile/timeline.py", "compile_check"),
     ("common/dlstudio/src/dlstudio/check/__init__.py", "compile_check"),
     ("common/dlstudio/src/dlstudio/render/raster/_content.py", "render_raster"),
@@ -62,18 +59,75 @@ def test_classify_path_domain_table(path, expected_domain):
 def test_classify_path_render_raster_wins_over_bare_render_prefix():
     c = verify.classify_path("common/dlstudio/src/dlstudio/render/raster/_util.py")
     assert c.domain == "render_raster"
-    assert c.tests == ("test_raster_*",)
+    assert c.tests == verify.DOMAIN_TESTS["render_raster"]
 
 
-def test_classify_path_model_ir_is_the_widest_blast():
-    c = verify.classify_path("common/dlstudio/src/dlstudio/ir.py")
-    assert c.tests == ("test_cache", "test_compile_*", "test_raster_*", "test_render_*")
+# ─── F9: render_raster domain also covers beat compositing + full e2e ──
+
+def test_render_raster_domain_includes_render_beat_and_e2e():
+    assert verify.DOMAIN_TESTS["render_raster"] == ("test_raster_*", "test_render_beat", "test_e2e")
+
+
+# ─── F4: compile_check domain also covers render tests (check.verify_output) ──
+
+def test_compile_check_domain_includes_render_and_assemble_mix_tests():
+    assert verify.DOMAIN_TESTS["compile_check"] == (
+        "test_compile_*", "test_check", "test_e2e", "test_render_*", "test_assemble_mix",
+    )
+
+
+def test_classify_path_check_dir_pulls_in_render_tests():
+    c = verify.classify_path("common/dlstudio/src/dlstudio/check/__init__.py")
+    assert c.domain == "compile_check"
+    assert "test_render_*" in c.tests
+    assert "test_assemble_mix" in c.tests
+
+
+# ─── F1: model/ | ir.py is a shared contract -> the FULL suite, not a ──
+# ─── fixed (and inevitably under-inclusive) test-stem list           ──
+
+@pytest.mark.parametrize("path", [
+    "common/dlstudio/src/dlstudio/model/edit.py",
+    "common/dlstudio/src/dlstudio/model/content.py",
+    "common/dlstudio/src/dlstudio/ir.py",
+])
+def test_classify_path_model_ir_triggers_full_suite(path):
+    c = verify.classify_path(path)
+    assert c.kind == "full_suite"
+    assert c.domain == "model_ir"
+    assert c.tests == verify.FULL_SUITE_TESTS == ("tests",)
 
 
 def test_classify_path_test_self_maps_to_its_own_stem():
     c = verify.classify_path("common/dlstudio/tests/test_cli.py")
     assert c.kind == "test_self"
     assert c.tests == ("test_cli",)
+
+
+# ─── F2: tests/*.py that ISN'T test_*.py (conftest, _builders, future ──
+# ─── helpers) has no single owning test file -> the FULL suite        ──
+
+@pytest.mark.parametrize("path", [
+    "common/dlstudio/tests/conftest.py",
+    "common/dlstudio/tests/_builders.py",
+])
+def test_classify_path_test_helper_files_trigger_full_suite(path):
+    c = verify.classify_path(path)
+    assert c.kind == "full_suite"
+    assert c.tests == verify.FULL_SUITE_TESTS
+
+
+# ─── F8: non-.py files under tests/ (fixtures, golden images) -> the ──
+# ─── FULL suite too -- they're consumed across raster/e2e tests       ──
+
+@pytest.mark.parametrize("path", [
+    "common/dlstudio/tests/fixtures/words_basic.json",
+    "common/dlstudio/tests/golden/plate_plain.png",
+])
+def test_classify_path_non_py_test_assets_trigger_full_suite(path):
+    c = verify.classify_path(path)
+    assert c.kind == "full_suite"
+    assert c.tests == verify.FULL_SUITE_TESTS
 
 
 def test_classify_path_webui():
@@ -107,10 +161,12 @@ def test_classify_path_bare_package_init_is_unmapped():
 def test_classify_path_dlstudio_root_config_is_wide_domain_not_exit2():
     """pyproject.toml lives under common/dlstudio/ but NOT under src/dlstudio
     -- the ownership-discipline exit-2 rule is scoped to src/dlstudio only,
-    so this must resolve to a (conservative, wide) domain, not "unmapped"."""
+    so this must resolve to a (conservative, wide) full-suite change, not
+    "unmapped"."""
     c = verify.classify_path("common/dlstudio/pyproject.toml")
-    assert c.kind == "domain"
+    assert c.kind == "full_suite"
     assert c.domain == "model_ir"
+    assert c.tests == verify.FULL_SUITE_TESTS
 
 
 @pytest.mark.parametrize("path", [
@@ -131,7 +187,7 @@ def test_classify_path_normalizes_backslashes():
 # ─── git_status_paths: NUL-safe parsing ────────────────────────────────
 
 def _fake_git_run(stdout: str):
-    def fake_run(cmd, cwd, capture_output, text, check):
+    def fake_run(cmd, cwd, capture_output, text, check, encoding=None, errors=None):
         return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
     return fake_run
 
@@ -170,6 +226,23 @@ def test_git_status_paths_handles_filename_with_space(monkeypatch):
 def test_git_status_paths_empty_when_clean(monkeypatch):
     monkeypatch.setattr(verify.subprocess, "run", _fake_git_run(""))
     assert verify.git_status_paths(Path(".")) == []
+
+
+# ─── F11: git status subprocess call is decode-safe (never raises on ──
+# ─── a non-UTF-8 filename) ──────────────────────────────────────────
+
+def test_git_status_paths_passes_utf8_replace_encoding(monkeypatch):
+    captured = {}
+
+    def fake_run(cmd, cwd, capture_output, text, check, encoding=None, errors=None):
+        captured["encoding"] = encoding
+        captured["errors"] = errors
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(verify.subprocess, "run", fake_run)
+    verify.git_status_paths(Path("."))
+    assert captured["encoding"] == "utf-8"
+    assert captured["errors"] == "replace"
 
 
 # ─── resolve_test_files ─────────────────────────────────────────────────
@@ -387,6 +460,83 @@ def test_cmd_verify_changed_multiple_domains_are_unioned(monkeypatch):
     assert verify.cmd_verify(_ns(changed=True)) == 0
     assert "tests/test_cache.py" in captured["files"]
     assert "tests/test_api.py" in captured["files"]
+
+
+# ─── cmd_verify: full_suite widening (F1/F2/F8) ─────────────────────────
+
+def test_cmd_verify_changed_model_ir_change_widens_to_full_suite(monkeypatch):
+    captured = {}
+
+    def fake_run_pytest(files, *, cwd):
+        captured["files"] = files
+        captured["cwd"] = cwd
+        return subprocess.CompletedProcess(["pytest", *files], 0)
+
+    monkeypatch.setattr(verify, "git_repo_root", lambda: REPO_ROOT)
+    monkeypatch.setattr(
+        verify, "git_status_paths",
+        lambda root: ["common/dlstudio/src/dlstudio/ir.py"],
+    )
+    monkeypatch.setattr(verify, "run_pytest", fake_run_pytest)
+
+    code = verify.cmd_verify(_ns(changed=True))
+    assert code == 0
+    assert captured["files"] == ["tests"]
+    assert captured["cwd"] == DLSTUDIO_DIR
+
+
+def test_cmd_verify_changed_test_conftest_change_widens_to_full_suite(monkeypatch):
+    captured = {}
+
+    def fake_run_pytest(files, *, cwd):
+        captured["files"] = files
+        return subprocess.CompletedProcess(["pytest", *files], 0)
+
+    monkeypatch.setattr(verify, "git_repo_root", lambda: REPO_ROOT)
+    monkeypatch.setattr(
+        verify, "git_status_paths",
+        lambda root: ["common/dlstudio/tests/conftest.py"],
+    )
+    monkeypatch.setattr(verify, "run_pytest", fake_run_pytest)
+
+    code = verify.cmd_verify(_ns(changed=True))
+    assert code == 0
+    assert captured["files"] == ["tests"]
+
+
+def test_cmd_verify_changed_full_suite_wins_over_other_domain_hits(monkeypatch):
+    """A model_ir change alongside an unrelated narrow-domain change must
+    still widen to the full suite (it's a superset), not run only the
+    resolved narrow-domain files."""
+    captured = {}
+
+    def fake_run_pytest(files, *, cwd):
+        captured["files"] = files
+        return subprocess.CompletedProcess(["pytest", *files], 0)
+
+    monkeypatch.setattr(verify, "git_repo_root", lambda: REPO_ROOT)
+    monkeypatch.setattr(
+        verify, "git_status_paths",
+        lambda root: [
+            "common/dlstudio/src/dlstudio/cache/__init__.py",
+            "common/dlstudio/src/dlstudio/model/edit.py",
+        ],
+    )
+    monkeypatch.setattr(verify, "run_pytest", fake_run_pytest)
+
+    code = verify.cmd_verify(_ns(changed=True))
+    assert code == 0
+    assert captured["files"] == ["tests"]
+
+
+def test_cmd_verify_changed_full_suite_propagates_pytest_failure(monkeypatch):
+    monkeypatch.setattr(verify, "git_repo_root", lambda: REPO_ROOT)
+    monkeypatch.setattr(
+        verify, "git_status_paths",
+        lambda root: ["common/dlstudio/src/dlstudio/ir.py"],
+    )
+    monkeypatch.setattr(verify, "run_pytest", lambda files, *, cwd: subprocess.CompletedProcess(["pytest"], 1))
+    assert verify.cmd_verify(_ns(changed=True)) == 1
 
 
 def test_cmd_verify_changed_propagates_pytest_failure(monkeypatch):

@@ -239,6 +239,7 @@ def test_download_writes_files_and_manifest(tmp_path, monkeypatch):
     first = next(e for e in manifest if e["id"] == "1")
     assert first == {
         "source": "pexels", "id": "1", "url": "https://x/1.mp4",
+        "preview_url": "", "credit": "A",
         "license": "Pexels License", "query": "cats",
         "retrieved_at": "2026-07-16T00:00:00+00:00", "file": "pexels_1.mp4",
     }
@@ -283,6 +284,10 @@ def test_download_accepts_dict_list_without_stockresult_objects(tmp_path, monkey
     manifest = stock.download(items, tmp_path / "out3")
     assert manifest[0]["id"] == "7"
     assert manifest[0]["license"] == "L2"
+    # items missing credit/preview_url (e.g. a hand-written manifest) default
+    # to "" rather than raising a KeyError
+    assert manifest[0]["credit"] == ""
+    assert manifest[0]["preview_url"] == ""
 
 
 def test_download_skips_items_without_url(tmp_path, monkeypatch):
