@@ -7,22 +7,25 @@ interface Props {
   irBeat: IRBeat | null;
   /** Rendered draft mp4 path, if one exists. */
   previewPath: string | null;
+  /** Cache-buster set once per completed render (see app.tsx). */
+  previewToken?: number;
 }
 
-export function ScriptTab({ beat, irBeat, previewPath }: Props) {
+export function ScriptTab({ beat, irBeat, previewPath, previewToken }: Props) {
   const words = irBeat?.words ?? [];
   const audioPath = beat.audio || irBeat?.audio || "";
   const canKaraoke = !!audioPath && words.length > 0;
+  // Stable src: the token changes only when a new render lands, so the video
+  // isn't refetched on every unrelated re-render (Date.now() per pass did).
+  const previewSrc = previewPath
+    ? api.fileUrl(previewPath) + (previewToken ? "&t=" + previewToken : "")
+    : null;
 
   return (
     <div class="tab-body">
       {previewPath && (
         <div class="preview">
-          <video
-            controls
-            preload="metadata"
-            src={api.fileUrl(previewPath) + "&t=" + Date.now()}
-          />
+          <video controls preload="metadata" src={previewSrc ?? undefined} />
           <div class="meta">{previewPath}</div>
         </div>
       )}

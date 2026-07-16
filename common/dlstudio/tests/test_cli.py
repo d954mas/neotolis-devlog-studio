@@ -1126,8 +1126,11 @@ def test_cmd_studio_dev_prints_hint(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(_uv, "run", lambda app, **kw: None)
 
     assert cli.main(["studio", "some.pkg.edit", "--dev"]) == 0
-    out = capsys.readouterr().out.lower()
-    assert "npm run dev" in out or "vite" in out
+    out = capsys.readouterr().out
+    assert "npm run dev" in out
+    # the hint must point at the real webui dir, not the stale src/ path
+    assert "common/dlstudio/webui" in out
+    assert "src/dlstudio/webui" not in out
 
 
 # ─── arg parsing for the new commands ────────────────────────────────────

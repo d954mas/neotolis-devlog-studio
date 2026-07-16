@@ -728,7 +728,7 @@ def cmd_studio(args: argparse.Namespace) -> int:
     if args.dev:
         print(
             "[dl2] --dev: run the Vite dev server separately for hot-reload UI:\n"
-            "        cd common/dlstudio/src/dlstudio/webui && npm run dev\n"
+            "        cd common/dlstudio/webui && npm run dev\n"
             "      then open its URL; it proxies /api/* to this backend."
         )
 

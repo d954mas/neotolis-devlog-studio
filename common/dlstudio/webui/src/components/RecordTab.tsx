@@ -28,6 +28,9 @@ export function RecordTab({
   const videoRef = useRef<HTMLVideoElement>(null);
   const timerRef = useRef<number>(0);
   const meterGate = useRef(0);
+  // In-flight process-take pollers, aborted when the beat changes or the tab
+  // unmounts so their pollJob loops don't leak. (L2)
+  const pollAborters = useRef<Set<AbortController>>(new Set());
 
   const [micStatus, setMicStatus] = useState("mic not enabled");
   const [micReady, setMicReady] = useState(false);
@@ -49,6 +52,16 @@ export function RecordTab({
       if (cs) cs.getTracks().forEach((t) => t.stop());
     };
   }, []);
+
+  // Abort in-flight process-take polls when the active beat switches (this
+  // component is reused across beats) and on unmount. (L2)
+  useEffect(() => {
+    const aborters = pollAborters.current;
+    return () => {
+      aborters.forEach((a) => a.abort());
+      aborters.clear();
+    };
+  }, [beat.id]);
 
   async function refreshDevices() {
     try {
@@ -147,6 +160,8 @@ export function RecordTab({
 
   async function processTake(t: SessionTake) {
     if (!t.serverPath) return;
+    const ctrl = new AbortController();
+    pollAborters.current.add(ctrl);
     updateTake(t.id, { processState: "running", processMessage: "starting…" });
     try {
       const { job_id } = await api.processTake({
@@ -154,8 +169,8 @@ export function RecordTab({
         recording_path: t.serverPath,
       });
       const final = await pollJob(job_id, {
-        onStatus: (s) =>
-          updateTake(t.id, { processMessage: s.status }),
+        signal: ctrl.signal,
+        onStatus: (s) => updateTake(t.id, { processMessage: s.status }),
       });
       if (final.status === "done") {
         updateTake(t.id, { processState: "done", processMessage: "processed" });
@@ -167,10 +182,13 @@ export function RecordTab({
         });
       }
     } catch (e) {
+      if (ctrl.signal.aborted) return; // beat switch / unmount — drop silently
       updateTake(t.id, {
         processState: "error",
         processMessage: (e as Error).message,
       });
+    } finally {
+      pollAborters.current.delete(ctrl);
     }
   }
 

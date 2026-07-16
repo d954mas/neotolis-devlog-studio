@@ -1,4 +1,4 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { api, pollJob } from "./api/client";
 import type {
   CheckReport,
@@ -60,6 +60,33 @@ export function App() {
   const [renderInfo, setRenderInfo] = useState<Record<string, RenderInfo>>({});
   const [renderPreview, setRenderPreview] = useState<Record<string, string>>(
     {},
+  );
+  // Cache-buster token, set ONCE per completed render job (not per render
+  // pass) so the preview <video> src is stable across re-renders and only
+  // reloads when a fresh render actually lands. (L4)
+  const [renderToken, setRenderToken] = useState<Record<string, number>>({});
+
+  // In-flight render job pollers, aborted on unmount so pollJob loops don't
+  // leak past the component's life. (L2)
+  const renderAborters = useRef<Set<AbortController>>(new Set());
+  useEffect(
+    () => () => {
+      renderAborters.current.forEach((a) => a.abort());
+      renderAborters.current.clear();
+    },
+    [],
+  );
+
+  // Revoke recorded-take object URLs on unmount so their blobs are freed. (L3)
+  const takesRef = useRef(takesByBeat);
+  takesRef.current = takesByBeat;
+  useEffect(
+    () => () => {
+      for (const list of Object.values(takesRef.current)) {
+        for (const t of list) if (t.url) URL.revokeObjectURL(t.url);
+      }
+    },
+    [],
   );
 
   // ── loaders ──────────────────────────────────────────────────────────────
@@ -138,6 +165,8 @@ export function App() {
   // ── render action ────────────────────────────────────────────────────────
   async function renderBeat(beatId: string) {
     const width = draftWidth(project?.design);
+    const ctrl = new AbortController();
+    renderAborters.current.add(ctrl);
     setRenderInfo((s) => ({
       ...s,
       [beatId]: { state: "running", msg: "rendering…" },
@@ -149,6 +178,7 @@ export function App() {
         quality: "draft",
       });
       const final = await pollJob(job_id, {
+        signal: ctrl.signal,
         onStatus: (st) =>
           setRenderInfo((s) => ({
             ...s,
@@ -158,6 +188,8 @@ export function App() {
       if (final.status === "done") {
         const p = resultPath(final.result) ?? `data/finalize/${beatId}.mp4`;
         setRenderPreview((s) => ({ ...s, [beatId]: p }));
+        // one fresh cache-buster per completed render (L4)
+        setRenderToken((s) => ({ ...s, [beatId]: Date.now() }));
         setRenderInfo((s) => ({
           ...s,
           [beatId]: { state: "done", msg: "done" },
@@ -172,10 +204,13 @@ export function App() {
         }));
       }
     } catch (e) {
+      if (ctrl.signal.aborted) return; // unmounted mid-poll — drop silently
       setRenderInfo((s) => ({
         ...s,
         [beatId]: { state: "error", msg: (e as Error).message },
       }));
+    } finally {
+      renderAborters.current.delete(ctrl);
     }
   }
 
@@ -190,6 +225,7 @@ export function App() {
       ? (renderPreview[activeBeatId] ??
         (beat.rendered ? `data/finalize/${beat.id}.mp4` : null))
       : null;
+  const previewToken = activeBeatId ? renderToken[activeBeatId] : undefined;
 
   const design = project?.design;
   const designStr = design
@@ -305,6 +341,7 @@ export function App() {
                       beat={beat}
                       irBeat={irBeat}
                       previewPath={previewPath}
+                      previewToken={previewToken}
                     />
                   )}
                   {tab === "record" && (

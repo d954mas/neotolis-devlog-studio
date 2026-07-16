@@ -108,8 +108,11 @@ _LIGHT_EDIT_BODY = textwrap.dedent(
         ),
         beats={
             "b01": Beat(
-                audio="data/finalize/b01_vo.wav",
-                words="data/finalize/b01_words.json",
+                # Deliberately NOT the <id>_vo.wav / <id>_words.json convention:
+                # process-take must write to whatever path the beat declares,
+                # or a real edit never sees the processed take (H1).
+                audio="data/finalize/b01_audio_tight_pause.wav",
+                words="data/finalize/b01_words_tight.json",
                 vo="hi there world",
                 chunks=[Chunk(words=(0, 1), content=Plate(text="X"))],
             ),
@@ -272,6 +275,33 @@ def test_feedback_rejects_non_object(light_client):
     assert r.status_code == 400
 
 
+def test_feedback_rejects_oversize_body(light_client, monkeypatch):
+    client, _, _ = light_client
+    monkeypatch.setattr("dlstudio.api.app._MAX_FEEDBACK_BYTES", 10)
+    r = client.post("/api/feedback", json={"b01": {"note": "x" * 100}})
+    assert r.status_code == 413
+
+
+def _nest(depth: int) -> dict:
+    root: dict = {}
+    cur = root
+    for _ in range(depth):
+        cur["k"] = {}
+        cur = cur["k"]
+    cur["v"] = 1
+    return root
+
+
+def test_feedback_rejects_too_deep(light_client):
+    client, _, _ = light_client
+    deep = _nest(40)
+    # store starts empty, so the first merge never recurses -> accepted
+    assert client.post("/api/feedback", json=deep).status_code == 200
+    # now the store is equally deep; merging the same shape recurses past the
+    # cap and is rejected (guards against unbounded recursion / stack blowup)
+    assert client.post("/api/feedback", json=deep).status_code == 400
+
+
 # ─── takes upload ────────────────────────────────────────────────────────────
 
 def test_takes_upload_saves_file(light_client):
@@ -297,6 +327,31 @@ def test_takes_upload_rejects_bad_beat_id(light_client):
         files={"file": ("t.webm", b"x", "audio/webm")},
     )
     assert r.status_code == 400
+
+
+def test_takes_upload_rejects_empty(light_client):
+    client, root, _ = light_client
+    r = client.post(
+        "/api/takes/b01",
+        files={"file": ("empty.webm", b"", "audio/webm")},
+    )
+    assert r.status_code == 400
+    # no partial file left behind
+    rec = root / "data" / "recordings"
+    assert not (rec.exists() and list(rec.glob("b01_*")))
+
+
+def test_takes_upload_rejects_oversize(light_client, monkeypatch):
+    client, root, _ = light_client
+    # shrink the cap so a tiny body trips it (streamed cap, not Content-Length)
+    monkeypatch.setattr("dlstudio.api.app._MAX_UPLOAD_BYTES", 4)
+    r = client.post(
+        "/api/takes/b01",
+        files={"file": ("big.webm", b"way-more-than-four-bytes", "audio/webm")},
+    )
+    assert r.status_code == 413
+    rec = root / "data" / "recordings"
+    assert not (rec.exists() and list(rec.glob("b01_*")))
 
 
 # ─── /api/file traversal rejection ───────────────────────────────────────────
@@ -338,6 +393,26 @@ def test_file_missing_is_404(light_client):
     client, _, _ = light_client
     r = client.get("/api/file", params={"path": "data/nope.bin"})
     assert r.status_code == 404
+
+
+def test_file_rejects_non_data_subtree(light_client):
+    client, root, _ = light_client
+    # a real source file under the project root but OUTSIDE data/ — safe_join
+    # allows it (it is under root), but /api/file now serves only data/ (H4).
+    src = root / "edits" / "myedit" / "__init__.py"
+    assert src.is_file()
+    r = client.get("/api/file", params={"path": "edits/myedit/__init__.py"})
+    assert r.status_code == 404
+
+
+def test_cors_restricted_to_dev_origins(light_client):
+    client, _, _ = light_client
+    # an allowlisted dev origin gets echoed back...
+    good = client.get("/api/feedback", headers={"Origin": "http://localhost:5173"})
+    assert good.headers.get("access-control-allow-origin") == "http://localhost:5173"
+    # ...an arbitrary origin does not (no wildcard "*").
+    evil = client.get("/api/feedback", headers={"Origin": "http://evil.example"})
+    assert evil.headers.get("access-control-allow-origin") is None
 
 
 # ─── job lifecycle: process-take ─────────────────────────────────────────────
@@ -383,13 +458,20 @@ def test_process_take_job_lifecycle(light_client, monkeypatch):
     done = _await_job(client, job_id)
     assert done["status"] == "done"
     result = done["result"]
-    assert result["audio"] == "data/finalize/b01_vo.wav"
-    assert result["words"] == "data/finalize/b01_words.json"
+    # H1: the processed wav/words land at the beat's OWN declared paths, not a
+    # hardcoded <id>_vo.wav — so a real edit's render/UI actually see the take.
+    assert result["audio"] == "data/finalize/b01_audio_tight_pause.wav"
+    assert result["words"] == "data/finalize/b01_words_tight.json"
     assert result["measured_lufs"] == -18.5
     assert result["duration"] == 3.2
-    # services were called with the resolved absolute recording + finalize paths
+    # services were called with the resolved absolute recording + declared paths
     assert calls["process"][0] == (root / "data" / "recordings" / "take.webm").resolve()
-    assert calls["process"][1] == root / "data" / "finalize" / "b01_vo.wav"
+    assert calls["process"][1] == (root / "data" / "finalize" / "b01_audio_tight_pause.wav").resolve()
+    assert calls["transcribe"][0] == (root / "data" / "finalize" / "b01_audio_tight_pause.wav").resolve()
+    assert calls["transcribe"][1] == (root / "data" / "finalize" / "b01_words_tight.json").resolve()
+    # and the files actually exist where the beat declares them
+    assert (root / "data" / "finalize" / "b01_audio_tight_pause.wav").is_file()
+    assert (root / "data" / "finalize" / "b01_words_tight.json").is_file()
 
 
 def test_process_take_rejects_traversal_recording(light_client):
@@ -398,6 +480,16 @@ def test_process_take_rejects_traversal_recording(light_client):
         "beat_id": "b01", "recording_path": "../evil.webm",
     })
     assert r.status_code == 400
+
+
+def test_process_take_unknown_beat_404(light_client):
+    client, _, _ = light_client
+    # membership is validated before the recording is touched (mirrors
+    # render-beat); an unknown beat is a 404 (L5).
+    r = client.post("/api/actions/process-take", json={
+        "beat_id": "nope", "recording_path": "data/recordings/take.webm",
+    })
+    assert r.status_code == 404
 
 
 def test_process_take_job_reports_error(light_client, monkeypatch):
@@ -421,6 +513,85 @@ def test_process_take_job_reports_error(light_client, monkeypatch):
 def test_jobs_unknown_id_404(light_client):
     client, _, _ = light_client
     assert client.get("/api/jobs/does-not-exist").status_code == 404
+
+
+def test_jobmanager_caps_finished_jobs():
+    from dlstudio.api.jobs import JobManager
+
+    jm = JobManager(max_workers=2, max_jobs=2)
+    try:
+        ids = [jm.submit(lambda: 42) for _ in range(4)]
+        deadline = time.time() + 5.0
+        while time.time() < deadline:
+            snaps = [jm.get(i) for i in ids]
+            if all(s is None or s["status"] != "running" for s in snaps):
+                break
+            time.sleep(0.01)
+        # a further submit evicts finished jobs beyond the cap
+        jm.submit(lambda: 42)
+        assert len(jm._jobs) <= jm._max_jobs + 1
+        # at least one of the original four was evicted
+        assert sum(1 for i in ids if jm.get(i) is not None) < 4
+    finally:
+        jm.shutdown()
+
+
+def test_jobmanager_evicts_by_ttl():
+    from dlstudio.api.jobs import JobManager
+
+    jm = JobManager(max_workers=1, ttl_seconds=0.0)
+    try:
+        first = jm.submit(lambda: 1)
+        deadline = time.time() + 5.0
+        while time.time() < deadline and (jm.get(first) or {}).get("status") == "running":
+            time.sleep(0.01)
+        time.sleep(0.01)  # ensure now - finished_at > 0
+        jm.submit(lambda: 1)  # triggers TTL eviction of the finished first job
+        assert jm.get(first) is None
+    finally:
+        jm.shutdown()
+
+
+# ─── hot-reload: beats.py edits appear without a restart (H2) ─────────────────
+
+def test_project_hot_reloads_edit_module(light_client):
+    client, root, _ = light_client
+    assert [b["id"] for b in client.get("/api/project").json()["beats"]] == ["b01"]
+
+    two_beats = textwrap.dedent(
+        """
+        from dlstudio.model import Beat, Chunk, Design, Edit, Fonts, Palette, Plate
+
+        EDIT = Edit(
+            name="light",
+            design=Design(
+                resolution=(1920, 1080),
+                palette=Palette(tokens={"bg": "#000000", "text": "#ffffff"}),
+                fonts=Fonts(main="main.ttf"),
+            ),
+            beats={
+                "b01": Beat(
+                    audio="data/finalize/b01_audio_tight_pause.wav",
+                    words="data/finalize/b01_words_tight.json",
+                    vo="hi there world",
+                    chunks=[Chunk(words=(0, 1), content=Plate(text="X"))],
+                ),
+                "b02": Beat(
+                    audio="data/finalize/b02_audio.wav",
+                    words="data/finalize/b02_words.json",
+                    vo="second beat",
+                    chunks=[Chunk(words=(0, 1), content=Plate(text="Y"))],
+                ),
+            },
+            order=["b01", "b02"],
+            output="data/finalize/out.mp4",
+        )
+        """
+    )
+    (root / "edits" / "myedit" / "__init__.py").write_text(two_beats, encoding="utf-8")
+
+    data = client.get("/api/project").json()
+    assert [b["id"] for b in data["beats"]] == ["b01", "b02"]
 
 
 # ─── job lifecycle: render-beat ──────────────────────────────────────────────

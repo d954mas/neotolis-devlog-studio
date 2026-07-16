@@ -11,11 +11,13 @@ export interface ProjectDesign {
 
 export interface ProjectBeat {
   id: string;
-  title: string;
-  vo: string;
-  stage: string;
+  /** Optional on the model (Beat.title/vo/stage default to None). */
+  title: string | null;
+  vo: string | null;
+  stage: string | null;
   face: FaceMode | string;
-  duration: number;
+  /** null until the beat compiles (needs processed VO to measure). */
+  duration: number | null;
   n_chunks: number;
   /** Processed VO wav path (null/"" until a take is processed). */
   audio: string | null;
