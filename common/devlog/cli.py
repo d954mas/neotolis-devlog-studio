@@ -29,6 +29,7 @@ import math
 import re
 import shutil
 import subprocess
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 from devlog.config import DevlogConfig, load_config
@@ -207,6 +208,32 @@ def cmd_compose(args):
                        no_cache=args.no_cache, quality=quality)
 
 
+@contextmanager
+def _project_render_lock(root: Path, edit_name: str):
+    """Prevent concurrent full-edit renders from sharing finalize temp files."""
+    lock_dir = root / "data" / "finalize"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = lock_dir / ".render.lock"
+    try:
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        owner = lock_path.read_text(encoding="utf-8", errors="replace").strip()
+        detail = f" Current lock: {owner}" if owner else ""
+        raise SystemExit(
+            "Another full-edit render is already using data/finalize. "
+            "Wait for it to finish before rendering another edit." + detail
+        )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(f"pid={os.getpid()} edit={edit_name}\n")
+        yield
+    finally:
+        try:
+            lock_path.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def cmd_render(args):
     """Render all beats in edit.order, then concat (unless --no-concat).
 
@@ -239,41 +266,43 @@ def cmd_render(args):
     else:
         targets = [args.beat] if args.beat else edit.order
 
-    if args.parallel > 1 and len(targets) > 1:
-        _render_parallel(edit, design, targets, suffix, draft, args.gpu,
-                         args.no_cache, args.parallel, engine, quality)
-    else:
-        for bid in targets:
-            out_path = f"data/finalize/{bid}{suffix}.mp4"
-            print(f"\n[devlog] rendering {bid} -> {out_path}")
-            _render_one(edit.beats[bid], design, out_path, draft, args.gpu,
-                        args.no_cache, engine, quality)
+    lock_ctx = _project_render_lock(root, edit.name) if not args.beat else nullcontext()
+    with lock_ctx:
+        if args.parallel > 1 and len(targets) > 1:
+            _render_parallel(edit, design, targets, suffix, draft, args.gpu,
+                             args.no_cache, args.parallel, engine, quality)
+        else:
+            for bid in targets:
+                out_path = f"data/finalize/{bid}{suffix}.mp4"
+                print(f"\n[devlog] rendering {bid} -> {out_path}")
+                _render_one(edit.beats[bid], design, out_path, draft, args.gpu,
+                            args.no_cache, engine, quality)
 
-    if not args.no_concat and not args.beat:
-        _concat(edit, root, suffix=suffix)
-        # Auto-review the final concatenated output — catches silent overlay
-        # drops that the renderer happily produces but a human would spot.
-        # Skip on --no-review; promote warnings to exit code on --strict-review.
-        if not args.no_review and suffix == "_video_1080p":
-            out = Path(edit.output)
-            if out.exists():
-                print(f"\n[devlog] reviewing {out}...")
-                from devlog.review import review_video
-                verdicts = review_video(edit, str(out),
-                                        threshold=args.review_threshold,
-                                        verbose=False)
-                fails = [v for v in verdicts if not v.passed]
-                if fails:
-                    print(f"\n  ⚠ {len(fails)}/{len(verdicts)} chunks failed visual review:")
-                    for v in fails:
-                        text = v.spec.text.replace("\n", " / ")[:50]
-                        print(f"    [FAIL] {v.spec.beat_id} c{v.spec.chunk_idx} "
-                              f"t={v.spec.t_video_mid:.2f}  diff={v.diff:.1f}  {text}")
-                    print(f"\n  Run `dl review {args.edit} {out}` for full report.")
-                    if args.strict_review:
-                        raise SystemExit(1)
-                else:
-                    print(f"  ✓ {len(verdicts)}/{len(verdicts)} chunks render correctly")
+        if not args.no_concat and not args.beat:
+            _concat(edit, root, suffix=suffix)
+            # Auto-review the final concatenated output — catches silent overlay
+            # drops that the renderer happily produces but a human would spot.
+            # Skip on --no-review; promote warnings to exit code on --strict-review.
+            if not args.no_review and suffix == "_video_1080p":
+                out = Path(edit.output)
+                if out.exists():
+                    print(f"\n[devlog] reviewing {out}...")
+                    from devlog.review import review_video
+                    verdicts = review_video(edit, str(out),
+                                            threshold=args.review_threshold,
+                                            verbose=False)
+                    fails = [v for v in verdicts if not v.passed]
+                    if fails:
+                        print(f"\n  ⚠ {len(fails)}/{len(verdicts)} chunks failed visual review:")
+                        for v in fails:
+                            text = v.spec.text.replace("\n", " / ")[:50]
+                            print(f"    [FAIL] {v.spec.beat_id} c{v.spec.chunk_idx} "
+                                  f"t={v.spec.t_video_mid:.2f}  diff={v.diff:.1f}  {text}")
+                        print(f"\n  Run `dl review {args.edit} {out}` for full report.")
+                        if args.strict_review:
+                            raise SystemExit(1)
+                    else:
+                        print(f"  ✓ {len(verdicts)}/{len(verdicts)} chunks render correctly")
 
 
 def cmd_iter(args):

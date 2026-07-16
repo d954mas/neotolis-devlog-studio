@@ -169,6 +169,15 @@ specifically for 9:16. This produces a better result than any automatic
 crop. For quick clips out of a finished video, use `dl cut` with
 `--reframe crop_center` instead.
 
+**Short-form retention gate:** before writing or rendering a reel, make the
+first second answer "what is this about?" in voice. Open with a viewer-facing
+problem, contrast, number, failure, or funny situation; do not start with a
+neutral feature tour. Avoid raw static screencast as the main visual. Prefer
+live/product/game motion, hand-held monitor footage, meme/situation B-roll, or
+generated motion assets. If a screenshot is necessary, use Ken Burns, an inset
+frame, highlights, or moving surrounding elements so the contact sheet does not
+read as one repeated static UI.
+
 ## Adding a new edit
 
 ```python

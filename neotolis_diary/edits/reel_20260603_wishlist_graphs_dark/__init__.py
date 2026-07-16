@@ -1,11 +1,10 @@
-"""Vertical reel — no-code game hook for a broad audience."""
 from devlog.types import Edit
-from .design import DESIGN
 from .beats import BEATS, CONCAT_ORDER, OUTPUT
+from .design import DESIGN
 
 
 EDIT = Edit(
-    name="reel_30k",
+    name="reel_20260603_wishlist_graphs_dark",
     design=DESIGN,
     beats=BEATS,
     order=CONCAT_ORDER,

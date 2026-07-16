@@ -28,6 +28,12 @@ The user writes in free form. Map their intent to one of these actions:
 
 If intent is unclear, **ask one short question** before acting.
 
+For a new reel/short request, prioritize a watchable draft over source research:
+scaffold the edit, write a provisional script, generate scratch TTS/word timings,
+build available or generated visuals, and run `dl reel-preview`. Timebox website
+capture, auth debugging, and exact data validation; if they block, mark them as
+second-pass replacement work instead of delaying the first draft.
+
 ---
 
 ## The Improve Loop
@@ -173,11 +179,18 @@ Run this after reviewer output and before final handoff:
 
 Run this before rendering an upload-quality reel:
 
+- **Visual draft first:** when creating a new reel, do not begin with open-ended website research, auth debugging, or exact-data validation. First create a provisional script/edit, generate scratch TTS and word timings, build usable visual placeholders or available real assets, and run `dl reel-preview`. If product capture or data access blocks, mark it as second-pass replacement work and keep the draft moving.
+- **Goal in the first second:** the opening voice line must name the situation, problem, or product. If the viewer cannot answer "what is this about?" after one second, rewrite or re-record before rendering.
+- **Hook for the viewer:** start from a problem, contradiction, funny situation, concrete number, or visible failure. Do not lead with a neutral feature tour or with what the author personally finds interesting.
+- **Voice energy:** delivery should sound interested and conversational. If the take is flat or "read on autopilot", treat it as `re-record`, even if the words and visuals are technically correct.
 - **Voice context first:** the opening voice line names the product or problem. Do not rely on a text overlay to explain what the reel is about.
 - **Standalone story:** the reel must make sense without the previous reel. Avoid starting with "а", "можно", "теперь" unless context was already stated in voice.
+- **Screencast is weak by default:** raw static screencast should not carry the reel. Prefer live/hand-held monitor shots, product/game motion, meme/situation B-roll, or generated motion assets. If a screenshot is necessary, make it a framed/inset object or add `Scene(..., ken_burns=True)` and keep something else moving.
+- **Motion floor:** no more than about 3 seconds of static screenshot without motion; repeated UI frames need either a new crop/zoom/position or a new visual source.
 - **Short overlay copy:** main text should be one strong idea; subtitles must be readable on phone. For vertical reels, default to `sub_ratio >= 0.5` and keep yellow lines short.
 - **Deliberate ending:** include a final hold with site/product/CTA, usually about one second.
 - **Cheap preview first:** use `dl reel-preview <edit>` to inspect contact sheet and chunk keyframes. Only run 1080/upload after this passes.
+- **Render serially:** do not run upload renders for two different reel edits in parallel. They share `data/finalize/main_*` and `_concat.txt`; parallel final renders can corrupt or overwrite intermediate concat inputs.
 
 If a checklist item fails, fix it or report it as open. Do not hide it behind a reviewer "ship" verdict.
 

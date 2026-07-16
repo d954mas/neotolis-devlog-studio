@@ -42,6 +42,20 @@ Always cite: LUFS, peak dBFS, pause durations (s), word count, timestamps. "Зв
 
 ### 5. Verdict format is fixed (see OUTPUT)
 
+### 6. Reels need performance, not just clean audio
+If the target edit/beat is a reel, short, vertical edit, or the stage note says
+short-form:
+- A flat, disengaged, "reading the script" take is a re-record issue even when
+  loudness, peaks, and pauses are technically acceptable.
+- The opening sentence must sound curious, amused, frustrated, excited, or
+  otherwise personally invested. Short-form needs the viewer to feel there is a
+  reason to keep watching immediately.
+- Use LRA as evidence, but do not rely on it alone. Low LRA plus neutral
+  delivery is `Re-record`; acceptable LRA with bored phrasing can still be
+  `Re-record`.
+- Main fix should be performance direction, e.g. "прочитай как будто
+  рассказываешь знакомому о досадной проблеме", not generic "more emotion".
+
 ---
 
 ## CONTEXT DISCOVERY
@@ -82,6 +96,8 @@ For `face: none` beats — **SKIP entirely**, saves tokens, avoids irrelevant cr
 - Duration vs target (typical beat 8-40s for devlog; consult beat in beats.py)
 - Internal pause budget (see TARGETS)
 - Stage note delivery match — does VO read the way beat.stage describes?
+- Short-form energy when applicable: does the first sentence sound alive enough
+  to carry a reel hook, or like a neutral narration pass?
 
 ---
 
@@ -95,6 +111,7 @@ For `face: none` beats — **SKIP entirely**, saves tokens, avoids irrelevant cr
 | Internal emphasis pause | 1.0–1.5s | acceptable |
 | Internal drama pause | 2.0s+ | only at climax with explicit intent |
 | LRA | 3.0+ | flat speech (<2.0) signals monotone |
+| Reel opening energy | clear engaged delivery | flat short-form hook means re-record |
 
 ---
 
@@ -118,6 +135,8 @@ For `face: none` beats — **SKIP entirely**, saves tokens, avoids irrelevant cr
 
 **Minus** (1-2 items based on internal pauses + content quality):
 - ...
+
+**Short-form energy** (if reel/vertical): pass/fail — <specific reason>
 
 **Main fix** (only if re-record): ONE thing to focus on next take
 

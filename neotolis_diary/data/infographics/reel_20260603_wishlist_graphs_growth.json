@@ -1,0 +1,15 @@
+{
+  "type": "bar_chart",
+  "title": "WISHLIST GROWTH",
+  "subtitle": "EVENTS NEXT TO GROWTH",
+  "values": [
+    {"label": "W1", "value": 12},
+    {"label": "W2", "value": 18},
+    {"label": "W3", "value": 31},
+    {"label": "W4", "value": 45},
+    {"label": "W5", "value": 64},
+    {"label": "W6", "value": 87}
+  ],
+  "highlight_index": 5,
+  "duration": 3.4
+}

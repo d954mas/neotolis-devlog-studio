@@ -69,6 +69,14 @@ For full videos, explicitly spot-check:
 
 If thumbnail or cover art is the task, hand off to `thumbnail-designer` instead.
 
+### 7. Short-form reels are judged harsher
+When the edit is vertical/reel/short-form:
+- First second must communicate the situation, problem, or product in voice. If not, tag `high · re-record` or `re-design` and name the exact opening line to replace.
+- The hook must be viewer-facing: problem, contradiction, funny situation, concrete number, or visible failure. A neutral feature tour is a retention risk.
+- Static screencast is a default problem. Flag any run of ~3s+ of unmoving screenshot/UI unless the viewer must read it. Prefer live/product/game motion, hand-held monitor capture, meme/situation B-roll, generated motion asset, or framed/inset screenshot with movement around it.
+- If screenshots are necessary, suggest exact mechanical fixes first: `Scene(..., ken_burns=True)`, changed crop/source, `framed_card=True`, animated generated asset, shorter chunk, or moving highlight/background.
+- Do not mark a reel "ship" if it has flat VO plus static screenshots, even when text is readable.
+
 ---
 
 ## CONTEXT DISCOVERY
@@ -165,6 +173,13 @@ Map frames to acts:
 - Beat joins do not cut phrases unnaturally
 - Final ending lands on an intentional outro/end card or clean final frame
 
+For vertical reels/shorts, add a short-form audit:
+- **0-1s goal:** does voice immediately say what this is about?
+- **Hook type:** problem / contrast / number / funny situation / failure / weak feature tour
+- **VO energy:** does the narration sound interested enough for short-form?
+- **Screencast risk:** percentage of frames that are static UI/screenshot, and longest static run
+- **Motion floor:** any static screenshot >3s without Ken Burns, crop change, insert, or moving surrounding elements
+
 ### Output
 ```
 ### iter<N>.mp4 · Full Video Review
@@ -190,6 +205,13 @@ Map frames to acts:
 - Visual hierarchy: <status>
 - Ending: <status>
 
+**Short-form gate** (if reel/vertical):
+- 0-1s goal: pass/fail
+- Hook type: <type>
+- VO energy: pass/fail
+- Screencast risk: pass/fail, longest static run <Xs>
+- Motion floor: pass/fail
+
 **Top 5 improvements ranked by ROI:**
 1. **<severity> · mech/re-record/re-design · effort <X>** · <one-line>
    How: <exact change>
@@ -214,6 +236,7 @@ Map frames to acts:
 - **Subtitle redundancy**: adds info or just repeats?
 - **Missing visuals**: chunks where overlay text is plain but moment calls for image/chart/video
 - **Timing risk**: any chunk >5s static, any chunk <0.8s
+- **Short-form retention gate** for reel/vertical edits: first spoken second names the product/problem, hook is viewer-facing, VO direction calls for energy, and static screenshot runs are avoided or animated.
 
 ### Output
 ```
@@ -232,6 +255,12 @@ Map frames to acts:
 
 **Pacing concerns:**
 - chunk N (X-Ys, dur Zs): too long for plain plate — split or change scene
+
+**Short-form gate** (if reel/vertical):
+- 0-1s goal: pass/fail
+- Viewer-facing hook: pass/fail
+- Static screencast risk: pass/fail
+- Needed before render: <rewrite/re-record/new asset/mech>
 
 **Ready to render?** Yes / fix <items> first
 ```

@@ -7,6 +7,10 @@ FEED_SCROLL = "data/screens/real_prod_reel/feed_scroll_portrait.png"
 ADD_EVENT = "data/screens/real_prod_reel/add_event_portrait.png"
 
 
+def moving_shot(src: str, zoom: float = 0.08) -> Scene:
+    return Scene(kind="image", src=src, ken_burns=True, kb_zoom=zoom)
+
+
 BEATS: dict[str, Beat] = {
     "main": Beat(
         title="Reel 01: коротко о проблеме и дневнике",
@@ -28,9 +32,9 @@ BEATS: dict[str, Beat] = {
                 size=245,
                 sub_ratio=0.58,
                 line_gap_ratio=0.08,
-                position="bottom",
-                style="band",
-                scene=Scene(kind="image", src=FEED_TOP),
+                position="middle",
+                style="hero",
+                scene=moving_shot(FEED_TOP, 0.06),
             ),
             Chunk(
                 words=(5, 9),
@@ -42,7 +46,7 @@ BEATS: dict[str, Beat] = {
                 line_gap_ratio=0.08,
                 position="bottom",
                 style="band",
-                scene=Scene(kind="image", src=ADD_EVENT),
+                scene=moving_shot(ADD_EVENT, 0.08),
             ),
             Chunk(
                 words=(10, 17),
@@ -54,7 +58,7 @@ BEATS: dict[str, Beat] = {
                 line_gap_ratio=0.08,
                 position="bottom",
                 style="band",
-                scene=Scene(kind="image", src=FEED_SCROLL),
+                scene=moving_shot(FEED_SCROLL, 0.08),
             ),
             Chunk(
                 words=(18, 31),
@@ -66,7 +70,7 @@ BEATS: dict[str, Beat] = {
                 line_gap_ratio=0.08,
                 position="bottom",
                 style="band",
-                scene=Scene(kind="image", src=FEED_TOP),
+                scene=moving_shot(FEED_TOP, 0.07),
             ),
             Chunk(
                 words=(32, 35),
@@ -78,7 +82,7 @@ BEATS: dict[str, Beat] = {
                 line_gap_ratio=0.08,
                 position="bottom",
                 style="band",
-                scene=Scene(kind="image", src=ADD_EVENT),
+                scene=moving_shot(ADD_EVENT, 0.06),
             ),
             Chunk(
                 words=(36, 43),
@@ -90,7 +94,7 @@ BEATS: dict[str, Beat] = {
                 line_gap_ratio=0.08,
                 position="bottom",
                 style="band",
-                scene=Scene(kind="image", src=FEED_TOP),
+                scene=moving_shot(FEED_TOP, 0.06),
             ),
         ],
         face="none",

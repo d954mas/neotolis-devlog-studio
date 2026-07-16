@@ -214,8 +214,11 @@ def _scene_normalize_filter(idx: int, seg_dur: float, eff_dur: float,
     if pad_needed > 0.01:
         chain.append(f"tpad=stop_mode=clone:stop_duration={pad_needed:.3f}")
     if scene.kind == "image" and scene.ken_burns and seg_dur > 2.0:
-        # Ken Burns: scale up over time, crop centered. Use zoompan? Simpler: scale+crop with expr.
+        # Ken Burns: first cover-fit to the target frame, then scale up over
+        # time and center-crop. Scaling from the source dimensions directly can
+        # leave narrow portrait screenshots smaller than the requested crop.
         z = scene.kb_zoom
+        chain.append(f"scale={W}:{H}:force_original_aspect_ratio=increase")
         # zoom factor: 1.0 -> 1.0+z linearly over seg_dur
         chain.append(
             f"scale=w='if(gte(t,0),iw*(1.0+{z}*t/{seg_dur:.3f}),iw)'"

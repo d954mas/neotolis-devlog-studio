@@ -1,0 +1,14 @@
+{
+  "url": "https://neotolis-diary.dev/login?next=%2Fsettings",
+  "title": "Promotion diary",
+  "text": "Sign in\nContinue with Google\n\nEarly access. Auto-import from registered sources arrives in a future release; manual paste works now.",
+  "buttons": [
+    {
+      "text": "Continue with Google",
+      "title": null,
+      "aria": null,
+      "href": null
+    }
+  ],
+  "storage": {}
+}

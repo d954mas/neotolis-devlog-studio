@@ -43,6 +43,17 @@ iterations on top of a "needs polish" baseline).
   (continuous gameplay/infographic bg under bottom-band labels) and that
   single change is what moved it from "slideshow" to "video". A run of
   three static plates in a row reads as a deck.
+- **DO treat short-form screencast as guilty until proven useful.** In reels,
+  a plain static product screenshot reads like a screen recording, not a
+  story. Use live/hand-held monitor shots, product/game motion, meme/situation
+  B-roll, or an animated generated asset when the visual does not need exact
+  UI reading. If the screenshot is the proof, make it move with Ken Burns or
+  frame it as an inset card while the surrounding scene moves.
+- **AVOID more than ~3s of unmoving screenshot in a reel.** If text on the
+  screenshot must be read, keep the screenshot stable but animate the
+  background, labels, highlights, or neighboring elements. If text is not
+  important, replacing the screenshot with a relevant meme/situation clip
+  often loses no information because the VO carries the point.
 - **DO end each beat on a new visual.** If two adjacent beats reuse the
   same bg image (e.g. a2-1 and b4 both used `files_breakdown.png`), the
   viewer feels stuck. Reviewer flags it even when it was intentional.
@@ -68,6 +79,13 @@ iterations on top of a "needs polish" baseline).
 
 ## Hook (first 5-8s)
 
+- **DO make the goal obvious in the first second for reels.** The viewer
+  should immediately know the product, problem, or situation from voice, not
+  only from a text overlay. If the first sentence is just a feature tour,
+  rewrite the VO before touching visual polish.
+- **DO hook from the viewer's problem, not the author's interest.** "Я сделал
+  дневник" is internal; "через неделю не помнишь, что продвигал" is
+  viewer-facing. Reels need the latter first, then the product.
 - **DO open on a number or a specific noun, not a category.** "Не ТРАМВАЙ.
   МАШИНА." or "0 СТРОК КОДА" outperform "О ЧЁМ ИГРА" because they create
   immediate informational tension.
@@ -79,6 +97,10 @@ iterations on top of a "needs polish" baseline).
 - **DO let the speaker's eyes hit the lens before the first cut.** Face
   beats need 0.3-0.5s of held eye contact at the head of the clip to land
   as "real human address" rather than B-roll voice-over.
+- **DO reject flat short-form VO early.** A technically clean take can still
+  fail if it sounds uninterested. For reels, the VO should feel curious,
+  amused, frustrated, or excited enough to justify watching; otherwise mark it
+  as re-record before spending time on visuals.
 
 ## Transitions between scenes/chunks
 

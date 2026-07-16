@@ -30,6 +30,7 @@ devlogs/                   ← workspace root, git repo, contains common/ + proj
 | Improve a rendered beat/video | Loop: render → reviewer → mech fixes → repeat | workflow |
 | Create simple chart/counter/timeline infographic | `dl gen` from JSON/sample, then use as `Scene(kind="video"|"image")` | CLI |
 | Create rich HTML/GSAP motion graphic | `dl gen-html <dir> --init`, edit HTML/CSS/JS, render to MP4 | CLI/Hyperframes |
+| New reel from a topic/site/update | scaffold edit + scratch VO + `dl reel-preview` first; timebox source capture | CLI |
 | Cut clip for reel/short | `dl cut` with reframe | CLI |
 | Iterate a reel/short edit | `dl reel-preview <edit>` before any upload render | CLI |
 | Review a recorded VO take | Spawn `vo-reviewer` agent on `.webm` | (agent) |
@@ -46,7 +47,7 @@ devlogs/                   ← workspace root, git repo, contains common/ + proj
 
 3. **Resolution and quality are runtime flags, not code constants.** Use `dl iter --stale` for 540p draft iteration and `dl final` for upload-ready renders. Engine is resolution-independent via `design.px()` — same `beats.py` renders correctly at any resolution.
 
-4. **Parallel render** (`-j 4..8`) is safe and useful when rendering many beats. Each worker is its own Python process. Per-worker cache writes are atomic.
+4. **Parallel render inside one edit** (`-j 4..8`) is safe and useful when rendering many beats. Each worker is its own Python process. Per-worker cache writes are atomic. Do **not** run two different edit renders concurrently: they share `data/finalize/main_*` and `_concat.txt`.
 
 5. **Run `dl check` before expensive renders.** Use plain `dl check` during normal iteration and `dl check --deep` after changing video assets or scene offsets. These use `default_edit` from `devlog.toml`.
 
@@ -74,15 +75,24 @@ devlogs/                   ← workspace root, git repo, contains common/ + proj
 
 17. **Do not replace the devlog pipeline with Hyperframes or Remotion.** The main video remains `Beat`/`Chunk`/`Scene` + FFmpeg composition. Hyperframes/`dl gen` only produce asset clips that the existing pipeline consumes.
 
+18. **For a new reel, produce a visual draft first.** If the user asks for a new reel/short from an update, topic, URL, or rough idea, immediately create the edit scaffold, provisional script, scratch TTS/words, visuals, and `dl reel-preview`. Do not spend the first pass on open-ended browsing, auth debugging, data validation, or perfect product capture. Source capture is allowed only as a short, bounded step; if it blocks, use existing assets/generated placeholders and keep moving. Replace with real screenshots/data during the next iteration.
+
 ## Reel/short defaults
 
 Before rendering an upload-quality reel, run this gate:
 
+- **Draft-first workflow:** for a new reel, the first deliverable is a watchable draft with scratch VO and contact sheet. Real logged-in captures, exact numbers, final VO, and upload render are second-pass work unless the user explicitly asks for source verification first.
+- **Goal in second 0-1:** the viewer must immediately know the situation/problem/product. If the first spoken sentence does not name it, rewrite or re-record before visual polish.
+- **Voice energy:** reels need a conversational, interested delivery. Flat/low-LRA voice is a re-record issue, not something visual edits can hide.
 - **Standalone story:** first 2-4 seconds explain the product/context in voice, not only text.
 - **No dependency on another reel:** avoid openings like "а еще", "теперь", "можно..." unless the product was just named.
+- **Hook first, explanation second:** open with a viewer-facing problem, surprising number, failure, contrast, or funny situation. Do not start with only what the author finds interesting internally.
+- **Screencast is not enough:** raw static screenshots are low-retention. Prefer live footage, hand-held monitor capture, gameplay/product motion, meme/situation B-roll, or generated motion assets. If screenshots are necessary, use them as framed/inset cards or add `Scene(..., ken_burns=True)` plus moving surrounding elements.
+- **Motion floor:** no more than ~3 seconds of static screenshot without motion; no run of repeated identical UI frames unless the text itself is the punchline.
 - **Readable phone text:** main overlay should be short; subtitle should be a second readable line, usually `sub_ratio >= 0.5` for vertical reels.
 - **Ending:** hold a deliberate final frame with site/product/CTA for about one second.
 - **Preview first:** run `dl reel-preview <edit>` and inspect the contact sheet/keyframes before any `--quality upload` render.
+- **Render one reel edit at a time:** separate reel edits share `data/finalize/main_*` and `_concat.txt`; do not run upload renders for multiple edits in parallel.
 
 ## Infographic and motion workflow
 

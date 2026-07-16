@@ -1,0 +1,69 @@
+FILTER_COMPLEX:
+[1:v]scale=3840:6826:force_original_aspect_ratio=increase,crop=3840:6826,setsar=1,fps=30,format=yuv420p[s0]
+
+CMD:
+ffmpeg -y -i data/reels/reel_20260603_wishlist_graphs_scratch_audio.wav -stream_loop -1 -ss 0.000 -t 22.177 -i data/infographics/reel_20260603_wishlist_graphs_light_smooth_scroll.mp4 -filter_complex [1:v]scale=3840:6826:force_original_aspect_ratio=increase,crop=3840:6826,setsar=1,fps=30,format=yuv420p[s0] -map [s0] -map 0:a -c:v libx264 -preset medium -crf 18 -pix_fmt yuv420p -c:a aac -b:a 256k -ar 48000 -movflags +faststart -color_primaries bt709 -color_trc bt709 -colorspace bt709 -t 22.177 data/finalize/main_3840w_upload.mp4
+
+STDERR:
+ffmpeg version N-122685-g9bfa1635ae-20260209 Copyright (c) 2000-2026 the FFmpeg developers
+  built with gcc 15.2.0 (crosstool-NG 1.28.0.1_403899e)
+  configuration: --prefix=/ffbuild/prefix --pkg-config-flags=--static --pkg-config=pkg-config --cross-prefix=x86_64-w64-mingw32- --arch=x86_64 --target-os=mingw32 --enable-gpl --enable-version3 --disable-debug --enable-shared --disable-static --disable-w32threads --enable-pthreads --enable-iconv --enable-zlib --enable-libxml2 --enable-libvmaf --enable-fontconfig --enable-libharfbuzz --enable-libfreetype --enable-libfribidi --enable-vulkan --enable-libshaderc --enable-libvorbis --disable-libxcb --disable-xlib --disable-libpulse --enable-opencl --enable-gmp --enable-lzma --enable-liblcevc-dec --enable-amf --enable-libaom --enable-libaribb24 --enable-avisynth --enable-chromaprint --enable-libdav1d --enable-libdavs2 --enable-libdvdread --enable-libdvdnav --disable-libfdk-aac --enable-ffnvcodec --enable-cuda-llvm --enable-frei0r --enable-libgme --enable-libkvazaar --enable-libaribcaption --enable-libass --enable-libbluray --enable-libjxl --enable-libmp3lame --enable-libopus --enable-libplacebo --enable-librist --enable-libssh --enable-libtheora --enable-libvpx --enable-libwebp --enable-libzmq --enable-lv2 --enable-libvpl --enable-openal --enable-liboapv --enable-libopencore-amrnb --enable-libopencore-amrwb --enable-libopenh264 --enable-libopenjpeg --enable-libopenmpt --enable-librav1e --enable-librubberband --enable-schannel --enable-sdl2 --enable-libsnappy --enable-libsoxr --enable-libsrt --enable-libsvtav1 --enable-libtwolame --enable-libuavs3d --disable-libdrm --enable-vaapi --enable-libvidstab --enable-libvvenc --enable-whisper --enable-libx264 --enable-libx265 --enable-libxavs2 --enable-libxvid --enable-libzimg --enable-libzvbi --extra-cflags=-DLIBTWOLAME_STATIC --extra-cxxflags= --extra-libs=-lgomp --extra-ldflags=-pthread --extra-ldexeflags= --cc=x86_64-w64-mingw32-gcc --cxx=x86_64-w64-mingw32-g++ --ar=x86_64-w64-mingw32-gcc-ar --ranlib=x86_64-w64-mingw32-gcc-ranlib --nm=x86_64-w64-mingw32-gcc-nm --extra-version=20260209
+  libavutil      60. 24.100 / 60. 24.100
+  libavcodec     62. 23.103 / 62. 23.103
+  libavformat    62.  8.102 / 62.  8.102
+  libavdevice    62.  2.100 / 62.  2.100
+  libavfilter    11. 12.100 / 11. 12.100
+  libswscale      9.  3.100 /  9.  3.100
+  libswresample   6.  2.100 /  6.  2.100
+[aist#0:0/pcm_s16le @ 00000233771b5540] Guessed Channel Layout: mono
+Input #0, wav, from 'data/reels/reel_20260603_wishlist_graphs_scratch_audio.wav':
+  Duration: 00:00:22.18, bitrate: 352 kb/s
+  Stream #0:0: Audio: pcm_s16le ([1][0][0][0] / 0x0001), 22050 Hz, mono, s16, 352 kb/s
+Input #1, mov,mp4,m4a,3gp,3g2,mj2, from 'data/infographics/reel_20260603_wishlist_graphs_light_smooth_scroll.mp4':
+  Metadata:
+    major_brand     : isom
+    minor_version   : 512
+    compatible_brands: isomiso2avc1mp41
+    encoder         : Lavf62.8.102
+  Duration: 00:00:22.17, start: 0.000000, bitrate: 2945 kb/s
+  Stream #1:0[0x1](und): Video: h264 (High) (avc1 / 0x31637661), yuv420p(progressive), 1080x1920, 2943 kb/s, 30 fps, 30 tbr, 15360 tbn (default)
+    Metadata:
+      handler_name    : VideoHandler
+      encoder         : Lavc62.23.103 libx264
+Stream mapping:
+  Stream #1:0 (h264) -> scale:default
+  format:default -> Stream #0:0 (libx264)
+  Stream #0:0 -> #0:1 (pcm_s16le (native) -> aac (native))
+Press [q] to stop, [?] for help
+[libx264 @ 00000233791f0a80] using SAR=1/1
+[libx264 @ 00000233791f0a80] using cpu capabilities: MMX2 SSE2Fast SSSE3 SSE4.2 AVX FMA3 BMI2 AVX2
+[libx264 @ 00000233791f0a80] profile High, level 6.0, 4:2:0, 8-bit
+[libx264 @ 00000233791f0a80] 264 - core 165 - H.264/MPEG-4 AVC codec - Copyleft 2003-2025 - http://www.videolan.org/x264.html - options: cabac=1 ref=3 deblock=1:0:0 analyse=0x3:0x113 me=hex subme=7 psy=1 psy_rd=1.00:0.00 mixed_ref=1 me_range=16 chroma_me=1 trellis=1 8x8dct=1 cqm=0 deadzone=21,11 fast_pskip=1 chroma_qp_offset=-2 threads=48 lookahead_threads=8 sliced_threads=0 nr=0 decimate=1 interlaced=0 bluray_compat=0 constrained_intra=0 bframes=3 b_pyramid=2 b_adapt=1 b_bias=0 direct=1 weightb=1 open_gop=0 weightp=2 keyint=250 keyint_min=25 scenecut=40 intra_refresh=0 rc_lookahead=40 rc=crf mbtree=1 crf=18.0 qcomp=0.60 qpmin=0 qpmax=69 qpstep=4 ip_ratio=1.40 aq=1:1.00
+Output #0, mp4, to 'data/finalize/main_3840w_upload.mp4':
+  Metadata:
+    encoder         : Lavf62.8.102
+  Stream #0:0: Video: h264 (avc1 / 0x31637661), yuv420p(tv, bt709/unknown/unknown, progressive), 3840x6826 [SAR 1:1 DAR 1920:3413], q=2-31, 30 fps, 15360 tbn
+    Metadata:
+      encoder         : Lavc62.23.103 libx264
+    Side data:
+      CPB properties: bitrate max/min/avg: 0/0/0 buffer size: 0 vbv_delay: N/A
+  Stream #0:1: Audio: aac (LC) (mp4a / 0x6134706D), 48000 Hz, mono, fltp, 256 kb/s
+    Metadata:
+      encoder         : Lavc62.23.103 aac
+frame=    0 fps=0.0 q=0.0 size=       0KiB time=N/A bitrate=N/A speed=N/A elapsed=0:00:00.51    
+frame=    0 fps=0.0 q=0.0 size=       0KiB time=N/A bitrate=N/A speed=N/A elapsed=0:00:01.03    
+frame=    0 fps=0.0 q=0.0 size=       0KiB time=N/A bitrate=N/A speed=N/A elapsed=0:00:01.54    
+frame=    0 fps=0.0 q=0.0 size=       0KiB time=N/A bitrate=N/A speed=N/A elapsed=0:00:02.06    
+frame=    0 fps=0.0 q=0.0 size=       0KiB time=N/A bitrate=N/A speed=N/A elapsed=0:00:02.57    
+frame=    0 fps=0.0 q=0.0 size=       0KiB time=N/A bitrate=N/A speed=N/A elapsed=0:00:03.09    
+frame=    0 fps=0.0 q=0.0 size=       0KiB time=N/A bitrate=N/A speed=N/A elapsed=0:00:03.60    
+x264 [error]: malloc of size 81733312 failed
+[vost#0:0/libx264 @ 0000023379210680] [enc:libx264 @ 0000023379233fc0] Error submitting video frame to the encoder
+[vost#0:0/libx264 @ 0000023379210680] [enc:libx264 @ 0000023379233fc0] Error encoding a frame: Generic error in an external library
+[vost#0:0/libx264 @ 0000023379210680] Task finished with error code: -542398533 (Generic error in an external library)
+[vost#0:0/libx264 @ 0000023379210680] Terminating thread with return code -542398533 (Generic error in an external library)
+[mp4 @ 00000233771b5b80] Starting second pass: moving the moov atom to the beginning of the file
+[out#0/mp4 @ 0000023377276200] video:0KiB audio:23KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: 4.628199%
+frame=    0 fps=0.0 q=0.0 Lsize=      24KiB time=N/A bitrate=N/A speed=N/A elapsed=0:00:04.73    
+[aac @ 00000233791f52c0] Qavg: 65498.242
+Conversion failed!
