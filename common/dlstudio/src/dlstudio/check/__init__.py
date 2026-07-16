@@ -11,17 +11,200 @@ Every gate has a VQ code (see docs/ARCHITECTURE_V2.md). Baseline set:
 - VQ-RES    resolution sanity: absurd upscales / dims beyond encoder
             limits (the 3840x6826 x264 OOM class) (error)
 - VQ-OFFSET scene offset at/past source EOF (warn, compile clamps)
+
+Design note: chunk word indices and pre-clamp offsets are NOT stored in the
+IR (contract freeze — no new fields), so the two facts that are lost after
+resolution — out-of-range indices and offset-past-EOF — are recorded by
+compile into Timeline.warnings with "VQ-WORDS:"/"VQ-OFFSET:" tags and promoted
+to issues here. Everything else (asset existence, window overlap, resolution)
+is derived directly from the IR.
 """
 from __future__ import annotations
 
-from dlstudio.ir import CheckReport, Timeline
+import json
+import re
+import subprocess
+from pathlib import Path
+
+from dlstudio.ir import CheckIssue, CheckReport, Timeline
+
+_EPS = 1e-3
+_MAX_DIM = 4096          # x264 practical safety ceiling per axis
+_MAX_UPSCALE = 2.2       # full-bleed upscale factor cap (the 3840x6826 OOM class)
+
+_WARN_RE = re.compile(r"^(?:\[(?P<beat>[^\]]+)\]\s*)?(?P<tag>VQ-[A-Z]+):\s*(?P<msg>.*)$")
 
 
 def run_checks(timeline: Timeline) -> CheckReport:
-    raise NotImplementedError("compile-agent implements this")
+    issues: list[CheckIssue] = []
+    issues += _check_assets(timeline)
+    issues += _check_words(timeline)
+    issues += _check_resolution(timeline)
+    issues += _promote_warnings(timeline)
+
+    # dedupe exact repeats (compile-tagged overlap vs IR-native overlap)
+    seen: set[tuple[str, str, str]] = set()
+    unique: list[CheckIssue] = []
+    for it in issues:
+        key = (it.code, it.message, it.where)
+        if key not in seen:
+            seen.add(key)
+            unique.append(it)
+    return CheckReport(issues=unique)
 
 
-def verify_output(video_path: str, expected_duration: float, *, tolerance: float = 0.25) -> None:
-    """ffprobe the rendered file; raise RuntimeError on duration mismatch.
-    Called by render/assemble as a mandatory postcondition."""
-    raise NotImplementedError("compile-agent implements this")
+# ─── VQ-ASSET ───────────────────────────────────────────────────────────────
+
+def _check_assets(timeline: Timeline) -> list[CheckIssue]:
+    out: list[CheckIssue] = []
+    for path, probe in timeline.assets.items():
+        if not probe.exists:
+            out.append(CheckIssue(
+                severity="error", code="VQ-ASSET",
+                message=f"referenced {probe.kind} asset is missing: {path}",
+                where=path,
+            ))
+    return out
+
+
+# ─── VQ-WORDS (IR-native overlap/order + compile-tagged out-of-range) ────────
+
+def _check_words(timeline: Timeline) -> list[CheckIssue]:
+    out: list[CheckIssue] = []
+    for beat in timeline.beats:
+        prev = None
+        for ov in beat.overlays:
+            if prev is not None:
+                if ov.t0 < prev.t0 - _EPS:
+                    out.append(CheckIssue(
+                        severity="error", code="VQ-WORDS",
+                        message=(f"overlay windows out of order: chunk "
+                                 f"{ov.chunk_index} starts {ov.t0:.3f}s before "
+                                 f"chunk {prev.chunk_index} at {prev.t0:.3f}s"),
+                        where=f"{beat.id}:{ov.chunk_index}",
+                    ))
+                elif ov.t0 < prev.t1 - _EPS:
+                    out.append(CheckIssue(
+                        severity="error", code="VQ-WORDS",
+                        message=(f"overlapping chunk windows: chunk "
+                                 f"{prev.chunk_index} ends {prev.t1:.3f}s, chunk "
+                                 f"{ov.chunk_index} starts {ov.t0:.3f}s"),
+                        where=f"{beat.id}:{ov.chunk_index}",
+                    ))
+            prev = ov
+    return out
+
+
+# ─── VQ-RES ─────────────────────────────────────────────────────────────────
+
+def _check_resolution(timeline: Timeline) -> list[CheckIssue]:
+    out: list[CheckIssue] = []
+    w, h = timeline.design.resolution
+    if w > _MAX_DIM or h > _MAX_DIM:
+        out.append(CheckIssue(
+            severity="error", code="VQ-RES",
+            message=(f"output resolution {w}x{h} exceeds encoder-safe "
+                     f"{_MAX_DIM}px per axis (x264 OOM class)"),
+            where=timeline.edit_name,
+        ))
+    for beat in timeline.beats:
+        for si, seg in enumerate(beat.segments):
+            probe = timeline.assets.get(seg.src)
+            if probe is None or probe.width in (None, 0) or probe.height in (None, 0):
+                continue
+            scale = max(w / probe.width, h / probe.height)
+            if scale > _MAX_UPSCALE + 1e-9:
+                out.append(CheckIssue(
+                    severity="error", code="VQ-RES",
+                    message=(f"full-bleed {seg.kind} {seg.src} at "
+                             f"{probe.width}x{probe.height} upscales "
+                             f"{scale:.2f}x to {w}x{h} (> {_MAX_UPSCALE}x cap)"),
+                    where=f"{beat.id}:seg{si}",
+                ))
+    return out
+
+
+# ─── compile warnings -> issues ──────────────────────────────────────────────
+
+def _promote_warnings(timeline: Timeline) -> list[CheckIssue]:
+    out: list[CheckIssue] = []
+    for w in timeline.warnings:
+        m = _WARN_RE.match(w)
+        if not m:
+            continue
+        tag = m.group("tag")
+        where = m.group("beat") or ""
+        msg = m.group("msg")
+        if tag == "VQ-OFFSET":
+            out.append(CheckIssue(severity="warn", code="VQ-OFFSET",
+                                  message=msg, where=where))
+        elif tag == "VQ-WORDS":
+            out.append(CheckIssue(severity="error", code="VQ-WORDS",
+                                  message=msg, where=where))
+        else:
+            out.append(CheckIssue(severity="warn", code=tag,
+                                  message=msg, where=where))
+    return out
+
+
+# ─── VQ-SYNC postcondition ───────────────────────────────────────────────────
+
+def verify_output(
+    video_path: str,
+    expected_duration: float,
+    *,
+    tolerance: float = 0.25,
+) -> None:
+    """ffprobe the rendered file; raise RuntimeError on duration mismatch or a
+    missing/zero video stream. Renderers MUST call this after writing an MP4 —
+    it is the postcondition that would have caught the v1 bug that produced a
+    silent audio-only/truncated file for 22 blind iterations.
+    """
+    p = Path(video_path)
+    if not p.exists():
+        raise RuntimeError(
+            f"VQ-SYNC: output does not exist: {video_path} "
+            f"(expected {expected_duration:.3f}s)")
+
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-print_format", "json",
+             "-show_format", "-show_streams", video_path],
+            capture_output=True, text=True,
+        )
+    except FileNotFoundError as e:  # pragma: no cover - ffprobe missing
+        raise RuntimeError("ffprobe not found on PATH") from e
+
+    if r.returncode != 0:
+        raise RuntimeError(
+            f"VQ-SYNC: ffprobe could not read {video_path}: {r.stderr.strip()}")
+
+    try:
+        data = json.loads(r.stdout)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            f"VQ-SYNC: ffprobe returned no parseable data for {video_path}") from e
+
+    streams = data.get("streams", [])
+    has_video = any(s.get("codec_type") == "video" for s in streams)
+    if not has_video:
+        raise RuntimeError(
+            f"VQ-SYNC: {video_path} has no video stream "
+            f"(expected {expected_duration:.3f}s of video)")
+
+    dur_raw = data.get("format", {}).get("duration")
+    try:
+        actual = float(dur_raw)
+    except (TypeError, ValueError):
+        actual = 0.0
+    if actual <= 0.0:
+        raise RuntimeError(
+            f"VQ-SYNC: {video_path} reports zero/invalid duration "
+            f"({dur_raw!r}); expected {expected_duration:.3f}s")
+
+    delta = abs(actual - expected_duration)
+    if delta > tolerance:
+        raise RuntimeError(
+            f"VQ-SYNC: duration mismatch for {video_path}: "
+            f"actual {actual:.3f}s vs expected {expected_duration:.3f}s "
+            f"(delta {delta:.3f}s > tolerance {tolerance:.3f}s)")

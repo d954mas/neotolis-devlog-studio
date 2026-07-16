@@ -137,8 +137,8 @@ report-only output.
 
 | Phase | Delivers | Acceptance |
 |---|---|---|
-| 0 | Legacy safety freeze | atomic cache fix (done), June work committed |
-| 1 | model + compile/IR + graph AST + beat render + cache v2 + `dl2 check/compose/iter` | a v2 beat renders with golden-frame tests green |
+| 0 | Legacy safety freeze — **DONE 2026-07-16** | atomic cache fix (done), June work committed |
+| 1 | model + compile/IR + graph AST + beat render + cache v2 + `dl2 check/compose/iter` — **DONE 2026-07-16** (214 tests incl. real-ffmpeg E2E; follow-ups in docs/issues/dlstudio-phase1-followups.md) | a v2 beat renders with golden-frame tests green |
 | 2 | assemble: full mix graph + transitions + `dl2 render/final` | full video with music across beats, ducking, -14 LUFS verified |
 | 3 | Studio v2 (FastAPI + Vite/TS) | record → process → render → review loop in browser, feature parity + mix view |
 | 4 | services (WhisperX, audiofix, TTS, capture, publish) + VQ catalog + new agents | `dl2 doctor` green; improve loop runs on v2 with grounded reviewers |

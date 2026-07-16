@@ -38,7 +38,9 @@ class WordSpan(_Model):
 
 class AssetProbe(_Model):
     """ffprobe facts for one referenced asset. duration/width/height are
-    None for kinds where they don't apply or when probing was skipped."""
+    None for kinds where they don't apply or when probing was skipped.
+    `readable` distinguishes present-but-broken files from healthy ones:
+    None = not determined, False = exists but ffprobe failed on it."""
 
     path: str
     kind: Literal["image", "video", "audio", "font", "other"]
@@ -47,6 +49,7 @@ class AssetProbe(_Model):
     width: int | None = None
     height: int | None = None
     has_audio: bool | None = None
+    readable: bool | None = None
 
 
 class IRAnim(_Model):
@@ -164,6 +167,10 @@ class Timeline(_Model):
     assets: dict[str, AssetProbe]            # path -> probe facts
     output: str
     warnings: list[str] = Field(default_factory=list)
+    # Structured compile-time diagnostics. Preferred over string-tagged
+    # warnings: compile appends CheckIssue objects here and check merges
+    # them without regex parsing. `warnings` stays for human display.
+    diagnostics: list[CheckIssue] = Field(default_factory=list)
 
     @property
     def duration(self) -> float:

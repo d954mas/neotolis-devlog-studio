@@ -21,11 +21,537 @@ Conventions (v1 parity where sensible):
 """
 from __future__ import annotations
 
+import argparse
+import concurrent.futures
+import importlib
+import os
+import shutil
+import subprocess
 import sys
+import tomllib
+from dataclasses import dataclass
+from pathlib import Path
+
+from dlstudio.ir import IRBeat, Timeline
+from dlstudio.model import Design, Edit
+
+CONFIG_NAME = "devlog.toml"
+
+_WIDTH_PRESETS = {
+    "360p": 640,
+    "540p": 960,
+    "720p": 1280,
+    "1080p": 1920,
+    "1440p": 2560,
+    "4k": 3840,
+}
+
+_QUALITY_PRESETS = ("draft", "preview", "standard", "upload", "master")
+
+
+class CliError(Exception):
+    """User-facing CLI error. main() prints this as a single line and
+    exits 1 instead of showing a traceback (unless --debug is passed)."""
+
+
+# ─── workspace / config ──────────────────────────────────────────────────
+
+def _find_workspace_root(start: Path | None = None) -> Path | None:
+    """Search upward from `start` (default cwd) for a workspace marker:
+    devlog.toml first, then a .git directory. Returns None if neither is
+    found before hitting the filesystem root."""
+    cur = (start or Path.cwd()).resolve()
+    if cur.is_file():
+        cur = cur.parent
+    for parent in (cur, *cur.parents):
+        if (parent / CONFIG_NAME).exists():
+            return parent
+    for parent in (cur, *cur.parents):
+        if (parent / ".git").exists():
+            return parent
+    return None
+
+
+def _load_v2_config(workspace_root: Path | None) -> dict:
+    """Read the [v2] table from workspace devlog.toml, if present."""
+    if workspace_root is None:
+        return {}
+    cfg_path = workspace_root / CONFIG_NAME
+    if not cfg_path.exists():
+        return {}
+    data = tomllib.loads(cfg_path.read_text(encoding="utf-8"))
+    return dict(data.get("v2", {}))
+
+
+def _resolve_edit_arg(edit_arg: str | None, v2_config: dict) -> str:
+    dotted = edit_arg or v2_config.get("default_edit")
+    if not dotted:
+        raise CliError(
+            "edit module is required: pass it explicitly or set "
+            "[v2] default_edit in devlog.toml"
+        )
+    return dotted
+
+
+# ─── edit loader ──────────────────────────────────────────────────────────
+
+def _project_root_for_module(module_file: Path, workspace_root: Path | None) -> Path:
+    """First parent of the module's directory that is a direct child of
+    `workspace_root`. Falls back to the legacy fixed-depth heuristic
+    (edits/<name>/__init__.py is two directories below the project root)
+    when no workspace root marker was found."""
+    module_dir = module_file.resolve().parent
+    if workspace_root is not None:
+        ws = workspace_root.resolve()
+        cur = module_dir
+        while cur.parent != cur and cur.parent != ws:
+            cur = cur.parent
+        if cur.parent == ws:
+            return cur
+    return module_dir.parent.parent
+
+
+def _load_edit(dotted: str) -> Edit:
+    """Import `dotted`, read its EDIT attribute, validate it, find the
+    project root (mirrors legacy loader semantics), and os.chdir there so
+    beats.py paths stay relative. Returns the Edit."""
+    try:
+        mod = importlib.import_module(dotted)
+    except ImportError as e:
+        raise CliError(f"cannot import edit module {dotted!r}: {e}") from e
+    if not hasattr(mod, "EDIT"):
+        raise CliError(
+            f"module {dotted!r} has no EDIT object — expected `EDIT = Edit(...)`"
+        )
+    edit = mod.EDIT
+    if not isinstance(edit, Edit):
+        raise CliError(f"{dotted}.EDIT is a {type(edit).__name__}, not dlstudio.model.Edit")
+    module_file = getattr(mod, "__file__", None)
+    if not module_file:
+        raise CliError(f"module {dotted!r} has no __file__ (namespace package?)")
+    workspace_root = _find_workspace_root()
+    project_root = _project_root_for_module(Path(module_file), workspace_root)
+    os.chdir(project_root)
+    print(f"[dl2] cwd -> {project_root}")
+    return edit
+
+
+# ─── render option helpers ────────────────────────────────────────────────
+
+def _resize_design(design: Design, width_spec: str | int | None) -> Design:
+    """Return a copy of `design` scaled to `width_spec`, aspect preserved.
+
+    `width_spec` is a preset name ("540p", "4k", ...) or a literal pixel
+    width. None returns `design` unchanged. Dimensions are rounded to even
+    pixels (x264 requirement).
+    """
+    if width_spec is None:
+        return design
+    if isinstance(width_spec, str) and width_spec in _WIDTH_PRESETS:
+        new_w = _WIDTH_PRESETS[width_spec]
+    else:
+        try:
+            new_w = int(width_spec)
+        except (TypeError, ValueError):
+            raise CliError(
+                f"--width must be an int or one of {sorted(_WIDTH_PRESETS)}, got {width_spec!r}"
+            )
+    orig_w, orig_h = design.resolution
+    new_h = round(new_w * orig_h / orig_w)
+    new_w = (new_w // 2) * 2
+    new_h = (new_h // 2) * 2
+    return design.model_copy(update={"resolution": (new_w, new_h)})
+
+
+def _add_render_flags(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--width", help="preset (360p/540p/720p/1080p/1440p/4k) or literal pixel width")
+    p.add_argument("--quality", choices=_QUALITY_PRESETS, help="render quality tier")
+    p.add_argument("--gpu", action="store_true", help="use GPU (NVENC) encoding")
+    p.add_argument("--no-cache", action="store_true", help="bypass the render cache")
+
+
+# ─── compose worker (top-level so it's picklable for -j N) ────────────────
+
+def _compose_worker(
+    beat: IRBeat,
+    design: Design,
+    timeline: Timeline,
+    quality: str,
+    gpu: bool,
+    width_px: int | None,
+    out_path: str,
+    cache_dir_override: str | None,
+    beat_chunks: list | None = None,
+) -> str:
+    """Render one beat to `out_path`, cache-aware. Runs in a worker process
+    under -j N (each worker is a fresh interpreter; the cache's atomic
+    publish makes concurrent workers safe even on a shared key).
+
+    `beat_chunks` is this beat's source Chunk list — workers are fresh
+    interpreters, so the chunk resolver must be re-registered here, not in
+    the parent process."""
+    if cache_dir_override:
+        os.environ[_cache_dir_env_var()] = cache_dir_override
+    from dlstudio import cache as dl_cache
+    from dlstudio import render as dl_render
+
+    if beat_chunks is not None:
+        from dlstudio.render import beat as render_beat_mod
+
+        render_beat_mod.set_chunk_resolver(lambda _bid, ci: beat_chunks[ci])
+
+    key = dl_cache.beat_key(beat, design, quality=quality, width=width_px, gpu=gpu)
+    out = Path(out_path)
+    if dl_cache.get(key, out):
+        return f"cache hit {key} -> {out}"
+    opts = dl_render.RenderOpts(width=width_px, quality=quality, gpu=gpu, workdir=out.parent)
+    rendered = dl_render.render_beat(beat, design, timeline, opts)
+    dl_cache.put(key, rendered)
+    dl_cache.get(key, out)
+    return f"rendered {key} -> {out}"
+
+
+def _cache_dir_env_var() -> str:
+    from dlstudio import cache as dl_cache
+
+    return dl_cache.CACHE_DIR_ENV_VAR
+
+
+def _render_targets(
+    targets: list[IRBeat],
+    design: Design,
+    timeline: Timeline,
+    *,
+    quality: str,
+    gpu: bool,
+    width_px: int | None,
+    beat_files: dict[str, Path],
+    jobs: int,
+    chunks_by_beat: dict[str, list] | None = None,
+) -> None:
+    """Render every beat in `targets` to beat_files[beat.id]. Serial when
+    jobs <= 1 or there's nothing to parallelize; otherwise fans out across
+    `jobs` worker processes via ProcessPoolExecutor."""
+    cache_dir_override = os.environ.get(_cache_dir_env_var())
+    by_beat = chunks_by_beat or {}
+    if jobs > 1 and len(targets) > 1:
+        print(f"[dl2] launching {jobs} workers for {len(targets)} beats")
+        with concurrent.futures.ProcessPoolExecutor(max_workers=jobs) as pool:
+            futures = {
+                pool.submit(
+                    _compose_worker, b, design, timeline, quality, gpu, width_px,
+                    str(beat_files[b.id]), cache_dir_override, by_beat.get(b.id),
+                ): b.id
+                for b in targets
+            }
+            for fut in concurrent.futures.as_completed(futures):
+                bid = futures[fut]
+                msg = fut.result()
+                print(f"[dl2] {bid}: {msg}")
+    else:
+        for b in targets:
+            msg = _compose_worker(
+                b, design, timeline, quality, gpu, width_px,
+                str(beat_files[b.id]), cache_dir_override, by_beat.get(b.id),
+            )
+            print(f"[dl2] {b.id}: {msg}")
+
+
+# ─── commands ──────────────────────────────────────────────────────────
+
+def cmd_check(args: argparse.Namespace) -> int:
+    v2_config = _load_v2_config(_find_workspace_root())
+    dotted = _resolve_edit_arg(args.edit, v2_config)
+    edit = _load_edit(dotted)
+
+    from dlstudio import check as dl_check
+    from dlstudio import compile as dl_compile
+
+    timeline = dl_compile.build_timeline(edit)
+    report = dl_check.run_checks(timeline)
+    for issue in report.issues:
+        print(f"[{issue.severity.upper()}] {issue.code} {issue.where}: {issue.message}")
+    errors = report.errors
+    warnings = [i for i in report.issues if i.severity == "warn"]
+    print(f"[dl2] check: {len(errors)} errors, {len(warnings)} warnings")
+    return 1 if errors else 0
+
+
+def cmd_ir(args: argparse.Namespace) -> int:
+    v2_config = _load_v2_config(_find_workspace_root())
+    dotted = _resolve_edit_arg(args.edit, v2_config)
+    edit = _load_edit(dotted)
+
+    from dlstudio import compile as dl_compile
+
+    timeline = dl_compile.build_timeline(edit)
+    text = timeline.model_dump_json(indent=2)
+    if args.out:
+        out_path = Path(args.out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(text, encoding="utf-8")
+        print(f"[dl2] wrote {out_path}")
+    else:
+        print(text)
+    return 0
+
+
+def _resolve_compose_args(args: argparse.Namespace, v2_config: dict) -> tuple[str, str]:
+    """`edit_or_beat` + optional `beat_id` (v1-style disambiguation): when
+    beat_id is omitted, edit_or_beat IS the beat id and the edit comes from
+    config/default_edit."""
+    if args.beat_id is None:
+        dotted = _resolve_edit_arg(None, v2_config)
+        beat_id = args.edit_or_beat
+    else:
+        dotted = _resolve_edit_arg(args.edit_or_beat, v2_config)
+        beat_id = args.beat_id
+    return dotted, beat_id
+
+
+def cmd_compose(args: argparse.Namespace) -> int:
+    v2_config = _load_v2_config(_find_workspace_root())
+    dotted, beat_id = _resolve_compose_args(args, v2_config)
+    edit = _load_edit(dotted)
+
+    from dlstudio import cache as dl_cache
+    from dlstudio import compile as dl_compile
+    from dlstudio import render as dl_render
+
+    timeline = dl_compile.build_timeline(edit)
+    beat = next((b for b in timeline.beats if b.id == beat_id), None)
+    if beat is None:
+        available = [b.id for b in timeline.beats]
+        raise CliError(f"beat {beat_id!r} not in edit {edit.name!r}; available: {available}")
+
+    design = _resize_design(timeline.design, args.width)
+    width_px = design.resolution[0] if args.width else None
+    quality = args.quality or "standard"
+
+    out_dir = Path("data/finalize")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{beat_id}.mp4"
+
+    cache_enabled = not args.no_cache
+    key = dl_cache.beat_key(beat, design, quality=quality, width=width_px, gpu=args.gpu)
+    if cache_enabled and dl_cache.get(key, out_path):
+        print(f"[dl2] cache hit {key} -> {out_path}")
+        return 0
+
+    from dlstudio.render import beat as render_beat_mod
+
+    render_beat_mod.set_chunk_resolver(lambda bid, ci: edit.beats[bid].chunks[ci])
+
+    opts = dl_render.RenderOpts(width=width_px, quality=quality, gpu=args.gpu, workdir=out_dir)
+    rendered = dl_render.render_beat(beat, design, timeline, opts)
+    if cache_enabled:
+        dl_cache.put(key, rendered)
+        dl_cache.get(key, out_path)
+    else:
+        shutil.copyfile(rendered, out_path)
+    print(f"[dl2] rendered {beat_id} -> {out_path}")
+    return 0
+
+
+def cmd_iter(args: argparse.Namespace) -> int:
+    v2_config = _load_v2_config(_find_workspace_root())
+    dotted = _resolve_edit_arg(args.edit, v2_config)
+    edit = _load_edit(dotted)
+
+    from dlstudio import cache as dl_cache
+    from dlstudio import compile as dl_compile
+    from dlstudio import render as dl_render
+
+    timeline = dl_compile.build_timeline(edit)
+    width_spec = args.width or "540p"
+    quality = args.quality or "draft"
+    design = _resize_design(timeline.design, width_spec)
+    width_px = design.resolution[0]
+
+    all_beats = list(timeline.beats)
+    out_dir = Path("data/finalize")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    beat_files = {b.id: out_dir / f"{b.id}.mp4" for b in all_beats}
+
+    if args.stale:
+        targets = [
+            b for b in all_beats
+            if not dl_cache.has(dl_cache.beat_key(b, design, quality=quality, width=width_px, gpu=args.gpu))
+        ]
+        print(f"[dl2] stale beats: {len(targets)}/{len(all_beats)}")
+        if not targets:
+            print("[dl2] nothing to render")
+    else:
+        targets = all_beats
+
+    jobs = max(1, args.jobs or 1)
+    _render_targets(
+        targets, design, timeline,
+        quality=quality, gpu=args.gpu, width_px=width_px,
+        beat_files=beat_files, jobs=jobs,
+        chunks_by_beat={bid: b.chunks for bid, b in edit.beats.items()},
+    )
+
+    missing = [bid for bid, p in beat_files.items() if not p.exists()]
+    if missing:
+        raise CliError(
+            f"missing rendered beats (no prior render to reuse for --stale): {missing}"
+        )
+
+    opts = dl_render.RenderOpts(width=width_px, quality=quality, gpu=args.gpu, workdir=out_dir)
+    final = dl_render.assemble(timeline, beat_files, opts)
+    print(f"[dl2] assembled -> {final}")
+    return 0
+
+
+def _format_beats_table(rows: list[tuple[str, float, int, bool]]) -> str:
+    header = f"{'beat':<28} {'dur(s)':>8} {'chunks':>7} {'cached':>7}"
+    lines = [header, "-" * len(header)]
+    for bid, dur, n_chunks, cached in rows:
+        lines.append(f"{bid:<28} {dur:>8.2f} {n_chunks:>7} {'yes' if cached else 'no':>7}")
+    return "\n".join(lines)
+
+
+def cmd_beats(args: argparse.Namespace) -> int:
+    v2_config = _load_v2_config(_find_workspace_root())
+    dotted = _resolve_edit_arg(args.edit, v2_config)
+    edit = _load_edit(dotted)
+
+    from dlstudio import cache as dl_cache
+    from dlstudio import compile as dl_compile
+
+    timeline = dl_compile.build_timeline(edit)
+    design = _resize_design(timeline.design, args.width)
+    width_px = design.resolution[0] if args.width else None
+    quality = args.quality or "standard"
+
+    rows = []
+    for b in timeline.beats:
+        chunk_count = len(edit.beats[b.id].chunks) if b.id in edit.beats else 0
+        key = dl_cache.beat_key(b, design, quality=quality, width=width_px, gpu=args.gpu)
+        rows.append((b.id, b.duration, chunk_count, dl_cache.has(key)))
+    print(_format_beats_table(rows))
+    return 0
+
+
+@dataclass(frozen=True)
+class DoctorCheck:
+    name: str
+    ok: bool
+    detail: str
+    required: bool = True
+
+
+def _tool_version(exe: str, path: str) -> str:
+    try:
+        result = subprocess.run(
+            [exe, "-version"], capture_output=True, text=True, timeout=5,
+        )
+        text = (result.stdout or result.stderr or "").strip()
+        return text.splitlines()[0] if text else "(version unknown)"
+    except Exception as e:  # pragma: no cover - defensive, environment-dependent
+        return f"found at {path} but failed to run: {e}"
+
+
+def run_doctor() -> list[DoctorCheck]:
+    """ffmpeg/ffprobe presence + version, python version, and the core
+    pydantic/PIL/numpy imports. All are `required` — a missing ffmpeg (or
+    any core dependency) is a hard doctor failure."""
+    checks: list[DoctorCheck] = []
+
+    for exe in ("ffmpeg", "ffprobe"):
+        path = shutil.which(exe)
+        if path:
+            checks.append(DoctorCheck(exe, True, f"{path} — {_tool_version(exe, path)}"))
+        else:
+            checks.append(DoctorCheck(exe, False, "not found on PATH"))
+
+    checks.append(DoctorCheck("python", True, sys.version.split()[0]))
+
+    for mod_name in ("pydantic", "PIL", "numpy"):
+        try:
+            mod = importlib.import_module(mod_name)
+            version = getattr(mod, "__version__", "unknown")
+            checks.append(DoctorCheck(mod_name, True, f"version {version}"))
+        except ImportError as e:
+            checks.append(DoctorCheck(mod_name, False, str(e)))
+
+    return checks
+
+
+def _format_doctor(checks: list[DoctorCheck]) -> str:
+    lines = []
+    for c in checks:
+        status = "OK" if c.ok else "MISSING"
+        lines.append(f"[{status}] {c.name}: {c.detail}")
+    return "\n".join(lines)
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    checks = run_doctor()
+    print(_format_doctor(checks))
+    failed = [c for c in checks if c.required and not c.ok]
+    return 1 if failed else 0
+
+
+# ─── argparse wiring ───────────────────────────────────────────────────
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="dl2", description="Studio v2 CLI")
+    parser.add_argument(
+        "--debug", action="store_true",
+        help="re-raise exceptions with a full traceback instead of a one-line message",
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p_check = sub.add_parser("check", help="compile the edit and run all checks")
+    p_check.add_argument("edit", nargs="?", help="dotted edit module path")
+    p_check.set_defaults(func=cmd_check)
+
+    p_ir = sub.add_parser("ir", help="dump the compiled Timeline IR as JSON")
+    p_ir.add_argument("edit", nargs="?")
+    p_ir.add_argument("--out", help="write JSON to this path instead of stdout")
+    p_ir.set_defaults(func=cmd_ir)
+
+    p_compose = sub.add_parser("compose", help="render one beat (cache-aware)")
+    p_compose.add_argument("edit_or_beat", help="beat id, or edit module path when beat_id is also given")
+    p_compose.add_argument("beat_id", nargs="?")
+    _add_render_flags(p_compose)
+    p_compose.set_defaults(func=cmd_compose)
+
+    p_iter = sub.add_parser("iter", help="draft-render all/stale beats and assemble")
+    p_iter.add_argument("edit", nargs="?")
+    p_iter.add_argument("--stale", action="store_true", help="only render cache-miss beats")
+    p_iter.add_argument("-j", "--jobs", type=int, default=1, help="parallel worker processes")
+    _add_render_flags(p_iter)
+    p_iter.set_defaults(func=cmd_iter)
+
+    p_beats = sub.add_parser("beats", help="beat durations / chunk counts / cache status")
+    p_beats.add_argument("edit", nargs="?")
+    _add_render_flags(p_beats)
+    p_beats.set_defaults(func=cmd_beats)
+
+    p_doctor = sub.add_parser("doctor", help="check local dependencies (ffmpeg, python, pydantic, ...)")
+    p_doctor.set_defaults(func=cmd_doctor)
+
+    return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    raise NotImplementedError("cli-agent implements this")
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    try:
+        return int(args.func(args) or 0)
+    except CliError as e:
+        print(f"[dl2] error: {e}", file=sys.stderr)
+        if args.debug:
+            raise
+        return 1
+    except Exception as e:
+        print(f"[dl2] error: {type(e).__name__}: {e}", file=sys.stderr)
+        if args.debug:
+            raise
+        return 1
 
 
 if __name__ == "__main__":

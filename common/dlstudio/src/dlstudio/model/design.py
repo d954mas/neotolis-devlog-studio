@@ -57,15 +57,17 @@ class Design(_Model):
     safe_margin_ratio: float = 0.05
 
     # Baseline for resolution-independent sizing: style sizes are authored
-    # for a 1080-high frame; px() scales any authored value to the actual
-    # render resolution. (Raster port: keep semantics aligned with legacy
-    # devlog.types.Design.px — if they differ, legacy wins; note it.)
-    def px(self, v: float, base: float = 1080.0) -> int:
-        return round(v * self.resolution[1] / base)
+    # for a 1920-WIDE frame; px() scales by WIDTH, matching legacy
+    # devlog.types.Design.px. Width-based scaling is the production-proven
+    # behavior for vertical reels: at 1080x1920 px(480) == 270 (the value
+    # v1 designs were tuned around), where height-based scaling would give
+    # a 3.2x larger 853.
+    def px(self, v: float, base: float = 1920.0) -> int:
+        return round(v * self.resolution[0] / base)
 
     @property
     def scale(self) -> float:
-        return self.resolution[1] / 1080.0
+        return self.resolution[0] / 1920.0
 
     def style(self, name: str) -> TextStyle:
         """Resolve a style name with sensible fallback chain:

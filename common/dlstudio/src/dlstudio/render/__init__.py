@@ -20,9 +20,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from dlstudio.ir import IRBeat, Timeline
-from dlstudio.model import Design
-
 
 @dataclass(frozen=True)
 class RenderOpts:
@@ -32,13 +29,10 @@ class RenderOpts:
     workdir: Path = Path("data/finalize")
 
 
-def render_beat(beat: IRBeat, design: Design, timeline: Timeline, opts: RenderOpts) -> Path:
-    """Render one beat to MP4 (+ sibling VO stem wav). Returns MP4 path.
-    MUST call check.verify_output() before returning."""
-    raise NotImplementedError("render-agent implements this")
+# Implementations live in the submodules (re-exported here so the public
+# render_beat/assemble/RenderOpts surface is stable). Imported AFTER RenderOpts
+# is defined so the submodules can type-hint against it without a cycle.
+from .beat import render_beat            # noqa: E402
+from .assemble import assemble           # noqa: E402
 
-
-def assemble(timeline: Timeline, beat_files: dict[str, Path], opts: RenderOpts) -> Path:
-    """Assemble rendered beats into the final output (timeline.output).
-    MUST call check.verify_output() before returning."""
-    raise NotImplementedError("render-agent implements this")
+__all__ = ["RenderOpts", "render_beat", "assemble"]

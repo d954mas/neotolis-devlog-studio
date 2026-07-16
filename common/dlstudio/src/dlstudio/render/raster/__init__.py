@@ -13,6 +13,12 @@ Rules:
 - px()/scale semantics: port from legacy devlog/types.py Design.px —
   if legacy semantics differ from dlstudio.model.Design.px, align the
   model helper to legacy behavior and note it in the commit.
+
+Implementation lives in the private `_content.py` (content renderers),
+`_decorations.py` (decoration passes), `_effects.py` (vectorized
+vignette), and `_util.py` (color/font/text-measurement helpers + the
+`Layout` geometry hint passed from content to decorations). Only the two
+functions below are public.
 """
 from __future__ import annotations
 
@@ -20,16 +26,45 @@ from pathlib import Path
 
 from PIL import Image
 
-from dlstudio.model import Chunk, Design
+from dlstudio.model import Chunk, Design, ImageShot, Overlay, Plate, VideoShot
+
+from ._content import render_image_shot, render_overlay, render_plate, render_video_shot
+from ._decorations import apply_decoration
+from ._util import Layout
 
 
-def render_chunk_png(chunk: Chunk, design: Design, out_path: Path) -> Path:
-    """Render the chunk's visual (content + decorations) to an RGBA PNG at
-    design resolution. Deterministic: same inputs -> byte-stable output
-    (required for cache correctness and golden tests)."""
-    raise NotImplementedError("raster-agent implements this")
+def _render_content(content, design: Design) -> tuple[Image.Image, Layout]:
+    if isinstance(content, Plate):
+        return render_plate(content, design)
+    if isinstance(content, Overlay):
+        return render_overlay(content, design)
+    if isinstance(content, ImageShot):
+        return render_image_shot(content, design)
+    if isinstance(content, VideoShot):
+        return render_video_shot(content, design)
+    raise TypeError(f"unknown content type: {type(content).__name__}")  # pragma: no cover — union is closed
 
 
 def render_chunk_image(chunk: Chunk, design: Design) -> Image.Image:
-    """Same as render_chunk_png but returns the PIL image (for tests)."""
-    raise NotImplementedError("raster-agent implements this")
+    """Render the chunk's visual (content + decorations) to an RGBA image
+    at design resolution. Deterministic: same inputs -> byte-stable output
+    (required for cache correctness and golden tests).
+
+    Motion (`chunk.anims`, Ken Burns, punch-in) and the background `scene`
+    are intentionally NOT handled here — raster renders one static frame;
+    motion and scene compositing are the ffmpeg graph layer's job.
+    """
+    img, layout = _render_content(chunk.content, design)
+    img = img.convert("RGBA")
+    for deco in chunk.decorations:
+        img = apply_decoration(img, deco, design, layout)
+    return img
+
+
+def render_chunk_png(chunk: Chunk, design: Design, out_path: Path) -> Path:
+    """Same as render_chunk_image but writes an RGBA PNG to out_path."""
+    img = render_chunk_image(chunk, design)
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    img.save(out_path, format="PNG")
+    return out_path
