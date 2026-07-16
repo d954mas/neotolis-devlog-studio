@@ -607,6 +607,63 @@ def test_jobs_unknown_id_404(light_client):
     assert client.get("/api/jobs/does-not-exist").status_code == 404
 
 
+# ─── 2.6: stale-feedback protection — server-side artifact pinning ───────────
+
+def test_feedback_verdict_gets_artifact_sha256_and_timestamp(light_client):
+    import hashlib
+
+    client, root, _ = light_client
+    mp4 = root / "data" / "finalize" / "b01.mp4"
+    mp4.parent.mkdir(parents=True, exist_ok=True)
+    mp4.write_bytes(b"reviewed-render-bytes")
+    expected = hashlib.sha256(b"reviewed-render-bytes").hexdigest()
+
+    r = client.post("/api/feedback", json={
+        "b01": {"video": {
+            "verdict": "needs-fixes",
+            "artifact_path": "data/finalize/b01.mp4",
+        }},
+    })
+    assert r.status_code == 200
+    section = r.json()["b01"]["video"]
+    assert section["artifact_sha256"] == expected
+    assert section["timestamp"]
+    # persisted, not just echoed
+    stored = json.loads((root / "data" / "review" / "feedback.json")
+                        .read_text(encoding="utf-8"))
+    assert stored["b01"]["video"]["artifact_sha256"] == expected
+
+
+def test_feedback_reviewer_provided_sha_not_overwritten(light_client):
+    client, root, _ = light_client
+    mp4 = root / "data" / "finalize" / "b01.mp4"
+    mp4.parent.mkdir(parents=True, exist_ok=True)
+    mp4.write_bytes(b"whatever")
+
+    r = client.post("/api/feedback", json={
+        "b01": {"video": {
+            "verdict": "ok",
+            "artifact_path": "data/finalize/b01.mp4",
+            "artifact_sha256": "reviewer-computed-value",
+        }},
+    })
+    assert r.json()["b01"]["video"]["artifact_sha256"] == "reviewer-computed-value"
+
+
+def test_feedback_missing_or_escaping_artifact_gets_no_sha(light_client):
+    client, _, _ = light_client
+    r = client.post("/api/feedback", json={
+        "b01": {"video": {"verdict": "x", "artifact_path": "data/finalize/gone.mp4"},
+                "vo": {"verdict": "y", "artifact_path": "../../etc/passwd"}},
+    })
+    assert r.status_code == 200
+    body = r.json()["b01"]
+    assert "artifact_sha256" not in body["video"]   # file doesn't exist
+    assert "artifact_sha256" not in body["vo"]      # escapes the root
+    # timestamps still stamped so staleness age is visible either way
+    assert body["video"]["timestamp"]
+
+
 # ─── safe_join vs Windows extended-length resolution (0.7/0.9 flake) ─────────
 
 def test_safe_join_tolerates_extended_length_resolution(tmp_path, monkeypatch):

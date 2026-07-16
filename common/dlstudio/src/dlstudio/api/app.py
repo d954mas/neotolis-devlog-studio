@@ -14,6 +14,7 @@ the Vite dev server on another localhost port can talk to it in `--dev`.
 """
 from __future__ import annotations
 
+import hashlib
 import importlib
 import json
 import os
@@ -131,6 +132,39 @@ class _MergeTooDeep(ValueError):
     """Raised when `_deep_merge` recurses past `_MAX_MERGE_DEPTH` — a guard
     against a hostile/degenerate deeply-nested feedback body blowing the
     Python recursion stack."""
+
+
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _enrich_feedback(node: object, root: Path, _depth: int = 0) -> None:
+    """Stale-feedback protection (PLAN_STUDIO_V2 2.6): any feedback node
+    that names an `artifact_path` gets `artifact_sha256` (of the file as it
+    exists RIGHT NOW under the project root) and a `timestamp` stamped in,
+    unless the reviewer already provided them. Consumers (skills/agents)
+    recompute the hash before trusting a stored verdict — a mismatch means
+    the MP4 changed since the review and the verdict is stale.
+
+    Mutates `node` in place; silently skips paths that escape the project
+    root or don't exist (nothing to hash — the consumer then treats the
+    verdict as unverifiable, not as fresh). Depth-bounded like _deep_merge."""
+    if _depth > _MAX_MERGE_DEPTH or not isinstance(node, dict):
+        return
+    ap = node.get("artifact_path")
+    if isinstance(ap, str) and ap:
+        if "artifact_sha256" not in node:
+            f = safe_join(root, ap)
+            if f is not None and f.is_file():
+                node["artifact_sha256"] = _sha256_file(f)
+        node.setdefault(
+            "timestamp", datetime.now().isoformat(timespec="seconds"))
+    for value in node.values():
+        _enrich_feedback(value, root, _depth + 1)
 
 
 def _deep_merge(base: dict, incoming: dict, _depth: int = 0) -> dict:
@@ -440,6 +474,7 @@ def create_app(edit_module: str) -> FastAPI:
             raise HTTPException(status_code=400, detail="body is not valid JSON")
         if not isinstance(incoming, dict):
             raise HTTPException(status_code=400, detail="feedback body must be a JSON object")
+        _enrich_feedback(incoming, root)   # 2.6: pin verdicts to the exact MP4
 
         fb = _feedback_path()
         store: dict = {}
