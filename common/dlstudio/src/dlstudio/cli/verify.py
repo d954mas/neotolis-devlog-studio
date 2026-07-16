@@ -189,6 +189,7 @@ def git_repo_root(start: Path | None = None) -> Path:
         ["git", "rev-parse", "--show-toplevel"],
         cwd=(start or Path.cwd()),
         capture_output=True, text=True, check=True,
+        encoding="utf-8", errors="replace",
     )
     return Path(result.stdout.strip())
 

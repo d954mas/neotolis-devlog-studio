@@ -265,7 +265,11 @@ def _compose_worker(
     if no_cache:
         opts = dl_render.RenderOpts(width=width_px, quality=quality, gpu=gpu, workdir=out.parent)
         rendered = dl_render.render_beat(beat, design, None, opts)
-        shutil.copyfile(rendered, out)
+        # render_beat writes workdir/<beat>.mp4 — with workdir = out.parent
+        # that IS `out` already; copying a file onto itself raises
+        # shutil.SameFileError (defect 0.3).
+        if Path(rendered).resolve() != out.resolve():
+            shutil.copyfile(rendered, out)
         return f"rendered (no-cache) -> {out}"
 
     key = dl_cache.beat_key(beat, design, quality=quality, width=width_px, gpu=gpu)
@@ -429,7 +433,9 @@ def cmd_compose(args: argparse.Namespace) -> int:
     if cache_enabled:
         dl_cache.put(key, rendered)
         dl_cache.get(key, out_path)
-    else:
+    elif Path(rendered).resolve() != out_path.resolve():
+        # workdir == out_dir, so render_beat usually wrote out_path itself;
+        # a same-file copy would raise shutil.SameFileError (defect 0.3).
         shutil.copyfile(rendered, out_path)
     print(f"[dl2] rendered {beat_id} -> {out_path}")
     return 0
@@ -610,6 +616,7 @@ def _tool_version(exe: str, path: str) -> str:
     try:
         result = subprocess.run(
             [exe, "-version"], capture_output=True, text=True, timeout=5,
+            encoding="utf-8", errors="replace",
         )
         text = (result.stdout or result.stderr or "").strip()
         return text.splitlines()[0] if text else "(version unknown)"

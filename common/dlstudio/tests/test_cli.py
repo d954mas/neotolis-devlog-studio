@@ -469,6 +469,18 @@ def test_compose_worker_cache_hit_short_circuits_render(tmp_path, monkeypatch):
     assert out_path.read_bytes() == b"already-rendered"
 
 
+def _realistic_fake_render_beat(beat, design, timeline, opts):
+    """Mirrors the REAL render_beat path contract (render/beat.py): writes
+    `workdir/<beat.id>.mp4` and returns that path. no-cache regression tests
+    MUST use this shape — the 0.3 defect (shutil.SameFileError) only fires
+    when the returned path collides with the CLI's own out_path, which a
+    made-up `<beat>_rendered.mp4` name can never reproduce."""
+    p = Path(opts.workdir) / f"{beat.id}.mp4"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(b"fresh-no-cache-bytes")
+    return p
+
+
 def test_compose_worker_no_cache_skips_cache_get_and_put(tmp_path, monkeypatch):
     """M2: `no_cache=True` must bypass BOTH the cache read and the cache
     write entirely -- dl2 iter --no-cache was a silent no-op before this
@@ -484,14 +496,7 @@ def test_compose_worker_no_cache_skips_cache_get_and_put(tmp_path, monkeypatch):
 
     monkeypatch.setattr(dl_cache, "get", spy_get)
     monkeypatch.setattr(dl_cache, "put", spy_put)
-
-    def fake_render_beat(beat, design, timeline, opts):
-        p = Path(opts.workdir) / f"{beat.id}_rendered.mp4"
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_bytes(b"fresh-no-cache-bytes")
-        return p
-
-    monkeypatch.setattr(dl_render_mod, "render_beat", fake_render_beat)
+    monkeypatch.setattr(dl_render_mod, "render_beat", _realistic_fake_render_beat)
 
     beat = make_ir_beat()
     design = make_design()
@@ -504,6 +509,55 @@ def test_compose_worker_no_cache_skips_cache_get_and_put(tmp_path, monkeypatch):
     assert cache_calls == {"get": 0, "put": 0}
     assert "no-cache" in msg
     assert out_path.read_bytes() == b"fresh-no-cache-bytes"
+
+
+def test_compose_worker_no_cache_out_path_equals_rendered_path(tmp_path, monkeypatch):
+    """0.3 regression (PLAN_STUDIO_V2): render_beat writes `workdir/<beat>.mp4`
+    and returns it; the CLI's no-cache paths pass workdir = out.parent, so the
+    rendered path IS the destination. Copying a file onto itself raised
+    shutil.SameFileError — the worker must succeed and leave the fresh bytes."""
+    monkeypatch.setattr(dl_render_mod, "render_beat", _realistic_fake_render_beat)
+
+    beat = make_ir_beat()
+    design = make_design()
+    # exactly what cmd_iter/_iterate_render passes: out lives in the workdir
+    out_path = tmp_path / "data" / "finalize" / "b01.mp4"
+
+    msg = cli._compose_worker(
+        beat, design, "draft", False, None, str(out_path),
+        str(tmp_path / "cache"), None, True,
+    )
+
+    assert "no-cache" in msg
+    assert out_path.read_bytes() == b"fresh-no-cache-bytes"
+    assert not any((tmp_path / "cache").glob("*")) if (tmp_path / "cache").exists() else True
+
+
+def test_cmd_compose_no_cache_renders_without_samefile_error(tmp_path, monkeypatch):
+    """0.3 regression for the `dl2 compose --no-cache` handler itself: its
+    workdir is data/finalize and its out_path is data/finalize/<beat>.mp4 —
+    identical paths; the handler must not die in shutil.copyfile."""
+    cache_dir = tmp_path / "cache"
+    monkeypatch.setattr(dl_cache, "CACHE_DIR", cache_dir)
+
+    pkg = _unique_pkg("proj_compose_no_cache")
+    dotted = _make_fake_project(tmp_path, pkg)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    project_root = (tmp_path / pkg).resolve()
+
+    beat = make_ir_beat("b01")
+    timeline = make_timeline([beat], design=make_design())
+    monkeypatch.setattr(dl_compile_mod, "build_timeline", lambda edit: timeline)
+    monkeypatch.setattr(dl_render_mod, "render_beat", _realistic_fake_render_beat)
+
+    args = cli._build_parser().parse_args(["compose", dotted, "b01", "--no-cache"])
+    code = cli.cmd_compose(args)
+
+    assert code == 0
+    out_file = project_root / "data" / "finalize" / "b01.mp4"
+    assert out_file.read_bytes() == b"fresh-no-cache-bytes"
+    assert not cache_dir.exists() or not any(cache_dir.iterdir())
 
 
 def test_render_targets_serial_calls_worker_per_beat(tmp_path, monkeypatch):
@@ -743,8 +797,11 @@ def test_cmd_iter_no_cache_bypasses_existing_cache_entry(tmp_path, monkeypatch):
     render_calls = []
 
     def fake_render_beat(beat, design, timeline, opts):
+        # Real path contract: render_beat writes workdir/<beat>.mp4 and
+        # returns it — under `iter --no-cache` that IS the destination file
+        # (the 0.3 SameFileError class), so the fake must mirror it.
         render_calls.append(beat.id)
-        p = Path(opts.workdir) / f"{beat.id}_fresh.mp4"
+        p = Path(opts.workdir) / f"{beat.id}.mp4"
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_bytes(b"freshly-rendered-bytes")
         return p

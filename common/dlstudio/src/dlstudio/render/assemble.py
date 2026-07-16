@@ -133,7 +133,8 @@ def _postcondition(path: Path, expected: float, tolerance: float) -> None:
 def _run(cmd: list[str], out_path: Path, what: str) -> None:
     """Run an ffmpeg command; on failure dump the argv + stderr next to the
     output (the *_ffmpeg_error.txt convention beat.py uses) and raise."""
-    r = subprocess.run(cmd, capture_output=True, text=True)
+    r = subprocess.run(cmd, capture_output=True, text=True,
+                       encoding="utf-8", errors="replace")
     if r.returncode != 0:
         dbg = out_path.parent / f"{out_path.stem}_ffmpeg_error.txt"
         dbg.write_text(f"STAGE: {what}\n\nCMD:\n" + " ".join(cmd)
@@ -351,6 +352,7 @@ def _probe_segment_duration(path: Path) -> float | None:
         ["ffprobe", "-v", "error", "-show_entries", "format=duration",
          "-of", "csv=p=0", str(path)],
         capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
     )
     try:
         return float(r.stdout.strip())
@@ -531,6 +533,7 @@ def _loudnorm_measure(audio: Path, target_lufs: float, true_peak: float,
          f"{prefix}loudnorm=I={target_lufs}:TP={true_peak}:LRA={_LOUDNORM_LRA}:print_format=json",
          "-f", "null", "-"],
         capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
     )
     m = _LOUDNORM_JSON_RE.search(r.stderr or r.stdout)
     if not m:
@@ -578,6 +581,7 @@ def _verify_audio_stream(path: Path) -> None:
         ["ffprobe", "-v", "error", "-select_streams", "a",
          "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(path)],
         capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
     )
     if "audio" not in (r.stdout or ""):
         raise RuntimeError(

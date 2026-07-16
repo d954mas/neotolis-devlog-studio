@@ -39,6 +39,10 @@ def _run_powershell(script: str, *, env: dict[str, str] | None = None,
         ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
          "-EncodedCommand", _powershell_encoded(script)],
         env=env, capture_output=True, text=True, check=check,
+        # PS 5.1's ConvertTo-Json escapes non-ASCII to \uXXXX, so the payload
+        # survives any codec; utf-8+replace only guards stderr from raising
+        # UnicodeDecodeError on localized error text (defect 0.12 class).
+        encoding="utf-8", errors="replace",
     )
 
 

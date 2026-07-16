@@ -111,6 +111,7 @@ def _probe_duration(src: str) -> float:
         ["ffprobe", "-v", "error", "-show_entries", "format=duration",
          "-of", "csv=p=0", src],
         capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
     )
     try:
         dur = float(r.stdout.strip())
@@ -474,7 +475,8 @@ def render_beat(beat: IRBeat, design: Design, _timeline: Timeline | None,
                "-t", f"{audio_dur:.3f}",
                str(out_path)]
 
-        r = subprocess.run(cmd, capture_output=True, text=True)
+        r = subprocess.run(cmd, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace")
         if r.returncode != 0:
             dbg = out_path.parent / f"{out_path.stem}_ffmpeg_error.txt"
             dbg.write_text(

@@ -82,7 +82,8 @@ class AudioStageError(RuntimeError):
 
 def _run(cmd: list[str], *, stage: str) -> subprocess.CompletedProcess:
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True)
+        r = subprocess.run(cmd, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace")
     except FileNotFoundError as e:
         raise RuntimeError(
             f"process_take: {cmd[0]!r} not found on PATH (stage {stage!r})"
@@ -157,6 +158,7 @@ def _probe_duration(path: Path) -> float:
         ["ffprobe", "-v", "error", "-show_entries", "format=duration",
          "-of", "csv=p=0", str(path)],
         capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
     )
     try:
         return float(r.stdout.strip())

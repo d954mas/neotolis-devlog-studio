@@ -105,6 +105,7 @@ def _ffprobe(path: str, kind: Kind) -> AssetProbe:
             ["ffprobe", "-v", "error", "-print_format", "json",
              "-show_format", "-show_streams", path],
             capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
         )
     except FileNotFoundError as e:  # pragma: no cover - ffprobe missing
         raise RuntimeError("ffprobe not found on PATH") from e

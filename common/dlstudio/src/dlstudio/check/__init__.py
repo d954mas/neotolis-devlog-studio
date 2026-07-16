@@ -165,6 +165,7 @@ def verify_output(
             ["ffprobe", "-v", "error", "-print_format", "json",
              "-show_format", "-show_streams", video_path],
             capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
         )
     except FileNotFoundError as e:  # pragma: no cover - ffprobe missing
         raise RuntimeError("ffprobe not found on PATH") from e
