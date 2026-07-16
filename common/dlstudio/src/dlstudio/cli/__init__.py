@@ -14,6 +14,12 @@ Phase 2 commands (full mix assemble — music/ducking/SFX/transitions/loudnorm):
   dl2 render <edit>                full render + mix assemble (default 1080p/standard)
   dl2 final <edit>                 shipping render + mix ([v2.final] defaults, else 1080p/upload)
 
+Phase 3 commands (services + Studio backend):
+  dl2 audio <edit> <beat> <rec>    process a take -> beat VO wav + words.json
+  dl2 transcribe <wav> <out.json>  standalone word-level transcription
+  dl2 scratch-tts <edit> <beat>    scratch VO from beat.vo -> data/scratch/
+  dl2 studio [edit] [--port]       serve the FastAPI Studio backend (127.0.0.1)
+
 Conventions (v1 parity where sensible):
 - <edit> is a dotted module path exposing EDIT (dlstudio.model.Edit);
   CLI auto-detects project root from module location and chdirs there so
@@ -128,10 +134,14 @@ def _project_root_for_module(module_file: Path, workspace_root: Path | None) -> 
     return module_dir.parent.parent
 
 
-def _load_edit(dotted: str) -> Edit:
+def load_edit(dotted: str) -> tuple[Edit, Path]:
     """Import `dotted`, read its EDIT attribute, validate it, find the
     project root (mirrors legacy loader semantics), and os.chdir there so
-    beats.py paths stay relative. Returns the Edit."""
+    beats.py paths stay relative. Returns (edit, project_root).
+
+    Shared by the CLI handlers (via `_load_edit`) and the API app factory
+    (`dlstudio.api.create_app`), which also needs the resolved project root
+    for its file-serving/recording endpoints."""
     try:
         mod = importlib.import_module(dotted)
     except ImportError as e:
@@ -150,6 +160,13 @@ def _load_edit(dotted: str) -> Edit:
     project_root = _project_root_for_module(Path(module_file), workspace_root)
     os.chdir(project_root)
     print(f"[dl2] cwd -> {project_root}")
+    return edit, project_root
+
+
+def _load_edit(dotted: str) -> Edit:
+    """Load + chdir (see `load_edit`), returning just the Edit — the shape
+    the existing render/check handlers expect."""
+    edit, _root = load_edit(dotted)
     return edit
 
 
@@ -630,6 +647,108 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+# ─── services / studio commands (Phase 3) ───────────────────────────────
+
+def cmd_audio(args: argparse.Namespace) -> int:
+    """Process a raw take into the beat's normalized VO wav + words.json
+    (v1 `dl audio` parity). process_take -> beat.audio, transcribe ->
+    beat.words, so a subsequent `dl2 compose` picks the new take up."""
+    v2_config = _load_v2_config(_find_workspace_root())
+    dotted = _resolve_edit_arg(args.edit, v2_config)
+    edit = _load_edit(dotted)
+    if args.beat_id not in edit.beats:
+        raise CliError(
+            f"beat {args.beat_id!r} not in edit {edit.name!r}; "
+            f"available: {list(edit.beats)}"
+        )
+    beat = edit.beats[args.beat_id]
+    recording = Path(args.recording)
+    if not recording.exists():
+        raise CliError(f"recording not found: {recording}")
+
+    from dlstudio import services
+
+    audio_out = Path(beat.audio)
+    words_out = Path(beat.words)
+    result = services.process_take(recording, audio_out)
+    services.transcribe(audio_out, words_out, language=args.language, model=args.model)
+    print(f"[dl2] audio: {recording} -> {audio_out}")
+    print(f"[dl2]   measured input loudness: {result.input_i:.2f} LUFS")
+    print(f"[dl2]   duration: {result.duration:.2f}s")
+    print(f"[dl2]   words -> {words_out}")
+    return 0
+
+
+def cmd_transcribe(args: argparse.Namespace) -> int:
+    """Standalone word-level transcription (no beat/edit context)."""
+    wav = Path(args.wav)
+    if not wav.exists():
+        raise CliError(f"wav not found: {wav}")
+
+    from dlstudio import services
+
+    out = services.transcribe(
+        wav, Path(args.out),
+        language=args.language, model=args.model, backend=args.backend,
+    )
+    print(f"[dl2] transcribed {wav} -> {out}")
+    return 0
+
+
+def cmd_scratch_tts(args: argparse.Namespace) -> int:
+    """Synthesize a throwaway scratch VO from a beat's `vo` text (or --text
+    override) to data/scratch/<beat>_scratch_tts.wav."""
+    v2_config = _load_v2_config(_find_workspace_root())
+    dotted, beat_id = _resolve_compose_args(args, v2_config)
+    edit = _load_edit(dotted)
+    if beat_id not in edit.beats:
+        raise CliError(
+            f"beat {beat_id!r} not in edit {edit.name!r}; available: {list(edit.beats)}"
+        )
+    beat = edit.beats[beat_id]
+    text = args.text if args.text is not None else beat.vo
+    if not text or not text.strip():
+        raise CliError(
+            f"beat {beat_id!r} has no vo text to synthesize (pass --text)"
+        )
+
+    from dlstudio import services
+
+    out = Path(f"data/scratch/{beat_id}_scratch_tts.wav")
+    services.scratch_tts(text, out)
+    print(f"[dl2] scratch tts -> {out}")
+    return 0
+
+
+def cmd_studio(args: argparse.Namespace) -> int:
+    """Serve the Studio v2 web backend (127.0.0.1 only)."""
+    v2_config = _load_v2_config(_find_workspace_root())
+    dotted = _resolve_edit_arg(args.edit, v2_config)
+
+    if args.dev:
+        print(
+            "[dl2] --dev: run the Vite dev server separately for hot-reload UI:\n"
+            "        cd common/dlstudio/src/dlstudio/webui && npm run dev\n"
+            "      then open its URL; it proxies /api/* to this backend."
+        )
+
+    try:
+        import uvicorn
+
+        from dlstudio.api import create_app
+    except ImportError as e:
+        raise CliError(
+            "the 'studio' extra is not installed. Install it with:\n"
+            "        pip install -e 'common/dlstudio[studio]'\n"
+            f"      (missing dependency: {e.name})"
+        ) from e
+
+    app = create_app(dotted)
+    print(f"[dl2] studio: http://127.0.0.1:{args.port}  (edit: {dotted})")
+    uvicorn.run(app, host="127.0.0.1", port=args.port)
+    return 0
+
+
 # ─── argparse wiring ───────────────────────────────────────────────────
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -685,6 +804,41 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_doctor = sub.add_parser("doctor", help="check local dependencies (ffmpeg, python, pydantic, ...)")
     p_doctor.set_defaults(func=cmd_doctor)
+
+    p_audio = sub.add_parser(
+        "audio", help="process a raw take -> beat VO wav + words.json (v1 `dl audio` parity)")
+    p_audio.add_argument("edit", help="dotted edit module path")
+    p_audio.add_argument("beat_id", help="beat whose audio/words to (re)write")
+    p_audio.add_argument("recording", help="raw take recording file")
+    p_audio.add_argument("--language", default="ru", help="transcription language (default: ru)")
+    p_audio.add_argument("--model", default="medium", help="whisper model size (default: medium)")
+    p_audio.set_defaults(func=cmd_audio)
+
+    p_transcribe = sub.add_parser(
+        "transcribe", help="standalone word-level transcription of a wav")
+    p_transcribe.add_argument("wav", help="input wav")
+    p_transcribe.add_argument("out", help="output words.json path")
+    p_transcribe.add_argument("--language", default="ru", help="language (default: ru)")
+    p_transcribe.add_argument("--model", default="medium", help="whisper model size (default: medium)")
+    p_transcribe.add_argument(
+        "--backend", default="auto", choices=("auto", "whisper", "whisperx"),
+        help="transcription backend (default: auto)")
+    p_transcribe.set_defaults(func=cmd_transcribe)
+
+    p_scratch = sub.add_parser(
+        "scratch-tts", help="synthesize a scratch VO from a beat's vo text")
+    p_scratch.add_argument(
+        "edit_or_beat", help="beat id, or edit module path when beat_id is also given")
+    p_scratch.add_argument("beat_id", nargs="?")
+    p_scratch.add_argument("--text", help="override text instead of the beat's vo")
+    p_scratch.set_defaults(func=cmd_scratch_tts)
+
+    p_studio = sub.add_parser("studio", help="serve the Studio v2 web backend (127.0.0.1)")
+    p_studio.add_argument("edit", nargs="?", help="dotted edit module path")
+    p_studio.add_argument("--port", type=int, default=8788, help="port (default: 8788)")
+    p_studio.add_argument(
+        "--dev", action="store_true", help="print the Vite dev-server hint before serving")
+    p_studio.set_defaults(func=cmd_studio)
 
     return parser
 

@@ -964,3 +964,195 @@ def test_cmd_render_runs_full_assemble(tmp_path, monkeypatch):
     args = cli._build_parser().parse_args(["render", dotted])
     assert cli.cmd_render(args) == 0
     assert called.get("assemble") is True
+
+
+# ─── Phase 3: services + studio commands ─────────────────────────────────
+#
+# cmd_audio/transcribe/scratch-tts call into dlstudio.services; the service
+# funcs are heavy (ffmpeg/whisper/SAPI), so these tests monkeypatch the live
+# service attributes and assert the CLI passes the right args. cmd_studio's
+# server start is monkeypatched (create_app + uvicorn.run) so nothing binds.
+
+import dlstudio.services as dl_services_mod  # noqa: E402
+
+_BEAT_EDIT_BODY = textwrap.dedent(
+    """
+    from dlstudio.model import Beat, Chunk, Design, Edit, Fonts, Palette, Plate
+
+    EDIT = Edit(
+        name="fake-edit",
+        design=Design(
+            resolution=(1920, 1080),
+            palette=Palette(tokens={"bg": "#000000", "text": "#ffffff"}),
+            fonts=Fonts(main="main.ttf"),
+        ),
+        beats={
+            "b01": Beat(
+                audio="data/finalize/b01_vo.wav",
+                words="data/finalize/b01_words.json",
+                vo="scratch narration line",
+                chunks=[Chunk(words=(0, 1), content=Plate(text="X"))],
+            ),
+        },
+        order=["b01"],
+        output="data/finalize/output.mp4",
+    )
+    """
+)
+
+
+class _FakeAudioResult:
+    input_i = -16.0
+    duration = 2.5
+
+
+def test_cmd_audio_calls_services_with_right_args(tmp_path, monkeypatch):
+    pkg = _unique_pkg("proj_audio")
+    dotted = _make_fake_project(tmp_path, pkg, edit_body=_BEAT_EDIT_BODY)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / pkg / "rec.webm").write_bytes(b"raw-take")
+
+    calls = {}
+
+    def fake_pt(recording, out_wav, **kw):
+        calls["pt"] = (Path(recording), Path(out_wav))
+        return _FakeAudioResult()
+
+    def fake_tr(wav, out_json, **kw):
+        calls["tr"] = (Path(wav), Path(out_json), kw)
+        return Path(out_json)
+
+    monkeypatch.setattr(dl_services_mod, "process_take", fake_pt)
+    monkeypatch.setattr(dl_services_mod, "transcribe", fake_tr)
+
+    assert cli.main(["audio", dotted, "b01", "rec.webm"]) == 0
+    assert calls["pt"] == (Path("rec.webm"), Path("data/finalize/b01_vo.wav"))
+    assert calls["tr"][0] == Path("data/finalize/b01_vo.wav")
+    assert calls["tr"][1] == Path("data/finalize/b01_words.json")
+    assert calls["tr"][2] == {"language": "ru", "model": "medium"}
+
+
+def test_cmd_audio_unknown_beat_errors(tmp_path, monkeypatch):
+    pkg = _unique_pkg("proj_audio_bad")
+    dotted = _make_fake_project(tmp_path, pkg, edit_body=_BEAT_EDIT_BODY)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / pkg / "rec.webm").write_bytes(b"raw-take")
+    assert cli.main(["audio", dotted, "nope", "rec.webm"]) == 1
+
+
+def test_cmd_transcribe_calls_service_with_right_args(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "in.wav").write_bytes(b"wav-bytes")
+
+    calls = {}
+
+    def fake_tr(wav, out_json, **kw):
+        calls["tr"] = (Path(wav), Path(out_json), kw)
+        return Path(out_json)
+
+    monkeypatch.setattr(dl_services_mod, "transcribe", fake_tr)
+    assert cli.main([
+        "transcribe", "in.wav", "out.json",
+        "--language", "en", "--model", "small", "--backend", "whisper",
+    ]) == 0
+    assert calls["tr"][0] == Path("in.wav")
+    assert calls["tr"][1] == Path("out.json")
+    assert calls["tr"][2] == {"language": "en", "model": "small", "backend": "whisper"}
+
+
+def test_cmd_scratch_tts_uses_beat_vo_text(tmp_path, monkeypatch):
+    pkg = _unique_pkg("proj_scratch")
+    dotted = _make_fake_project(tmp_path, pkg, edit_body=_BEAT_EDIT_BODY)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+    calls = {}
+
+    def fake_tts(text, out_wav, **kw):
+        calls["tts"] = (text, Path(out_wav))
+        return Path(out_wav)
+
+    monkeypatch.setattr(dl_services_mod, "scratch_tts", fake_tts)
+    assert cli.main(["scratch-tts", dotted, "b01"]) == 0
+    assert calls["tts"][0] == "scratch narration line"
+    assert calls["tts"][1] == Path("data/scratch/b01_scratch_tts.wav")
+
+
+def test_cmd_scratch_tts_text_override(tmp_path, monkeypatch):
+    pkg = _unique_pkg("proj_scratch2")
+    dotted = _make_fake_project(tmp_path, pkg, edit_body=_BEAT_EDIT_BODY)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+    calls = {}
+    monkeypatch.setattr(
+        dl_services_mod, "scratch_tts",
+        lambda text, out_wav, **kw: calls.setdefault("text", text) or Path(out_wav),
+    )
+    assert cli.main(["scratch-tts", dotted, "b01", "--text", "custom override words"]) == 0
+    assert calls["text"] == "custom override words"
+
+
+def test_cmd_studio_arg_wiring(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    monkeypatch.chdir(tmp_path)
+    import uvicorn as _uv
+    import dlstudio.api as _api
+
+    captured = {}
+
+    def fake_create_app(edit_module):
+        captured["edit"] = edit_module
+        return "APP"
+
+    monkeypatch.setattr(_api, "create_app", fake_create_app)
+    monkeypatch.setattr(_uv, "run", lambda app, **kw: captured.update(run=(app, kw)))
+
+    assert cli.main(["studio", "some.pkg.edit", "--port", "9999"]) == 0
+    assert captured["edit"] == "some.pkg.edit"
+    assert captured["run"][0] == "APP"
+    assert captured["run"][1]["host"] == "127.0.0.1"
+    assert captured["run"][1]["port"] == 9999
+
+
+def test_cmd_studio_dev_prints_hint(tmp_path, monkeypatch, capsys):
+    pytest.importorskip("fastapi")
+    monkeypatch.chdir(tmp_path)
+    import uvicorn as _uv
+    import dlstudio.api as _api
+    monkeypatch.setattr(_api, "create_app", lambda edit_module: "APP")
+    monkeypatch.setattr(_uv, "run", lambda app, **kw: None)
+
+    assert cli.main(["studio", "some.pkg.edit", "--dev"]) == 0
+    out = capsys.readouterr().out.lower()
+    assert "npm run dev" in out or "vite" in out
+
+
+# ─── arg parsing for the new commands ────────────────────────────────────
+
+def test_parse_audio_defaults():
+    args = cli._build_parser().parse_args(["audio", "pkg.edit", "b01", "rec.webm"])
+    assert (args.edit, args.beat_id, args.recording) == ("pkg.edit", "b01", "rec.webm")
+    assert args.language == "ru" and args.model == "medium"
+    assert args.func is cli.cmd_audio
+
+
+def test_parse_transcribe_defaults():
+    args = cli._build_parser().parse_args(["transcribe", "in.wav", "out.json"])
+    assert (args.wav, args.out) == ("in.wav", "out.json")
+    assert args.backend == "auto" and args.language == "ru" and args.model == "medium"
+    assert args.func is cli.cmd_transcribe
+
+
+def test_parse_scratch_tts_disambiguation():
+    args = cli._build_parser().parse_args(["scratch-tts", "pkg.edit", "b01"])
+    assert args.edit_or_beat == "pkg.edit" and args.beat_id == "b01"
+    assert args.text is None and args.func is cli.cmd_scratch_tts
+
+
+def test_parse_studio_defaults():
+    args = cli._build_parser().parse_args(["studio"])
+    assert args.edit is None and args.port == 8788 and args.dev is False
+    assert args.func is cli.cmd_studio
