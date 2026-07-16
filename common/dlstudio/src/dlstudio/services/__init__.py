@@ -14,6 +14,11 @@ Phase 4 additions:
   publish.py     generate_youtube_package() — title/description/tags/
                   chapters -> youtube_package.md (no heavy deps at all).
 
+Production-plan §1.5 addition:
+  hyperframes.py init_project()/render_html() — thin `npx hyperframes`
+                  bridge for HTML/GSAP motion assets (stdlib-only module;
+                  node/npx is probed only when render_html actually runs).
+
 Still planned: audiofix/ (DeepFilterNet-class cleanup), capture/ (CDP +
 obs-websocket).
 
@@ -27,6 +32,7 @@ provider functions are the only place that imports requests, same rule.
 from __future__ import annotations
 
 from .audio import AudioStageError, ProcessResult, process_take
+from .hyperframes import init_project, render_html
 from .publish import generate_youtube_package
 from .stock import StockConfigError, StockResult, download, search
 from .transcribe import transcribe
@@ -36,6 +42,8 @@ __all__ = [
     "AudioStageError",
     "ProcessResult",
     "process_take",
+    "init_project",
+    "render_html",
     "generate_youtube_package",
     "StockConfigError",
     "StockResult",
