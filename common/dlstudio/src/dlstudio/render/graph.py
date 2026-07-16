@@ -20,6 +20,10 @@ Nothing here shells out; `scene_input_args` takes an already-probed
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:                      # type-only: keeps graph.py import-cycle-free
+    from dlstudio.model.edit import Duck
 
 
 # ─── option-value formatting / escaping ────────────────────────────────────
@@ -306,3 +310,149 @@ def color_source(graph: Graph, color: str, w: int, h: int, dur: float,
         outputs=[label],
     ))
     return label
+
+
+# ─── audio mix graph (assemble.py) ─────────────────────────────────────────
+#
+# The edit-level mix lays VO stems, music beds and SFX one-shots onto a single
+# ABSOLUTE edit-timeline via `adelay`, ducks music under a summed VO bus with
+# `sidechaincompress`, and sums everything with `amix`. Every builder here is a
+# pure function returning a `FilterNode`/`Chain` (unit-tested by asserting on
+# `.render()`), so the whole mix graph is assembled without string templating.
+
+# Common audio normalization applied to every leaf input so mono VO, arbitrary
+# music sample rates and stereo SFX meet at one format before summing (and so
+# sidechaincompress's main/key inputs match, which it requires).
+_MIX_SR = 48000
+_MIX_LAYOUT = "stereo"
+
+
+def db_to_linear(db: float) -> float:
+    """dB (relative to full scale) -> linear amplitude ratio (10**(db/20))."""
+    return 10.0 ** (db / 20.0)
+
+
+def delay_ms(t: float) -> int:
+    """Absolute placement time (seconds) -> integer milliseconds for `adelay`.
+    Negative times clamp to 0 (nothing is placed before the edit start)."""
+    return max(0, round(t * 1000.0))
+
+
+def _aformat_node() -> FilterNode:
+    return FilterNode("aformat", args={"sample_rates": _MIX_SR,
+                                       "channel_layouts": _MIX_LAYOUT})
+
+
+def _adelay_node(t: float) -> FilterNode:
+    """`adelay=delays=<ms>:all=1` — one value applied to all channels
+    regardless of channel count (mono VO or stereo music alike)."""
+    return FilterNode("adelay", args={"delays": delay_ms(t), "all": 1})
+
+
+def duck_params(duck: "Duck") -> dict[str, object]:
+    """Map model `Duck` fields to ffmpeg `sidechaincompress` options.
+
+    sidechaincompress compresses its FIRST input (the music) whenever its
+    SECOND input (the VO sidechain key) rises above `threshold`. Mapping:
+
+    - ``threshold``  <- ``db_to_linear(threshold_db)``. sidechaincompress's
+      threshold is a LINEAR amplitude (0..1), NOT dB, so the model's
+      ``threshold_db`` (default -30 dB) is converted (-30 dB -> ~0.0316).
+    - ``ratio``      <- derived from ``amount_db`` (the desired duck depth):
+      ``clamp(1 + |amount_db|/2, 2, 20)``. A deeper requested duck maps to a
+      more aggressive ratio (amount_db=-12 -> ratio 7, in the ~8:1 ballpark
+      the architecture calls for). Exact gain reduction still depends on how
+      far VO sits above threshold, so this is a documented approximation, not
+      a guaranteed -amount_db of attenuation.
+    - ``attack``/``release`` <- ``attack_ms``/``release_ms`` straight through
+      (sidechaincompress attack/release are already in milliseconds).
+    - ``makeup`` pinned to 1 (no make-up gain): ducking must make music
+      quieter under VO, never louder.
+    """
+    ratio = max(2.0, min(20.0, 1.0 + abs(duck.amount_db) / 2.0))
+    return {
+        "threshold": round(db_to_linear(duck.threshold_db), 6),
+        "ratio": round(ratio, 3),
+        "attack": int(duck.attack_ms),
+        "release": int(duck.release_ms),
+        "makeup": 1,
+    }
+
+
+def vo_stem_chain(in_stream: str, out_label: str, delay_t: float) -> Chain:
+    """One VO stem -> stereo/48k, delayed to its beat's absolute start."""
+    return Chain(
+        inputs=[in_stream],
+        filters=[_aformat_node(), _adelay_node(delay_t)],
+        outputs=[out_label],
+    )
+
+
+def sfx_chain(in_stream: str, out_label: str, *, gain_db: float,
+              delay_t: float) -> Chain:
+    """One SFX one-shot -> stereo/48k, gain, delayed to its absolute anchor."""
+    return Chain(
+        inputs=[in_stream],
+        filters=[
+            _aformat_node(),
+            FilterNode("volume", positional=[f"{gain_db}dB"]),
+            _adelay_node(delay_t),
+        ],
+        outputs=[out_label],
+    )
+
+
+def music_span_chain(in_stream: str, out_label: str, *, span_len: float,
+                     gain_db: float, fade_in: float, fade_out: float,
+                     delay_t: float) -> Chain:
+    """One music span -> stereo/48k, padded+trimmed to exactly `span_len`
+    (short sources are silence-padded so the bed always fills its window),
+    PTS reset, gain, fade in/out, then delayed to its absolute start `delay_t`.
+
+    The caller additionally seeks the file with input-level `-ss offset`, so
+    this chain works on a stream already positioned at the span's seek point;
+    `apad`+`atrim` here guarantee the exact placed length regardless of how
+    much material the source actually had after the seek."""
+    filters: list[FilterNode] = [
+        _aformat_node(),
+        FilterNode("apad"),
+        FilterNode("atrim", args={"duration": round(span_len, 4)}),
+        FilterNode("asetpts", positional=["N/SR/TB"]),
+        FilterNode("volume", positional=[f"{gain_db}dB"]),
+    ]
+    if fade_in > 0.001:
+        filters.append(FilterNode("afade", args={"t": "in", "st": 0.0,
+                                                  "d": round(fade_in, 4)}))
+    if fade_out > 0.001:
+        st = round(max(0.0, span_len - fade_out), 4)
+        filters.append(FilterNode("afade", args={"t": "out", "st": st,
+                                                  "d": round(fade_out, 4)}))
+    filters.append(_adelay_node(delay_t))
+    return Chain(inputs=[in_stream], filters=filters, outputs=[out_label])
+
+
+def sidechain_duck_node(music_label: str, key_label: str, out_label: str,
+                        duck: "Duck") -> FilterNode:
+    """`[music][key]sidechaincompress=...[out]` — duck `music_label` under the
+    VO `key_label` using `duck_params(duck)`."""
+    return FilterNode("sidechaincompress", args=duck_params(duck),
+                      inputs=[music_label, key_label], outputs=[out_label])
+
+
+def amix_sum_node(in_labels: list[str], out_label: str,
+                  duration: str = "longest") -> FilterNode:
+    """`amix=inputs=N:normalize=0:duration=longest` — a straight SUM (not the
+    default input-count average, which would attenuate) of `in_labels`."""
+    return FilterNode(
+        "amix",
+        args={"inputs": len(in_labels), "normalize": 0, "duration": duration},
+        inputs=list(in_labels), outputs=[out_label],
+    )
+
+
+def asplit_node(in_label: str, out_labels: list[str]) -> FilterNode:
+    """`[in]asplit=N[o1][o2]...` — fan `in_label` out to N identical taps
+    (used to feed the summed VO bus to the final mix AND to each ducking
+    sidechain key)."""
+    return FilterNode("asplit", positional=[len(out_labels)],
+                      inputs=[in_label], outputs=list(out_labels))

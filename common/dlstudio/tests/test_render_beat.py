@@ -232,3 +232,49 @@ def test_bg_color_6_digit_hex_still_works():
 def test_bg_color_invalid_falls_back_to_black():
     design = _design_with_bg("not-a-color")
     assert beat_mod._bg_color(design) == "0x000000"
+
+
+# ─── L5b: _duration_cache keyed by (path, size, mtime_ns), not path alone ──
+#
+# A path-only key goes stale within a long-lived process (e.g. a future
+# watch mode): editing a source file on disk keeps the same path but the
+# cache would keep serving the pre-edit duration forever. Keying on identity
+# (size + mtime_ns) makes an edited file a cache miss, same as
+# dlstudio.cache's asset-identity fingerprint.
+
+def test_probe_duration_cache_reprobes_after_file_content_change(tmp_path, monkeypatch):
+    beat_mod._duration_cache.clear()
+    src = tmp_path / "clip.mp4"
+    src.write_bytes(b"v1")
+
+    calls = {"n": 0}
+
+    def fake_run_v1(cmd, **kwargs):
+        calls["n"] += 1
+        return subprocess.CompletedProcess(cmd, 0, stdout="5.0\n", stderr="")
+
+    monkeypatch.setattr(beat_mod.subprocess, "run", fake_run_v1)
+
+    d1 = beat_mod._probe_duration(str(src))
+    assert d1 == 5.0
+    assert calls["n"] == 1
+
+    # Same path, unchanged file -> cache hit, no subprocess call.
+    d2 = beat_mod._probe_duration(str(src))
+    assert d2 == 5.0
+    assert calls["n"] == 1
+
+    # Change the file's content (and mtime) at the SAME path -> must re-probe,
+    # not silently keep serving the stale 5.0 duration.
+    src.write_bytes(b"v2-longer-content-forces-a-new-mtime-and-size")
+
+    def fake_run_v2(cmd, **kwargs):
+        calls["n"] += 1
+        return subprocess.CompletedProcess(cmd, 0, stdout="9.0\n", stderr="")
+
+    monkeypatch.setattr(beat_mod.subprocess, "run", fake_run_v2)
+
+    d3 = beat_mod._probe_duration(str(src))
+    assert d3 == 9.0
+    assert calls["n"] == 2
+    beat_mod._duration_cache.clear()

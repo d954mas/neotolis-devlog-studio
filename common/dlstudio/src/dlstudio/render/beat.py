@@ -26,6 +26,7 @@ resolver via `set_chunk_resolver`; tests inject one (and usually patch
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import tempfile
@@ -79,12 +80,22 @@ def _resolve_chunk(beat_id: str, chunk_index: int) -> Chunk:
 
 # ─── ffprobe helper ────────────────────────────────────────────────────────
 
-_duration_cache: dict[str, float] = {}
+# Keyed by (path, size, mtime_ns) -- NOT path alone. A path-only key goes
+# stale within a long-lived process (e.g. a future watch mode) the moment a
+# source file is edited on disk: same path, different bytes, wrong cached
+# duration served forever. Keying on identity (size+mtime_ns) makes an edited
+# file a cache miss, same as dlstudio.cache/compile.probe's asset identity.
+_duration_cache: dict[tuple[str, int, int], float] = {}
 
 
 def _probe_duration(src: str) -> float:
-    if src in _duration_cache:
-        return _duration_cache[src]
+    try:
+        st = os.stat(src)
+        key = (src, st.st_size, st.st_mtime_ns)
+    except OSError:
+        key = (src, -1, -1)
+    if key in _duration_cache:
+        return _duration_cache[key]
     r = subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries", "format=duration",
          "-of", "csv=p=0", src],
@@ -94,7 +105,7 @@ def _probe_duration(src: str) -> float:
         dur = float(r.stdout.strip())
     except ValueError:
         dur = 0.0
-    _duration_cache[src] = dur
+    _duration_cache[key] = dur
     return dur
 
 

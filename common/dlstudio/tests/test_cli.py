@@ -840,3 +840,127 @@ def test_cmd_beats_reports_cached_after_plain_iter(tmp_path, monkeypatch, capsys
     lines = [ln for ln in out.splitlines() if ln.startswith("b01")]
     assert len(lines) == 1
     assert lines[0].split()[-1] == "yes"   # cached column
+
+
+# ─── Phase 2: `dl2 render` / `dl2 final` (full mix assemble) ──────────────
+#
+# render/final reuse cmd_iter's machinery (_iterate_render) and differ ONLY in
+# their default width/quality; both must run the full mix assemble. These tests
+# stub the render + assemble seams (no ffmpeg) and assert the resolved
+# width/quality that flows into RenderOpts / assemble.
+
+def _run_full_render(tmp_path, monkeypatch, argv, cmd, *, design,
+                     toml_body=None):
+    """Wire a fake project + timeline, stub _render_targets (writes the beat
+    files) and assemble (captures the RenderOpts), then run `cmd`. Returns the
+    captured RenderOpts."""
+    pkg = _unique_pkg("proj_full_render")
+    dotted = _make_fake_project(tmp_path, pkg)
+    if toml_body is not None:
+        (tmp_path / "devlog.toml").write_text(toml_body.format(dotted=dotted),
+                                              encoding="utf-8")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+    beat = make_ir_beat("b01")
+    timeline = make_timeline([beat], design=design)
+    monkeypatch.setattr(dl_compile_mod, "build_timeline", lambda edit: timeline)
+
+    def fake_render_targets(targets, design_arg, *, quality, gpu, width_px,
+                            beat_files, jobs, chunks_by_beat=None, no_cache=False):
+        for _bid, p in beat_files.items():
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(b"beat")
+
+    monkeypatch.setattr(cli, "_render_targets", fake_render_targets)
+
+    captured = {}
+
+    def fake_assemble(_tl, beat_files, opts):
+        captured["opts"] = opts
+        out = Path(_tl.output)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"final")
+        return out
+
+    monkeypatch.setattr(dl_render_mod, "assemble", fake_assemble)
+
+    args = cli._build_parser().parse_args([argv[0], dotted, *argv[1:]])
+    code = cmd(args)
+    assert code == 0
+    return captured["opts"]
+
+
+def test_cmd_render_defaults_1080p_standard(tmp_path, monkeypatch):
+    opts = _run_full_render(
+        tmp_path, monkeypatch, ["render"], cli.cmd_render,
+        design=make_design(3840, 2160))
+    assert opts.quality == "standard"
+    assert opts.width == 1920            # 1080p preset resolves a 3840-wide design to 1920
+
+
+def test_cmd_render_explicit_flags_override(tmp_path, monkeypatch):
+    opts = _run_full_render(
+        tmp_path, monkeypatch, ["render", "--width", "720p", "--quality", "master"],
+        cli.cmd_render, design=make_design(3840, 2160))
+    assert opts.quality == "master"
+    assert opts.width == 1280            # 720p preset
+
+
+def test_cmd_final_defaults_1080p_upload_without_config(tmp_path, monkeypatch):
+    opts = _run_full_render(
+        tmp_path, monkeypatch, ["final"], cli.cmd_final,
+        design=make_design(3840, 2160))
+    assert opts.quality == "upload"
+    assert opts.width == 1920
+
+
+def test_cmd_final_reads_v2_final_config(tmp_path, monkeypatch):
+    toml = ('[v2]\ndefault_edit = "{dotted}"\n'
+            '[v2.final]\nwidth = "720p"\nquality = "master"\n')
+    opts = _run_full_render(
+        tmp_path, monkeypatch, ["final"], cli.cmd_final,
+        design=make_design(3840, 2160), toml_body=toml)
+    assert opts.quality == "master"
+    assert opts.width == 1280
+
+
+def test_cmd_final_explicit_flags_beat_config(tmp_path, monkeypatch):
+    toml = ('[v2]\ndefault_edit = "{dotted}"\n'
+            '[v2.final]\nwidth = "720p"\nquality = "master"\n')
+    opts = _run_full_render(
+        tmp_path, monkeypatch, ["final", "--width", "4k", "--quality", "upload"],
+        cli.cmd_final, design=make_design(3840, 2160), toml_body=toml)
+    assert opts.quality == "upload"
+    assert opts.width == 3840            # 4k preset, explicit flag wins over config
+
+
+def test_cmd_render_runs_full_assemble(tmp_path, monkeypatch):
+    """render must actually call assemble (the full mix pass), not stop at
+    per-beat rendering."""
+    called = {}
+
+    pkg = _unique_pkg("proj_render_assembles")
+    dotted = _make_fake_project(tmp_path, pkg)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+    timeline = make_timeline([make_ir_beat("b01")], design=make_design())
+    monkeypatch.setattr(dl_compile_mod, "build_timeline", lambda edit: timeline)
+    monkeypatch.setattr(cli, "_render_targets",
+                        lambda targets, d, **kw: [
+                            kw["beat_files"][b.id].parent.mkdir(parents=True, exist_ok=True)
+                            or kw["beat_files"][b.id].write_bytes(b"x") for b in targets])
+
+    def fake_assemble(_tl, beat_files, opts):
+        called["assemble"] = True
+        out = Path(_tl.output)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"final")
+        return out
+
+    monkeypatch.setattr(dl_render_mod, "assemble", fake_assemble)
+
+    args = cli._build_parser().parse_args(["render", dotted])
+    assert cli.cmd_render(args) == 0
+    assert called.get("assemble") is True

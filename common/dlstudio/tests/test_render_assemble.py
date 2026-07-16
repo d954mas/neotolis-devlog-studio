@@ -12,7 +12,7 @@ import subprocess
 import pytest
 
 from dlstudio.ir import BeatPlacement, IRBeat, IRMix, Timeline, WordSpan
-from dlstudio.model import Design, Fonts, Palette, Transition
+from dlstudio.model import Design, Fonts, Palette
 from dlstudio.render import RenderOpts, assemble, render_beat
 
 # `dlstudio.render.__init__` does `from .assemble import assemble`, which
@@ -62,14 +62,15 @@ def _probe(path):
 
 
 def test_assemble_concats_two_beats(tmp_path, capsys):
+    """Fast path: no music, no SFX, no transitions -> stream-copy concat of the
+    beat MP4s (video + their own VO audio), no re-encode, no mix graph."""
     design = _design()
     a1 = tmp_path / "a1.wav"
     a2 = tmp_path / "a2.wav"
     _wav(a1, 1.0)
     _wav(a2, 1.0)
 
-    # second beat carries a transition_out -> Phase 1 hard-cuts + notes it
-    b1 = _beat("b1", a1, 1.0, transition_out=Transition(kind="fade", dur=0.3))
+    b1 = _beat("b1", a1, 1.0)   # no transition -> fast path
     b2 = _beat("b2", a2, 1.0)
 
     opts = RenderOpts(quality="draft", workdir=tmp_path / "fin")
@@ -88,8 +89,8 @@ def test_assemble_concats_two_beats(tmp_path, capsys):
     assert out.exists()
     assert abs(_probe(out) - 2.0) < 0.5
 
-    # Phase-1 deferral note emitted for the fade transition_out
-    assert "Phase 2" in capsys.readouterr().out
+    # Fast path taken: no mix-graph work announced.
+    assert "mix path" not in capsys.readouterr().out
 
 
 # ─── M1: VQ-SYNC tolerance scales with beat count ──────────────────────────

@@ -10,6 +10,10 @@ Phase 1 commands:
   dl2 beats <edit>                 durations, chunk counts, render status
   dl2 doctor                       ffmpeg/ffprobe/python/pydantic diagnostics
 
+Phase 2 commands (full mix assemble — music/ducking/SFX/transitions/loudnorm):
+  dl2 render <edit>                full render + mix assemble (default 1080p/standard)
+  dl2 final <edit>                 shipping render + mix ([v2.final] defaults, else 1080p/upload)
+
 Conventions (v1 parity where sensible):
 - <edit> is a dotted module path exposing EDIT (dlstudio.model.Edit);
   CLI auto-detects project root from module location and chdirs there so
@@ -81,6 +85,19 @@ def _load_v2_config(workspace_root: Path | None) -> dict:
         return {}
     data = tomllib.loads(cfg_path.read_text(encoding="utf-8"))
     return dict(data.get("v2", {}))
+
+
+def _load_v2_final_config(workspace_root: Path | None) -> dict:
+    """Read the [v2.final] table from workspace devlog.toml, if present.
+    Supplies `dl2 final`'s default width/quality (an inline table under [v2]
+    also works: `[v2.final]` with `width`/`quality` keys)."""
+    if workspace_root is None:
+        return {}
+    cfg_path = workspace_root / CONFIG_NAME
+    if not cfg_path.exists():
+        return {}
+    data = tomllib.loads(cfg_path.read_text(encoding="utf-8"))
+    return dict(data.get("v2", {}).get("final", {}))
 
 
 def _resolve_edit_arg(edit_arg: str | None, v2_config: dict) -> str:
@@ -390,18 +407,27 @@ def cmd_compose(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_iter(args: argparse.Namespace) -> int:
-    v2_config = _load_v2_config(_find_workspace_root())
-    dotted = _resolve_edit_arg(args.edit, v2_config)
-    edit = _load_edit(dotted)
+def _iterate_render(
+    edit: Edit,
+    timeline,
+    *,
+    width_spec: str | int | None,
+    quality: str,
+    gpu: bool,
+    no_cache: bool,
+    stale: bool,
+    jobs: int | None,
+) -> int:
+    """Shared render+assemble machinery behind `iter`/`render`/`final`.
 
+    Renders all (or, with `stale`, only cache-miss) beats to data/finalize at
+    the resolved width/quality, then runs the FULL mix assemble (music beds,
+    ducking, SFX, transitions, loudnorm — assemble picks its fast pure-concat
+    path automatically when the edit has none of those). The three commands
+    differ ONLY in their default width/quality; everything below is identical."""
     from dlstudio import cache as dl_cache
-    from dlstudio import compile as dl_compile
     from dlstudio import render as dl_render
 
-    timeline = dl_compile.build_timeline(edit)
-    width_spec = args.width or "540p"
-    quality = args.quality or "draft"
     design = _resize_design(timeline.design, width_spec)
     width_px = design.resolution[0]
 
@@ -410,10 +436,10 @@ def cmd_iter(args: argparse.Namespace) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     beat_files = {b.id: out_dir / f"{b.id}.mp4" for b in all_beats}
 
-    if args.stale:
+    if stale:
         targets = []
         for b in all_beats:
-            key = dl_cache.beat_key(b, design, quality=quality, width=width_px, gpu=args.gpu)
+            key = dl_cache.beat_key(b, design, quality=quality, width=width_px, gpu=gpu)
             if dl_cache.has(key):
                 # Cache hit: nothing to render, but the beat_files[b.id] copy
                 # may have been deleted since the cache entry was written
@@ -430,13 +456,13 @@ def cmd_iter(args: argparse.Namespace) -> int:
     else:
         targets = all_beats
 
-    jobs = max(1, args.jobs or 1)
+    jobs = max(1, jobs or 1)
     _render_targets(
         targets, design,
-        quality=quality, gpu=args.gpu, width_px=width_px,
+        quality=quality, gpu=gpu, width_px=width_px,
         beat_files=beat_files, jobs=jobs,
         chunks_by_beat={bid: b.chunks for bid, b in edit.beats.items()},
-        no_cache=args.no_cache,
+        no_cache=no_cache,
     )
 
     missing = [bid for bid, p in beat_files.items() if not p.exists()]
@@ -445,10 +471,64 @@ def cmd_iter(args: argparse.Namespace) -> int:
             f"missing rendered beats (no prior render to reuse for --stale): {missing}"
         )
 
-    opts = dl_render.RenderOpts(width=width_px, quality=quality, gpu=args.gpu, workdir=out_dir)
+    opts = dl_render.RenderOpts(width=width_px, quality=quality, gpu=gpu, workdir=out_dir)
     final = dl_render.assemble(timeline, beat_files, opts)
     print(f"[dl2] assembled -> {final}")
     return 0
+
+
+def cmd_iter(args: argparse.Namespace) -> int:
+    v2_config = _load_v2_config(_find_workspace_root())
+    dotted = _resolve_edit_arg(args.edit, v2_config)
+    edit = _load_edit(dotted)
+
+    from dlstudio import compile as dl_compile
+
+    timeline = dl_compile.build_timeline(edit)
+    return _iterate_render(
+        edit, timeline,
+        width_spec=args.width or "540p", quality=args.quality or "draft",
+        gpu=args.gpu, no_cache=args.no_cache, stale=args.stale, jobs=args.jobs,
+    )
+
+
+def cmd_render(args: argparse.Namespace) -> int:
+    """Full-render preview: iter-style render + full mix assemble at explicit
+    (default 1080p/standard) width/quality."""
+    v2_config = _load_v2_config(_find_workspace_root())
+    dotted = _resolve_edit_arg(args.edit, v2_config)
+    edit = _load_edit(dotted)
+
+    from dlstudio import compile as dl_compile
+
+    timeline = dl_compile.build_timeline(edit)
+    return _iterate_render(
+        edit, timeline,
+        width_spec=args.width or "1080p", quality=args.quality or "standard",
+        gpu=args.gpu, no_cache=args.no_cache, stale=args.stale, jobs=args.jobs,
+    )
+
+
+def cmd_final(args: argparse.Namespace) -> int:
+    """Shipping render: same machinery as `render`, but defaults come from the
+    workspace `[v2.final]` table (width/quality) when present, else 1080p/upload.
+    Explicit --width/--quality still win."""
+    workspace_root = _find_workspace_root()
+    v2_config = _load_v2_config(workspace_root)
+    final_cfg = _load_v2_final_config(workspace_root)
+    dotted = _resolve_edit_arg(args.edit, v2_config)
+    edit = _load_edit(dotted)
+
+    from dlstudio import compile as dl_compile
+
+    timeline = dl_compile.build_timeline(edit)
+    width_spec = args.width or final_cfg.get("width") or "1080p"
+    quality = args.quality or final_cfg.get("quality") or "upload"
+    return _iterate_render(
+        edit, timeline,
+        width_spec=width_spec, quality=quality,
+        gpu=args.gpu, no_cache=args.no_cache, stale=args.stale, jobs=args.jobs,
+    )
 
 
 def _format_beats_table(rows: list[tuple[str, float, int, bool]]) -> str:
@@ -581,6 +661,22 @@ def _build_parser() -> argparse.ArgumentParser:
     p_iter.add_argument("-j", "--jobs", type=int, default=1, help="parallel worker processes")
     _add_render_flags(p_iter)
     p_iter.set_defaults(func=cmd_iter)
+
+    p_render = sub.add_parser(
+        "render", help="full render + mix assemble (default 1080p/standard)")
+    p_render.add_argument("edit", nargs="?")
+    p_render.add_argument("--stale", action="store_true", help="only render cache-miss beats")
+    p_render.add_argument("-j", "--jobs", type=int, default=1, help="parallel worker processes")
+    _add_render_flags(p_render)
+    p_render.set_defaults(func=cmd_render)
+
+    p_final = sub.add_parser(
+        "final", help="shipping render + mix assemble ([v2.final] defaults, else 1080p/upload)")
+    p_final.add_argument("edit", nargs="?")
+    p_final.add_argument("--stale", action="store_true", help="only render cache-miss beats")
+    p_final.add_argument("-j", "--jobs", type=int, default=1, help="parallel worker processes")
+    _add_render_flags(p_final)
+    p_final.set_defaults(func=cmd_final)
 
     p_beats = sub.add_parser("beats", help="beat durations / chunk counts / cache status")
     p_beats.add_argument("edit", nargs="?")

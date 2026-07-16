@@ -14,7 +14,17 @@ import subprocess
 
 import pytest
 
+from dlstudio.compile import probe as probe_mod
 from dlstudio.compile.probe import build_registry, classify, probe_asset
+
+
+@pytest.fixture(autouse=True)
+def _isolated_probe_memo(tmp_path, monkeypatch):
+    """Every test gets its own probe memo location so tests never touch the
+    real workspace data/finalize/.cache2/probe_memo.json, and never see each
+    other's memoized entries (mirrors test_cache.py's _isolated_cache_dir)."""
+    monkeypatch.setattr(probe_mod, "MEMO_PATH", tmp_path / "cache2" / "probe_memo.json")
+    yield
 
 
 # ─── classify ────────────────────────────────────────────────────────────────
@@ -168,3 +178,153 @@ def test_real_ffprobe_on_real_video_marks_readable(tmp_path):
     assert p.exists is True
     assert p.readable is True
     assert p.duration is not None and p.duration > 0
+
+
+# ─── M3: cross-invocation ffprobe memo ─────────────────────────────────────
+#
+# probe_asset() consults an on-disk memo keyed by absolute path -> {size,
+# mtime_ns, probe fields} before shelling out to ffprobe. A 30-beat edit
+# probes ~60 assets per CLI invocation even on a full render-cache hit; the
+# memo lets repeat invocations skip the subprocess entirely when a referenced
+# file hasn't changed. `_isolated_probe_memo` (autouse, above) gives every
+# test in this module its own memo file.
+
+def _fake_ffprobe_video(duration="2.0", width=100, height=200):
+    payload = json.dumps({
+        "format": {"duration": duration},
+        "streams": [{"codec_type": "video", "width": width, "height": height}],
+    })
+
+    def fake_run(*a, **k):
+        return subprocess.CompletedProcess(a[0], 0, stdout=payload, stderr="")
+    return fake_run
+
+
+def test_memo_hit_avoids_subprocess(tmp_path, monkeypatch):
+    f = tmp_path / "clip.mp4"
+    f.write_bytes(b"v1")
+
+    calls = {"n": 0}
+
+    def fake_run(*a, **k):
+        calls["n"] += 1
+        return subprocess.CompletedProcess(a[0], 0, stdout=json.dumps({
+            "format": {"duration": "2.0"},
+            "streams": [{"codec_type": "video", "width": 100, "height": 200}],
+        }), stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    p1 = probe_asset(str(f), "video")
+    assert p1.readable is True
+    assert calls["n"] == 1
+
+    # Second call, same file untouched -> memo hit, no new subprocess call.
+    p2 = probe_asset(str(f), "video")
+    assert p2.readable is True
+    assert p2.duration == 2.0
+    assert p2.width == 100 and p2.height == 200
+    assert p2.path == str(f)          # caller's path string, not the memo key
+    assert calls["n"] == 1
+
+
+def test_memo_size_or_mtime_change_forces_reprobe(tmp_path, monkeypatch):
+    f = tmp_path / "clip.mp4"
+    f.write_bytes(b"v1")
+
+    calls = {"n": 0}
+
+    def fake_run(*a, **k):
+        calls["n"] += 1
+        dur = "2.0" if calls["n"] == 1 else "9.0"
+        return subprocess.CompletedProcess(a[0], 0, stdout=json.dumps({
+            "format": {"duration": dur},
+            "streams": [{"codec_type": "video", "width": 100, "height": 200}],
+        }), stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    p1 = probe_asset(str(f), "video")
+    assert p1.duration == 2.0
+    assert calls["n"] == 1
+
+    f.write_bytes(b"v2-longer-content")   # changes size (and mtime_ns)
+    p2 = probe_asset(str(f), "video")
+    assert p2.duration == 9.0
+    assert calls["n"] == 2
+
+
+def test_memo_readable_false_result_is_memoized(tmp_path, monkeypatch):
+    f = tmp_path / "clip.mp4"
+    f.write_bytes(b"not a real video")
+
+    calls = {"n": 0}
+
+    def fake_run(*a, **k):
+        calls["n"] += 1
+        return subprocess.CompletedProcess(a[0], 1, stdout="", stderr="bad")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    p1 = probe_asset(str(f), "video")
+    assert p1.readable is False
+    assert calls["n"] == 1
+
+    p2 = probe_asset(str(f), "video")   # readable=False is memoized too
+    assert p2.readable is False
+    assert calls["n"] == 1
+
+
+def test_memo_missing_file_never_memoized(tmp_path):
+    p = probe_asset(str(tmp_path / "nope.mp4"), "video")
+    assert p.exists is False
+    assert probe_mod._load_memo() == {}
+
+
+def test_memo_corrupt_file_tolerated(tmp_path, monkeypatch):
+    memo_path = probe_mod.MEMO_PATH
+    memo_path.parent.mkdir(parents=True, exist_ok=True)
+    memo_path.write_text("{not valid json", encoding="utf-8")
+
+    f = tmp_path / "clip.mp4"
+    f.write_bytes(b"whatever")
+    monkeypatch.setattr(subprocess, "run", _fake_ffprobe_video(duration="1.0"))
+
+    p = probe_asset(str(f), "video")     # must not raise despite corrupt memo
+    assert p.readable is True
+    assert p.duration == 1.0
+
+    reloaded = json.loads(memo_path.read_text(encoding="utf-8"))
+    assert str(f.resolve()) in reloaded
+
+
+def test_memo_env_var_override(tmp_path, monkeypatch):
+    # MEMO_PATH (module default) is monkeypatched by the autouse fixture to a
+    # tmp_path location; the env var must take precedence over it.
+    override_path = tmp_path / "override" / "probe_memo.json"
+    monkeypatch.setenv(probe_mod.MEMO_PATH_ENV_VAR, str(override_path))
+
+    f = tmp_path / "clip.mp4"
+    f.write_bytes(b"whatever")
+    monkeypatch.setattr(subprocess, "run", _fake_ffprobe_video(duration="3.0"))
+
+    probe_asset(str(f), "video")
+
+    assert override_path.exists()
+    assert not probe_mod.MEMO_PATH.exists()   # the (unused) default must stay untouched
+
+
+def test_memo_atomic_write_leaves_no_temp_on_failure(tmp_path, monkeypatch):
+    memo_path = tmp_path / "cache2" / "probe_memo.json"
+
+    def boom_replace(src, dst):
+        raise OSError("disk full (simulated)")
+
+    monkeypatch.setattr(probe_mod.os, "replace", boom_replace)
+    monkeypatch.setattr(probe_mod.time, "sleep", lambda *_a, **_k: None)
+
+    with pytest.raises(OSError):
+        probe_mod._atomic_write_memo(memo_path, {"some": "data"})
+
+    assert not memo_path.exists()
+    assert list(memo_path.parent.glob("*.tmp-*")) == []

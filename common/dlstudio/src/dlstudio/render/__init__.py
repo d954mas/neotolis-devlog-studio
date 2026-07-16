@@ -18,8 +18,12 @@ render/raster/ is owned separately by the raster-agent.
                all for this reason.
 - assemble.py  edit-level pass: concat + beat transitions + music beds
                across beat boundaries + sidechain ducking + SFX + final
-               loudness normalization. Phase 1 ships concat + duration
-               postcondition; the full mix graph lands in Phase 2.
+               loudness normalization. Phase 2 ships the full mix graph: a
+               fast stream-copy path when there's no music/SFX/transition, and
+               otherwise a VO+music+SFX filter-graph mix (ducking keyed by the
+               `*_vo_stem.wav` stems), two-pass loudnorm, and dip-to-black
+               transitions re-encoded only at boundaries. `measure_loudness()`
+               exposes a loudnorm measure pass for VQ-AUDIO checks/tests.
 
 RenderOpts quality presets mirror v1 (draft/preview/upload/master, CPU +
 NVENC variants — port from legacy compose_ffmpeg._codec_args).
@@ -42,6 +46,6 @@ class RenderOpts:
 # render_beat/assemble/RenderOpts surface is stable). Imported AFTER RenderOpts
 # is defined so the submodules can type-hint against it without a cycle.
 from .beat import render_beat            # noqa: E402
-from .assemble import assemble           # noqa: E402
+from .assemble import assemble, measure_loudness  # noqa: E402
 
-__all__ = ["RenderOpts", "render_beat", "assemble"]
+__all__ = ["RenderOpts", "render_beat", "assemble", "measure_loudness"]
