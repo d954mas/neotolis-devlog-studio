@@ -56,6 +56,7 @@ from dlstudio.model import Design, Edit
 
 from . import genhtml as dl_genhtml
 from . import newvideo as dl_newvideo
+from . import preview as dl_preview
 from . import verify as dl_verify
 
 CONFIG_NAME = "devlog.toml"
@@ -982,6 +983,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     dl_genhtml.add_subparser(sub)
     dl_newvideo.add_subparser(sub)
+    dl_preview.add_subparser(sub)
     dl_verify.add_subparser(sub)
 
     return parser

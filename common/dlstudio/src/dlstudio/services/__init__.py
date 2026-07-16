@@ -19,6 +19,11 @@ Production-plan §1.5 addition:
                   bridge for HTML/GSAP motion assets (stdlib-only module;
                   node/npx is probed only when render_html actually runs).
 
+Production-plan §1.3 addition:
+  review.py      make_contact_sheet()/extract_keyframes() — review
+                  artifacts from a finished MP4 (plain ffmpeg passes,
+                  decoupled from the render pipeline; used by dl2 preview).
+
 Still planned: audiofix/ (DeepFilterNet-class cleanup), capture/ (CDP +
 obs-websocket).
 
@@ -34,6 +39,7 @@ from __future__ import annotations
 from .audio import AudioStageError, ProcessResult, process_take
 from .hyperframes import init_project, render_html
 from .publish import generate_youtube_package
+from .review import extract_keyframes, make_contact_sheet
 from .stock import StockConfigError, StockResult, download, search
 from .transcribe import transcribe
 from .tts import UnknownTTSBackendError, list_sapi_voices, scratch_tts
@@ -44,6 +50,8 @@ __all__ = [
     "process_take",
     "init_project",
     "render_html",
+    "extract_keyframes",
+    "make_contact_sheet",
     "generate_youtube_package",
     "StockConfigError",
     "StockResult",

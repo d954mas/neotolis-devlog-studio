@@ -28,7 +28,9 @@ Domain table (source-relative to common/dlstudio/src/dlstudio/):
     render/ (else)      -> test_render_*, test_assemble_mix, test_graph,
                             test_e2e
     cache/              -> test_cache
-    cli/                -> test_cli, test_cli_newvideo, test_verify_cmd
+    cli/                -> test_cli* (test_cli, test_cli_genhtml,
+                            test_cli_newvideo, test_cli_preview, ...),
+                            test_verify_cmd
     api/                -> test_api
     services/           -> test_services_*
     template/           -> test_cli_newvideo (the packaged project template
@@ -94,7 +96,7 @@ DOMAIN_TESTS: dict[str, tuple[str, ...]] = {
     "render_raster": ("test_raster_*", "test_render_beat", "test_e2e"),
     "render": ("test_render_*", "test_assemble_mix", "test_graph", "test_e2e"),
     "cache": ("test_cache",),
-    "cli": ("test_cli", "test_cli_newvideo", "test_verify_cmd"),
+    "cli": ("test_cli*", "test_verify_cmd"),
     "api": ("test_api",),
     "services": ("test_services_*",),
     "template": ("test_cli_newvideo",),
