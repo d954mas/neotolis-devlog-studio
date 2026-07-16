@@ -121,6 +121,7 @@ ship time (pattern ported from game-67-idle's ai_studio):
   `VQ-MOTION` static-screenshot floor · `VQ-HOOK` goal-in-first-second ·
   `VQ-SAFE` safe zones · `VQ-END` deliberate ending · `VQ-PROOF` real product
   visuals. "Could not verify" reports as `unverified`, never as pass.
+  Full catalog with per-rule Use/Check/Evidence: `common/quality/README.md`.
 
 Agents: keep vo-reviewer / video-reviewer / thumbnail-designer (blind review +
 orchestrator regression checklist), ground them with IR + probe facts. Add:

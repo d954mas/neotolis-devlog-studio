@@ -184,6 +184,37 @@ current `trolley/.claude/agents/` files are a project-local copy for the
 first project, not the canonical source. `dl new` copies from root
 `.claude/agents/` into each new project.
 
+## Studio v2 (dlstudio)
+
+A second engine is being built alongside the one above: `common/dlstudio/`
+(Python package) plus the `dl2` CLI. It does not replace `dl` yet.
+
+| | v1 — `dl` (`common/devlog`) | v2 — `dl2` (`common/dlstudio`) |
+|---|---|---|
+| Status | **Frozen.** Bugfix-only, no adapter layer. | In active build (see `docs/ARCHITECTURE_V2.md` phases). |
+| Use for | Existing projects: `trolley`, `neotolis_diary` | **New** videos going forward |
+| Render backend | FFmpeg + MoviePy fallback | FFmpeg only, no fallback |
+
+`dl2` command groups mirror the `dl` cheat-sheet in `common/PIPELINE.md`:
+`check`, `ir`, `compose`, `iter`, `render`, `final`, `audio`, `transcribe`,
+`scratch-tts`, `studio`, `beats`, `doctor`.
+
+**Quality rules** live in `common/quality/` (`VQ-*` catalog: sync, audio,
+motion, hook, safe zones, ending, real-product proof, resolution, word
+indices, assets). Mechanical parts of VQ-SYNC/VQ-RES/VQ-WORDS/VQ-ASSET are
+enforced in code (`common/dlstudio/src/dlstudio/check/`); the rest is
+judgment, checked against the rule files — never assumed from "looks fine."
+
+**Engine work** (not content work) routes to two new agents: `deep-reasoner`
+(Opus — architecture, render/ffmpeg debugging, adversarial review of engine
+changes) and `fast-worker` (Sonnet — mechanical edits, applying an
+already-decided plan, test boilerplate). Content work (beats.py, reel
+pacing, VO/video review) keeps using the five agents already listed above.
+
+**The contract**: `docs/ARCHITECTURE_V2.md` is the source of truth for v2
+layering (`model -> compile -> IR -> check -> render`) and phase status.
+Read it before touching `common/dlstudio/`.
+
 ## Don't
 
 - Don't render at 4K during iteration (slow + separate cache entry).
