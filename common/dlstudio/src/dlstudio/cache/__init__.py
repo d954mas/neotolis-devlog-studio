@@ -17,6 +17,7 @@ import hashlib
 import os
 import shutil
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -214,14 +215,16 @@ def put(key: str, rendered_path: Path) -> None:
     an MP4-only entry would resurrect defect 0.2 (cache hit restores video A
     while a stale on-disk stem B feeds the mix).
 
-    Each half copies to a `.tmp-<pid>` file then os.replace()s onto its
-    final name, so parallel `-j N` workers racing on one key, or a crash
-    mid-copy, never leave a truncated file behind as a hit. The stem is
-    published FIRST: the MP4's appearance is what flips `has()` to True, and
-    by then its pair is already in place. (Two racers interleaving halves is
-    harmless: the stem is a byte-copy of the beat's input audio, which is
-    part of the key — so all stems published under one key are identical.)
-    Temp files are removed on any failure.
+    Each half copies to a `.tmp-<pid>-<nonce>` file then os.replace()s onto
+    its final name, so racers on one key, or a crash mid-copy, never leave a
+    truncated file behind as a hit. The nonce matters (defect 0.9): the
+    Studio API runs jobs on a ThreadPool in ONE process, so a pid-only temp
+    name collided between two same-key publishers and could publish a torn
+    file. The stem is published FIRST: the MP4's appearance is what flips
+    `has()` to True, and by then its pair is already in place. (Two racers
+    interleaving halves is harmless: the stem is a byte-copy of the beat's
+    input audio, which is part of the key — so all stems published under one
+    key are identical.) Temp files are removed on any failure.
     """
     rendered_path = Path(rendered_path)
     stem_src = vo_stem_sibling(rendered_path)
@@ -231,9 +234,10 @@ def put(key: str, rendered_path: Path) -> None:
         return
     cache_dir = _cache_dir()
     cache_dir.mkdir(parents=True, exist_ok=True)
+    nonce = uuid.uuid4().hex[:8]
     for src, dst in ((stem_src, _cache_stem_path(key)),
                      (rendered_path, _cache_path(key))):
-        tmp = cache_dir / f"{key}{dst.suffix}.tmp-{os.getpid()}"
+        tmp = cache_dir / f"{key}{dst.suffix}.tmp-{os.getpid()}-{nonce}"
         try:
             shutil.copyfile(src, tmp)
             _atomic_replace(tmp, dst)

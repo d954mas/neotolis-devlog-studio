@@ -28,6 +28,10 @@ export function RecordTab({
   const videoRef = useRef<HTMLVideoElement>(null);
   const timerRef = useRef<number>(0);
   const meterGate = useRef(0);
+  // The beat a take belongs to is pinned when recording STARTS (defect 0.7):
+  // `beat` is a live prop — reading it at stop/upload time attributed the
+  // take to whatever beat was selected by then, not the one recorded.
+  const takeBeatIdRef = useRef<string | null>(null);
   // In-flight process-take pollers, aborted when the beat changes or the tab
   // unmounts so their pollJob loops don't leak. (L2)
   const pollAborters = useRef<Set<AbortController>>(new Set());
@@ -42,22 +46,51 @@ export function RecordTab({
   const [selectedCam, setSelectedCam] = useState("");
   const [cameraOn, setCameraOn] = useState(false);
 
-  // Teardown on unmount.
+  // Stop the current take (if any) and save it to the beat captured at
+  // record start. Idempotent — the ref hand-off makes exactly one caller
+  // win, so the stop button, a beat switch, and unmount can all call it.
+  // Kept in a ref so the []-deps teardown always sees the latest closure.
+  async function stopAndSave(): Promise<void> {
+    const rec = recRef.current;
+    const beatId = takeBeatIdRef.current;
+    takeBeatIdRef.current = null;
+    if (!beatId || !rec.recording) return;
+    setRecording(false);
+    stopTimer();
+    try {
+      const blob = await rec.stopTake();
+      await handleBlob(blob, beatId);
+    } catch (e) {
+      setMicStatus(`stop failed: ${(e as Error).message}`);
+    }
+  }
+  const stopAndSaveRef = useRef(stopAndSave);
+  stopAndSaveRef.current = stopAndSave;
+
+  // Teardown on unmount. A recording in flight is SAVED first (defect 0.7:
+  // switching tabs used to rec.close() and silently drop the take), then the
+  // recorder/camera are released.
   useEffect(() => {
     const rec = recRef.current;
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
-      rec.close();
+      const salvage = rec.recording
+        ? stopAndSaveRef.current()
+        : Promise.resolve();
+      void salvage.finally(() => rec.close());
       const cs = cameraStreamRef.current;
       if (cs) cs.getTracks().forEach((t) => t.stop());
     };
   }, []);
 
-  // Abort in-flight process-take polls when the active beat switches (this
-  // component is reused across beats) and on unmount. (L2)
+  // When the active beat switches (this component is reused across beats):
+  // a recording in flight is stopped and saved TO THE BEAT IT STARTED ON
+  // (defect 0.7 — switching required a stop; this is that stop, without
+  // losing the take), and in-flight process-take polls are aborted. (L2)
   useEffect(() => {
     const aborters = pollAborters.current;
     return () => {
+      void stopAndSaveRef.current();
       aborters.forEach((a) => a.abort());
       aborters.clear();
     };
@@ -116,29 +149,25 @@ export function RecordTab({
       if (!recRef.current.ready) return;
     }
     if (recording) {
-      setRecording(false);
-      stopTimer();
-      try {
-        const blob = await recRef.current.stopTake();
-        await handleBlob(blob);
-      } catch (e) {
-        setMicStatus(`stop failed: ${(e as Error).message}`);
-      }
+      await stopAndSave();
     } else {
       recRef.current.beginTake();
+      takeBeatIdRef.current = beat.id; // pin the take's beat at START (0.7)
       setRecording(true);
       startTimer();
     }
   }
 
-  async function handleBlob(blob: Blob) {
+  async function handleBlob(blob: Blob, beatId: string) {
+    // `beatId` is the beat captured at record start — NEVER the live
+    // `beat.id` prop, which may have changed mid-take (defect 0.7).
     const ext = fileExtForMime(recRef.current.mimeType);
     const stamp = Math.floor(Date.now() / 1000);
-    const filename = `${stamp}_${beat.id}_take.${ext}`;
+    const filename = `${stamp}_${beatId}_take.${ext}`;
     const id = newTakeId();
     const take: SessionTake = {
       id,
-      beatId: beat.id,
+      beatId,
       filename,
       url: URL.createObjectURL(blob),
       size: blob.size,
@@ -148,7 +177,7 @@ export function RecordTab({
     };
     addTake(take);
     try {
-      const res = await api.uploadTake(beat.id, blob, filename);
+      const res = await api.uploadTake(beatId, blob, filename);
       updateTake(id, { uploadState: "uploaded", serverPath: res.path });
     } catch (e) {
       updateTake(id, {
@@ -165,7 +194,7 @@ export function RecordTab({
     updateTake(t.id, { processState: "running", processMessage: "starting…" });
     try {
       const { job_id } = await api.processTake({
-        beat_id: beat.id,
+        beat_id: t.beatId, // the take's own beat, pinned at record start (0.7)
         recording_path: t.serverPath,
       });
       const final = await pollJob(job_id, {

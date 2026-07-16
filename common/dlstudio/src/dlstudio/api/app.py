@@ -16,10 +16,12 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import re
 import shutil
 import sys
 import threading
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -152,7 +154,7 @@ def _deep_merge(base: dict, incoming: dict, _depth: int = 0) -> dict:
 # ─── long-running job bodies (run on the executor, off the request thread) ───
 
 def _process_take_job(
-    edit, root: Path, beat_id: str, recording: Path,
+    edit, root: Path, beat_lock: threading.Lock, beat_id: str, recording: Path,
     language: str | None, model: str | None,
 ) -> dict:
     """VO take -> loudness-normalized wav + word-timed transcript.
@@ -162,7 +164,13 @@ def _process_take_job(
     a fixed `<id>_vo.wav` convention. That is what makes a subsequent render
     (and the UI's audio/karaoke) actually see the new take — the render cache
     keys off the asset the beat's chunks reference. Paths are resolved under
-    `root` with the same containment guard as `GET /api/file`."""
+    `root` with the same containment guard as `GET /api/file`.
+
+    Defect 0.7: the whole job runs under the beat's lock (two Process jobs of
+    one beat serialize; a render job of the same beat can never read the wav/
+    words mid-replacement), and both stages write to TEMP files that are
+    os.replace()-promoted to the declared paths only after BOTH succeed — a
+    crash mid-processing leaves the previous take fully intact."""
     from dlstudio import services
 
     beat = edit.beats[beat_id]
@@ -173,15 +181,30 @@ def _process_take_job(
             f"beat {beat_id!r} declares an audio/words path outside the project "
             f"root (audio={beat.audio!r}, words={beat.words!r})"
         )
-    audio_out.parent.mkdir(parents=True, exist_ok=True)
-    words_out.parent.mkdir(parents=True, exist_ok=True)
-    result = services.process_take(recording, audio_out)
-    kwargs: dict = {}
-    if language:
-        kwargs["language"] = language
-    if model:
-        kwargs["model"] = model
-    services.transcribe(audio_out, words_out, **kwargs)
+    with beat_lock:
+        audio_out.parent.mkdir(parents=True, exist_ok=True)
+        words_out.parent.mkdir(parents=True, exist_ok=True)
+        # Same-directory temp names keep os.replace atomic (same volume); the
+        # real extensions are preserved because ffmpeg/whisper infer output
+        # format from them.
+        nonce = uuid.uuid4().hex[:8]
+        tmp_audio = audio_out.with_name(
+            f".{audio_out.stem}.tmp-{nonce}{audio_out.suffix or '.wav'}")
+        tmp_words = words_out.with_name(
+            f".{words_out.stem}.tmp-{nonce}{words_out.suffix or '.json'}")
+        try:
+            result = services.process_take(recording, tmp_audio)
+            kwargs: dict = {}
+            if language:
+                kwargs["language"] = language
+            if model:
+                kwargs["model"] = model
+            services.transcribe(tmp_audio, tmp_words, **kwargs)
+            os.replace(tmp_audio, audio_out)
+            os.replace(tmp_words, words_out)
+        finally:
+            tmp_audio.unlink(missing_ok=True)
+            tmp_words.unlink(missing_ok=True)
     return {
         "audio": _rel(root, audio_out),
         "words": _rel(root, words_out),
@@ -191,55 +214,64 @@ def _process_take_job(
 
 
 def _render_beat_job(
-    edit, root: Path, render_lock, beat_id: str,
+    edit, root: Path, render_lock, beat_lock: threading.Lock, beat_id: str,
     width: str | int | None, quality: str | None,
 ) -> dict:
     """Same code path as `dl2 compose`: compile -> resolver -> cache ->
     render_beat, in-process. Returns {output}. `render_lock` serializes the
-    module-global chunk resolver against concurrent render jobs."""
+    module-global chunk resolver against concurrent render jobs.
+
+    Defect 0.9: the WHOLE job (compile -> cache check -> render -> cache put
+    -> copy) runs under the beat's lock. The jobs executor is a ThreadPool in
+    ONE process with no per-beat dedup, so two parallel render jobs of the
+    same beat used to share the workdir MP4 and the cache tmp path and could
+    publish a torn MP4 into the cache as a lasting hit. Serialized, the second job
+    simply sees the first one's cache entry. (Also 0.7: holding the beat lock
+    means a render can never read beat.audio/words mid-take-replacement.)"""
     from dlstudio import cache as dl_cache
     from dlstudio import compile as dl_compile
     from dlstudio import render as dl_render
     from dlstudio.cli import CliError, _resize_design, gate_pre_render_checks
     from dlstudio.render import beat as render_beat_mod
 
-    timeline = dl_compile.build_timeline(edit)
-    beat = next((b for b in timeline.beats if b.id == beat_id), None)
-    if beat is None:
-        raise ValueError(
-            f"beat {beat_id!r} not in edit {edit.name!r}; "
-            f"available: {[b.id for b in timeline.beats]}"
-        )
+    with beat_lock:
+        timeline = dl_compile.build_timeline(edit)
+        beat = next((b for b in timeline.beats if b.id == beat_id), None)
+        if beat is None:
+            raise ValueError(
+                f"beat {beat_id!r} not in edit {edit.name!r}; "
+                f"available: {[b.id for b in timeline.beats]}"
+            )
 
-    design = _resize_design(timeline.design, width)
-    try:
-        gate_pre_render_checks(timeline, design)   # defect 0.4: no gate, no render
-    except CliError as e:
-        raise ValueError(str(e)) from e
-    width_px = design.resolution[0]
-    quality = quality or "standard"
-
-    out_dir = root / "data" / "finalize"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"{beat_id}.mp4"
-
-    key = dl_cache.beat_key(beat, design, quality=quality, width=width_px, gpu=False)
-    if dl_cache.get(key, out_path):
-        return {"output": _rel(root, out_path)}
-
-    with render_lock:
-        render_beat_mod.set_chunk_resolver(lambda bid, ci: edit.beats[bid].chunks[ci])
+        design = _resize_design(timeline.design, width)
         try:
-            opts = dl_render.RenderOpts(
-                width=width_px, quality=quality, gpu=False, workdir=out_dir)
-            rendered = Path(dl_render.render_beat(beat, design, None, opts))
-        finally:
-            render_beat_mod.set_chunk_resolver(None)
+            gate_pre_render_checks(timeline, design)   # defect 0.4: no gate, no render
+        except CliError as e:
+            raise ValueError(str(e)) from e
+        width_px = design.resolution[0]
+        quality = quality or "standard"
 
-    dl_cache.put(key, rendered)
-    if rendered != out_path:
-        shutil.copyfile(rendered, out_path)
-    return {"output": _rel(root, out_path)}
+        out_dir = root / "data" / "finalize"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"{beat_id}.mp4"
+
+        key = dl_cache.beat_key(beat, design, quality=quality, width=width_px, gpu=False)
+        if dl_cache.get(key, out_path):
+            return {"output": _rel(root, out_path)}
+
+        with render_lock:
+            render_beat_mod.set_chunk_resolver(lambda bid, ci: edit.beats[bid].chunks[ci])
+            try:
+                opts = dl_render.RenderOpts(
+                    width=width_px, quality=quality, gpu=False, workdir=out_dir)
+                rendered = Path(dl_render.render_beat(beat, design, None, opts))
+            finally:
+                render_beat_mod.set_chunk_resolver(None)
+
+        dl_cache.put(key, rendered)
+        if rendered != out_path:
+            shutil.copyfile(rendered, out_path)
+        return {"output": _rel(root, out_path)}
 
 
 # ─── app factory ─────────────────────────────────────────────────────────────
@@ -255,6 +287,16 @@ def create_app(edit_module: str) -> FastAPI:
     edit, root = load_edit(edit_module)
     jobs = JobManager()
     render_lock = threading.Lock()
+
+    # Per-beat job locks (defects 0.7/0.9): render and process-take jobs of
+    # the SAME beat serialize; different beats stay parallel. Process-local
+    # like the JobManager itself.
+    beat_locks: dict[str, threading.Lock] = {}
+    beat_locks_guard = threading.Lock()
+
+    def _beat_lock(beat_id: str) -> threading.Lock:
+        with beat_locks_guard:
+            return beat_locks.setdefault(beat_id, threading.Lock())
 
     # ── hot-reload: pick up beats.py edits without a server restart ───────────
     # The legacy recorder (common/devlog/web/serve.py `_reload_edit`) reloaded
@@ -469,7 +511,7 @@ def create_app(edit_module: str) -> FastAPI:
         if not recording.is_file():
             raise HTTPException(status_code=404, detail=f"recording not found: {rec_rel}")
         job_id = jobs.submit(
-            _process_take_job, edit, root, beat_id, recording,
+            _process_take_job, edit, root, _beat_lock(beat_id), beat_id, recording,
             body.get("language"), body.get("model"),
         )
         return {"job_id": job_id}
@@ -485,7 +527,7 @@ def create_app(edit_module: str) -> FastAPI:
         if beat_id not in edit.beats:
             raise HTTPException(status_code=404, detail=f"unknown beat: {beat_id}")
         job_id = jobs.submit(
-            _render_beat_job, edit, root, render_lock, beat_id,
+            _render_beat_job, edit, root, render_lock, _beat_lock(beat_id), beat_id,
             body.get("width"), body.get("quality"),
         )
         return {"job_id": job_id}

@@ -17,6 +17,7 @@ import json
 import shutil
 import subprocess
 import textwrap
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -471,14 +472,21 @@ def test_process_take_job_lifecycle(light_client, monkeypatch):
     assert result["words"] == "data/finalize/b01_words_tight.json"
     assert result["measured_lufs"] == -18.5
     assert result["duration"] == 3.2
-    # services were called with the resolved absolute recording + declared paths
+    audio_out = root / "data" / "finalize" / "b01_audio_tight_pause.wav"
+    words_out = root / "data" / "finalize" / "b01_words_tight.json"
+    # 0.7 atomic promotion: services are called with same-dir TEMP paths (the
+    # declared extension preserved for format inference), and the results are
+    # os.replace()-promoted to the declared paths only after both succeed.
     assert calls["process"][0] == (root / "data" / "recordings" / "take.webm").resolve()
-    assert calls["process"][1] == (root / "data" / "finalize" / "b01_audio_tight_pause.wav").resolve()
-    assert calls["transcribe"][0] == (root / "data" / "finalize" / "b01_audio_tight_pause.wav").resolve()
-    assert calls["transcribe"][1] == (root / "data" / "finalize" / "b01_words_tight.json").resolve()
-    # and the files actually exist where the beat declares them
-    assert (root / "data" / "finalize" / "b01_audio_tight_pause.wav").is_file()
-    assert (root / "data" / "finalize" / "b01_words_tight.json").is_file()
+    assert calls["process"][1].parent == audio_out.parent
+    assert calls["process"][1] != audio_out and calls["process"][1].suffix == ".wav"
+    assert calls["transcribe"][0] == calls["process"][1]     # transcribed the temp wav
+    assert calls["transcribe"][1].parent == words_out.parent
+    assert calls["transcribe"][1] != words_out and calls["transcribe"][1].suffix == ".json"
+    # the declared paths hold the promoted content; no temp litter remains
+    assert audio_out.read_bytes() == b"vo"
+    assert words_out.read_text(encoding="utf-8") == "{}"
+    assert not list(audio_out.parent.glob("*.tmp-*"))
 
 
 def test_process_take_rejects_traversal_recording(light_client):
@@ -515,6 +523,82 @@ def test_process_take_job_reports_error(light_client, monkeypatch):
     done = _await_job(client, job_id)
     assert done["status"] == "error"
     assert "ffmpeg exploded" in done["error"]
+
+
+def test_process_take_failure_leaves_previous_take_intact(light_client, monkeypatch):
+    """0.7 regression: WAV/words used to be written STRAIGHT to the beat's
+    declared paths — a transcribe failure left a new wav with the OLD words
+    (or a half-written wav). With temp+promote, any failure leaves the
+    previous take byte-identical and no temp litter behind."""
+    client, root, _ = light_client
+    (root / "data" / "recordings").mkdir(parents=True, exist_ok=True)
+    (root / "data" / "recordings" / "take.webm").write_bytes(b"raw")
+
+    audio_out = root / "data" / "finalize" / "b01_audio_tight_pause.wav"
+    words_out = root / "data" / "finalize" / "b01_words_tight.json"
+    audio_out.parent.mkdir(parents=True, exist_ok=True)
+    audio_out.write_bytes(b"previous-take-wav")
+    words_out.write_text('{"words": "previous"}', encoding="utf-8")
+
+    def fake_process_take(recording, out_wav, **kw):
+        Path(out_wav).write_bytes(b"new-take-wav")     # stage 1 succeeds...
+        return _FakeProcessResult(Path(out_wav))
+
+    def failing_transcribe(wav, out_json, **kw):
+        raise RuntimeError("whisper exploded")          # ...stage 2 fails
+
+    monkeypatch.setattr("dlstudio.services.process_take", fake_process_take)
+    monkeypatch.setattr("dlstudio.services.transcribe", failing_transcribe)
+
+    r = client.post("/api/actions/process-take", json={
+        "beat_id": "b01", "recording_path": "data/recordings/take.webm",
+    })
+    done = _await_job(client, r.json()["job_id"])
+    assert done["status"] == "error"
+    assert "whisper exploded" in done["error"]
+    # the previous take survived untouched — nothing was promoted
+    assert audio_out.read_bytes() == b"previous-take-wav"
+    assert words_out.read_text(encoding="utf-8") == '{"words": "previous"}'
+    assert not list(audio_out.parent.glob("*.tmp-*"))
+
+
+def test_parallel_process_take_jobs_same_beat_serialize(light_client, monkeypatch):
+    """0.7: two Process jobs of ONE beat must never run concurrently (they
+    write the same declared wav/words paths)."""
+    client, root, _ = light_client
+    (root / "data" / "recordings").mkdir(parents=True, exist_ok=True)
+    (root / "data" / "recordings" / "take.webm").write_bytes(b"raw")
+
+    state = {"active": 0, "max_active": 0}
+    guard = threading.Lock()
+
+    def slow_process_take(recording, out_wav, **kw):
+        with guard:
+            state["active"] += 1
+            state["max_active"] = max(state["max_active"], state["active"])
+        time.sleep(0.15)
+        Path(out_wav).write_bytes(b"vo")
+        with guard:
+            state["active"] -= 1
+        return _FakeProcessResult(Path(out_wav))
+
+    def fake_transcribe(wav, out_json, **kw):
+        Path(out_json).write_text("{}", encoding="utf-8")
+        return Path(out_json)
+
+    monkeypatch.setattr("dlstudio.services.process_take", slow_process_take)
+    monkeypatch.setattr("dlstudio.services.transcribe", fake_transcribe)
+
+    job_ids = []
+    for _ in range(2):
+        r = client.post("/api/actions/process-take", json={
+            "beat_id": "b01", "recording_path": "data/recordings/take.webm",
+        })
+        job_ids.append(r.json()["job_id"])
+
+    for jid in job_ids:
+        assert _await_job(client, jid)["status"] == "done"
+    assert state["max_active"] == 1, "two takes of one beat overlapped"
 
 
 def test_jobs_unknown_id_404(light_client):
@@ -636,6 +720,54 @@ def test_render_beat_unknown_beat_404(light_client):
     client, _, _ = light_client
     r = client.post("/api/actions/render-beat", json={"beat_id": "nope"})
     assert r.status_code == 404
+
+
+def test_parallel_render_jobs_same_beat_serialize_and_cache_stays_valid(
+    light_client, monkeypatch, tmp_path,
+):
+    """0.9 regression: the jobs executor is a ThreadPool in ONE process with
+    no dedup — two render jobs of the same beat used to share the workdir MP4
+    and the pid-keyed cache tmp path, publishing a torn MP4 into the cache as
+    a lasting hit. Per-beat serialization means the second job waits, then
+    simply materializes the first job's cache entry: exactly ONE render."""
+    client, root, _ = light_client
+    from dlstudio import cache as dl_cache
+
+    monkeypatch.setattr(dl_cache, "CACHE_DIR", tmp_path / "cache2")
+
+    from conftest import make_ir_beat, make_timeline
+
+    timeline = make_timeline([make_ir_beat("b01", duration=4.0)])
+    monkeypatch.setattr("dlstudio.compile.build_timeline", lambda edit, **kw: timeline)
+
+    render_count = {"n": 0}
+
+    def slow_render_beat(beat, design, _timeline, opts):
+        render_count["n"] += 1
+        time.sleep(0.15)
+        out = Path(opts.workdir) / f"{beat.id}.mp4"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"rendered-mp4-payload")
+        dl_cache.vo_stem_sibling(out).write_bytes(b"rendered-stem")
+        return out
+
+    monkeypatch.setattr("dlstudio.render.render_beat", slow_render_beat)
+
+    job_ids = []
+    for _ in range(2):
+        r = client.post("/api/actions/render-beat", json={"beat_id": "b01"})
+        job_ids.append(r.json()["job_id"])
+
+    for jid in job_ids:
+        done = _await_job(client, jid)
+        assert done["status"] == "done", done
+    assert render_count["n"] == 1, "same-beat render jobs were not deduplicated"
+    # the published cache entry is a complete, untorn pair
+    entries = list((tmp_path / "cache2").glob("*.mp4"))
+    assert len(entries) == 1
+    assert entries[0].read_bytes() == b"rendered-mp4-payload"
+    assert entries[0].with_suffix(".wav").read_bytes() == b"rendered-stem"
+    assert not list((tmp_path / "cache2").glob("*.tmp-*"))
 
 
 def test_render_beat_job_blocks_on_check_errors(light_client, monkeypatch):

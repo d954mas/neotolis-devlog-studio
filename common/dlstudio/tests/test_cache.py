@@ -457,6 +457,37 @@ def test_concurrent_put_same_key_different_workers(tmp_path, monkeypatch):
     assert list(cache.CACHE_DIR.glob("*.tmp-*")) == []
 
 
+def test_concurrent_put_same_key_same_process_threads(tmp_path):
+    """0.9 regression: the Studio API executes jobs on a ThreadPool in ONE
+    process, so a pid-only temp name collided between two same-key
+    publishers — one thread could os.replace the OTHER thread's half-copied
+    temp file into the cache. With per-put unique temp names, the surviving
+    entry is one payload COMPLETE, and no temp litter remains."""
+    content_a = b"A" * 300_000
+    content_b = b"B" * 300_000
+    src_a, src_b = tmp_path / "a.mp4", tmp_path / "b.mp4"
+    _write_pair(src_a, content_a, stem_content=b"same-stem")
+    _write_pair(src_b, content_b, stem_content=b"same-stem")
+
+    barrier = threading.Barrier(2)
+
+    def worker(src):
+        barrier.wait()
+        for _ in range(5):     # repeated same-pid publishes maximize overlap
+            cache.put("threadkey", src)
+
+    threads = [threading.Thread(target=worker, args=(s,)) for s in (src_a, src_b)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    final = (cache.CACHE_DIR / "threadkey.mp4").read_bytes()
+    assert final in (content_a, content_b), "torn MP4 published to the cache"
+    assert (cache.CACHE_DIR / "threadkey.wav").read_bytes() == b"same-stem"
+    assert list(cache.CACHE_DIR.glob("*.tmp-*")) == []
+
+
 # ─── CACHE_DIR override (env var + direct monkeypatch) ─────────────────
 
 def test_cache_dir_env_var_override(tmp_path, monkeypatch):
