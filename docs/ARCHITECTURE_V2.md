@@ -36,7 +36,6 @@ common/dlstudio/            v2 engine (Python package, pyproject.toml, pinned de
     transcribe/             WhisperX (word-boundary accuracy > plain whisper)
     audiofix/               DeepFilterNet-class cleanup
     tts/                    scratch VO backends: sapi | piper | silero
-    capture/                CDP + obs-websocket (formalizes tmp/ capture scripts)
     stock/                  thin provider wrappers (commodity feature — keep thin)
     publish/                YouTube package generation (titles/desc/tags/chapters)
   cli/                      command groups, top-level error boundary, `dl2`
@@ -142,7 +141,11 @@ report-only output.
 | 1 | model + compile/IR + graph AST + beat render + cache v2 + `dl2 check/compose/iter` — **DONE 2026-07-16** (214 tests incl. real-ffmpeg E2E; follow-ups in docs/issues/dlstudio-phase1-followups.md) | a v2 beat renders with golden-frame tests green |
 | 2 | assemble: full mix graph + transitions + `dl2 render/final` — **DONE 2026-07-16** (reviewed + fixed; 335 tests; ducking/LUFS/transitions pinned by real-ffmpeg integration) | full video with music across beats, ducking, -14 LUFS verified |
 | 3 | Studio v2 (FastAPI + Vite/TS) — **DONE 2026-07-16** (reviewed + fixed: process-take beat-path fix, hot-reload, upload cap, CORS/file scoping) | record → process → render → review loop in browser, feature parity + mix view |
-| 4 | services (WhisperX, audiofix, TTS, capture, publish) + VQ catalog + new agents — **DONE 2026-07-16** except audiofix/capture (deferred: audiofix needs a DeepFilterNet dependency decision; capture needs a real-usage design round) | `dl2 doctor` green; improve loop runs on v2 with grounded reviewers |
-| 5 | switchover | first real video ships on v2; `dl` → v2; legacy = frozen projects only |
+| 4 | services (WhisperX, audiofix, TTS, publish) + VQ catalog + new agents — **DONE 2026-07-16** except audiofix (deferred: needs a DeepFilterNet dependency decision) | `dl2 doctor` green; improve loop runs on v2 with grounded reviewers |
+| 5 | switchover — **detailed plan: `docs/PLAN_STUDIO_V2.md`** (этапы 0–3: опасные дефекты → шаблон + contact sheet + HyperFrames-мост → skills/agents → два реальных ролика) | first real video ships on v2; `dl` → v2; legacy = frozen projects only |
+
+Capture is **permanently out of scope** for Studio (decision 2026-07-16):
+gameplay recording is an external gameplay/capture agent's job; Studio only
+consumes ready asset files. See `docs/PLAN_STUDIO_V2.md` §2/§6.
 
 Each phase ends with a working system — a video can ship at any point.
