@@ -9,6 +9,7 @@ __pycache__/
 
 # ─── Render outputs (regenerable via `dl render`) ──────────
 **/data/finalize/.cache/
+**/data/finalize/.cache2/
 **/data/finalize/frames_iter*/
 **/data/finalize/preview_frames/
 **/data/finalize/iterations/
