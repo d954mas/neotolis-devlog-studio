@@ -6,6 +6,19 @@ orchestrator picks the right action(s) and runs them. Two agents handle
 focused review work: `vo-reviewer` (voice takes) and `video-reviewer`
 (rendered beats + full video + plan).
 
+> **v1/v2 note (2026-07-17):** the CLI commands below (`dl compose`,
+> `dl render`, `dl reel-preview`, `dl cut`, `dl audio`, ...) are the
+> **legacy v1** surface. All new production work uses **v2** (`dl2`) per
+> `AGENTS.md` and `.claude/skills/dl-make-video/SKILL.md` — command names
+> differ (`dl2 preview` replaces `dl reel-preview`, `dl2 final` replaces
+> `dl render --final`, etc.). The *process* on this page — improve-loop
+> shape, reviewer isolation, regression checklist, reel gate — is still
+> the intended v2 process; only the exact command strings are stale and
+> need a full pass. Until that migration lands, treat every `dl ...`
+> command on this page as "the v2 equivalent from `AGENTS.md`'s defaults
+> table", not as copy-pasteable. The reel gate below has a v2-accurate,
+> maintained twin: `docs/CHECKLIST_VERTICAL_REEL.md`.
+
 ---
 
 ## How to read user input
@@ -170,7 +183,7 @@ Run this after reviewer output and before final handoff:
 - **Audio/music:** background music exists when requested, is audible but not distracting, and attribution is available when needed.
 - **VO joins:** no abrupt phrase cut at beat boundaries or edited joins; inspect user-reported timestamps if any.
 - **Visual glitches:** no one-frame/one-second wrong visual flashes, stale screenshot flashes, or transition pops in the final render.
-- **Readability/safe zones:** titles, captions, and overlays do not collide with borders, accent lines, device frames, or UI edges.
+- **Readability/safe zones:** titles, captions, and overlays do not collide with borders, accent lines, device frames, or UI edges. For vertical reels, check against the numeric platform-chrome zones and Instagram 4:5 crop line in `common/quality/VQ-SAFE.md` and `docs/CHECKLIST_VERTICAL_REEL.md` — "inside the 1080x1920 canvas" is not the same as "inside what any platform actually shows."
 - **Real product proof:** website/app/game thumbnails and promo shots use real captured visuals, not invented UI.
 - **Thumbnail:** if packaging for YouTube, use `thumbnail-designer` plus `devlog-thumbnail` contact-sheet QA.
 - **Ending:** final video has a deliberate outro/end card or clean landing frame, not an accidental hard stop.
@@ -189,7 +202,7 @@ Run this before rendering an upload-quality reel:
 - **Motion floor:** no more than about 3 seconds of static screenshot without motion; repeated UI frames need either a new crop/zoom/position or a new visual source.
 - **Short overlay copy:** main text should be one strong idea; subtitles must be readable on phone. For vertical reels, default to `sub_ratio >= 0.5` and keep yellow lines short.
 - **Deliberate ending:** include a final hold with site/product/CTA, usually about one second.
-- **Cheap preview first:** use `dl reel-preview <edit>` to inspect contact sheet and chunk keyframes. Only run 1080/upload after this passes.
+- **Cheap preview first:** use `dl2 preview <edit>` (v2) / `dl reel-preview <edit>` (v1) to inspect contact sheet and chunk keyframes. Only run 1080/upload after this passes. **This step is not optional under a deadline** — it is one command and costs about the same as the final render itself; see `docs/CHECKLIST_VERTICAL_REEL.md` for the full pre-publish gate (platform-safe zones, VQ-RES anti-bypass rule, transcript token check) that a `trolley3d` reel shipped without in 2026-07-17, catchable only because the lead happened to look at it after publish.
 - **Render serially:** do not run upload renders for two different reel edits in parallel. They share `data/finalize/main_*` and `_concat.txt`; parallel final renders can corrupt or overwrite intermediate concat inputs.
 
 If a checklist item fails, fix it or report it as open. Do not hide it behind a reviewer "ship" verdict.

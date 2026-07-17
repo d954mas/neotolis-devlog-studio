@@ -111,8 +111,15 @@ If a deviation is needed, output it as `edit.mix.duck = Duck(amount_db=-16.0, ..
   most active part; no flat bed under a beat meant to peak.
 - **Ending alignment (VQ-END):** the music's fade/resolve lands with the
   final hold frame, not an abrupt cut mid-phrase.
-- **Attribution:** if the track's license requires credit, note the exact
-  attribution string for `publish-packager` to place in the description.
+- **License preference (lead directive, 2026-07-17): CC0 first.** When
+  recommending a track, prefer CC0 / public-domain / already-purchased
+  no-attribution licenses over attribution-required ones (CC-BY etc.).
+  ALWAYS state the recommended track's license explicitly in the verdict.
+- **Attribution:** if the track's license requires credit, the exact
+  attribution string goes in the verdict AND the orchestrator must surface
+  it as a blocking "⚠️ АТРИБУЦИЯ ОБЯЗАТЕЛЬНА" block at delivery (see
+  docs/CHECKLIST_VERTICAL_REEL.md A6) — a passing mention is not enough;
+  `trolley3d` r01 shipped without attribution that way.
 
 Report each item pass/block/**unverified** — never a bare "sounds fine."
 

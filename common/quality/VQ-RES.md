@@ -41,6 +41,19 @@ such check.
   entry).
 - `dl assets --width 4k` / `dl2 assets` run before final render to surface
   low-resolution source warnings, not just missing files.
+- **A `VQ-RES` upscale error means re-capture, never a pre-crop/pre-upscale
+  workaround.** Pre-processing the source file in ffmpeg (crop-then-scale,
+  or any transform) purely to bring the *computed* upscale factor under
+  2.2x is not a fix — it silences the check while shipping the same or
+  worse quality loss the check exists to catch. `trolley3d` did exactly
+  this under a deadline (`crop=405:720:437:0,scale=1080:1920` on a
+  1280x720 source to dodge a 2.67x-upscale error) and the lead caught the
+  resulting quality on delivery. Capture gameplay in the reel's own
+  orientation at or above the target resolution instead — see
+  `trolley3d/scripts/capture_gameplay.py` for the portrait
+  oversized-window supersampling technique (`SetWindowPos` +
+  `SWP_NOSENDCHANGING` to exceed the WM max-track clamp, then a lanczos
+  downscale at assembly).
 
 ## Evidence required
 
@@ -49,6 +62,9 @@ such check.
   resolution and the computed upscale factor.
 - The render command actually used, to confirm it matches the intended
   stage (draft vs. final).
+- If a `VQ-RES` error was ever raised for the asset now in the edit: what
+  fixed it — must be a new capture/asset with adequate native resolution,
+  never a pre-transform of the same source computed to land under the cap.
 
 ## Not enough
 
@@ -58,3 +74,6 @@ such check.
   because it "looked ok" on one preview.
 - Assuming a v1 asset that worked in a horizontal edit will scale cleanly
   into a new vertical reel without checking its native dimensions.
+- A `VQ-RES` error that used to fire and now doesn't, without knowing
+  *why* it stopped firing — confirm the asset's native resolution actually
+  grew, not that its declared/upscale-relevant dimensions were massaged.

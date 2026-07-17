@@ -118,6 +118,9 @@ class Overlay(_Model):
     style: str = "overlay.default"
     sub_ratio: float | None = None
     subtitle_color: str | None = None  # palette token
+    # Center of the band as a fraction of frame height; None = legacy
+    # position-based placement (bottom/top/middle).
+    y_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class ImageShot(_Model):

@@ -49,6 +49,7 @@ the `RESOLUTION` tuple in `design.py` — there is no separate format field.
 | YouTube package | `dl2 publish <edit>` → `data/publish/youtube_package.md` |
 | Environment triage | `dl2 doctor` |
 | Engine-work verification | `dl2 verify --changed` |
+| Vertical reel, before any `dl2 final` | Run `docs/CHECKLIST_VERTICAL_REEL.md` section A in full — no deadline exception |
 
 Agent routing:
 
@@ -112,6 +113,63 @@ Agent routing:
 - **Ending:** hold a deliberate final frame with site/product/CTA ~1s.
 - **Preview first:** inspect the `dl2 preview` contact sheet + keyframes
   before any delivery-quality render.
+- **Gameplay capture matches the reel orientation (user feedback,
+  2026-07-17, trolley3d):** for a vertical reel capture gameplay with a
+  PORTRAIT window/framebuffer at the largest size the screen allows —
+  never landscape + center-crop (1280x720 → a 405x720 slice upscaled
+  2.67x reads as "паршивое качество"). A VQ-RES upscale error means
+  RE-CAPTURE at a proper resolution; pre-cropping/upscaling the source
+  file in ffmpeg just to silence the check is forbidden. Capture at or
+  ABOVE 1080x1920 when possible (supersampled downscale beats any
+  upscale; see trolley3d/scripts/capture_gameplay.py for the oversized
+  off-screen window technique).
+- **Platform-safe zones for vertical 1080x1920 (Reels/TikTok/Shorts
+  union):** UI overlays cover the frame edges — top ~220px (camera/search
+  bars), bottom ~450px (caption + action buttons; IG is the strictest),
+  right ~140px (like/comment/share rail), left ~60px. Instagram feed
+  additionally CROPS the video to 4:5 (1080x1350 center). Cross-platform
+  text-safe rectangle: centered ~900x1400px.
+- **Music licensing (lead directive, 2026-07-17): CC0 first.** Prefer
+  CC0 / public-domain / purchased no-attribution tracks. If an
+  attribution-required track (CC-BY etc.) is used anyway: persist the
+  attribution string to `data/publish/` BEFORE delivery and put a
+  blocking "⚠️ АТРИБУЦИЯ ОБЯЗАТЕЛЬНА" block (with copy-paste text) in
+  the delivery message itself — the lead must not be able to publish
+  without seeing it. A passing mention in prose already failed once
+  (trolley3d r01 shipped to Instagram without attribution).
+- **Text placement, creator practice (researched 2026-07):** captions
+  live in the LOWER-MIDDLE third — y ≈ 1200–1550 of 1920 (center ratio
+  ~0.66–0.78), keeping ≥370px clearance from the bottom. Viewers are
+  conditioned to read subtitles there; higher placement reads as
+  "detached/оторванный" and competes with content. Anchor the band
+  visually to the subject (right under the game frame / near the face),
+  don't leave it floating in empty space. Hook text on screen within the
+  first 0.5s; every text element ≥2s; entrance animations subtle
+  0.3–0.5s fades (hard pops read amateur); bold sans-serif, ≥36pt-phone
+  equivalent; semi-transparent backdrop for contrast on busy footage.
+  Verify overlay positions against these rules on every vertical reel
+  before final.
+- **Deadline mode is not a license to skip `dl2 preview`
+  (`trolley3d`, 2026-07-17):** under a stated time limit, run
+  `docs/CHECKLIST_VERTICAL_REEL.md` section A only (check, VQ-RES with no
+  bypass, `dl2 preview`, eyeball the contact sheet against the platform
+  zones above, read the transcript tokens) — it costs about the same as
+  the `dl2 final` render you were already going to run. Section B
+  (`video-reviewer`, attribution file, ending check) may be skipped, but
+  say so explicitly in the delivery message. Noting a risk in passing
+  prose ("сейчас ревью-цикл пропущен ради дедлайна") is not the same as a gate — it shipped through three more rounds before the lead caught it.
+- **Transcript tokens, not just word timings:** before wiring
+  `beat.subtitles=True` or an `Overlay` sourced from a `*_words.json`
+  transcript, scan it for garbled tokens — Whisper reliably mangles
+  English/brand proper nouns inside an otherwise-correct RU transcript.
+  Patch the specific word index in the JSON; don't re-run transcription
+  and hope it's better.
+- **Silent VO track as a timing carrier (music+text reels):** a reel with
+  no spoken VO can still use the normal `Beat.audio`/`Beat.words` pipeline
+  — synthesize scratch TTS for timing, then replace the WAV with silence
+  of the same duration (keep the words JSON) so beat/chunk timings stay
+  driven by `words` while the mix carries only music + `Overlay` text.
+  This is a supported pattern, not a workaround.
 
 ## Infographic and motion workflow — HyperFrames only
 

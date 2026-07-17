@@ -153,7 +153,7 @@ def render_overlay(content: Overlay, design: Design) -> tuple[Image.Image, Layou
         _overlay_card(canvas, design, style, text, subtitle, main_rgb, sub_rgb, accent_rgb, bg_rgb, base_size, sub_ratio)
     else:
         _overlay_band(canvas, design, style, text, subtitle, main_rgb, sub_rgb, accent_rgb, bg_rgb, base_size, sub_ratio,
-                       content.position)
+                       content.position, content.y_ratio)
 
     return canvas, Layout()  # overlay content carries no plate-style text geometry hint
 
@@ -176,7 +176,7 @@ def _soft_backdrop(canvas: Image.Image, design: Design, box: tuple[int, int, int
 
 
 def _overlay_band(canvas, design, style, text, subtitle, main_rgb, sub_rgb, accent_rgb, bg_rgb,
-                   base_size, sub_ratio, position) -> None:
+                   base_size, sub_ratio, position, y_ratio=None) -> None:
     W, H = canvas.size
     draw = ImageDraw.Draw(canvas)
 
@@ -203,7 +203,10 @@ def _overlay_band(canvas, design, style, text, subtitle, main_rgb, sub_rgb, acce
     box_w = max(design.px(860), min(W - design.px(200), max(tw, sw) + pad_x * 2 + accent_safe_w))
     box_h = th + sh + gap + pad_y * 2
 
-    if position == "bottom":
+    if y_ratio is not None:
+        y = int(H * y_ratio - box_h / 2)
+        y = max(design.px(24), min(y, H - box_h - design.px(24)))
+    elif position == "bottom":
         y = H - box_h - design.px(78)
     elif position == "top":
         y = design.px(78)
