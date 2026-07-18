@@ -7,6 +7,7 @@ Implemented so far (record -> process -> render loop, Phase 3 Studio):
   tts.py         scratch_tts()   — throwaway VO for pacing checks
                   (sapi implemented; piper | silero are documented slots,
                   see docs/issues/local-russian-tts-research.md).
+  speech_edit.py agent plan + deterministic FFmpeg cuts + words remapping.
 
 Phase 4 additions:
   stock.py       search()/download() — thin Pexels/Pixabay b-roll wrapper,
@@ -40,6 +41,19 @@ from .audio import AudioStageError, ProcessResult, process_take
 from .hyperframes import init_project, render_html
 from .publish import generate_youtube_package
 from .review import extract_keyframes, make_contact_sheet
+from .speech_edit import (
+    SpeechCut,
+    SpeechEditPlan,
+    SpeechEditResult,
+    SpeechEditStageError,
+    ResolvedSpeechCuts,
+    build_automatic_plan,
+    build_automatic_plan_from_files,
+    detect_silences,
+    execute_speech_edit,
+    resolve_safe_cuts,
+    sha256_file,
+)
 from .stock import StockConfigError, StockResult, download, search
 from .transcribe import transcribe
 from .tts import UnknownTTSBackendError, list_sapi_voices, scratch_tts
@@ -52,6 +66,17 @@ __all__ = [
     "render_html",
     "extract_keyframes",
     "make_contact_sheet",
+    "SpeechCut",
+    "SpeechEditPlan",
+    "SpeechEditResult",
+    "SpeechEditStageError",
+    "ResolvedSpeechCuts",
+    "build_automatic_plan",
+    "build_automatic_plan_from_files",
+    "detect_silences",
+    "execute_speech_edit",
+    "resolve_safe_cuts",
+    "sha256_file",
     "generate_youtube_package",
     "StockConfigError",
     "StockResult",

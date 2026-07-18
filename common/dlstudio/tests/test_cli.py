@@ -12,6 +12,7 @@ conftest helpers instead of compiling an Edit.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import textwrap
@@ -1229,6 +1230,118 @@ def test_cmd_audio_unknown_beat_errors(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / pkg / "rec.webm").write_bytes(b"raw-take")
     assert cli.main(["audio", dotted, "nope", "rec.webm"]) == 1
+
+
+def test_cmd_speech_edit_applies_agent_plan_and_promotes_bundle(tmp_path, monkeypatch):
+    pkg = _unique_pkg("proj_speech_edit")
+    dotted = _make_fake_project(tmp_path, pkg, edit_body=_BEAT_EDIT_BODY)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    project = tmp_path / pkg
+    finalize = project / "data" / "finalize"
+    finalize.mkdir(parents=True)
+    (finalize / "b01_vo.wav").write_bytes(b"source-audio")
+    (finalize / "b01_words.json").write_text("{}", encoding="utf-8")
+    (project / "agent_plan.json").write_text(json.dumps({
+        "schema": "dlstudio.speech-edit/v1",
+        "input": {
+            "audio_sha256": "a" * 64,
+            "words_sha256": "b" * 64,
+            "duration": 2.0,
+        },
+        "cuts": [{
+            "t0": 0.4,
+            "t1": 0.8,
+            "reasons": ["false_start"],
+            "sources": ["agent"],
+            "confidence": 1.0,
+        }],
+    }), encoding="utf-8")
+    calls = {}
+
+    def fake_execute(source_audio, source_words, output_audio, output_words,
+                     artifact_path, **kwargs):
+        calls["paths"] = tuple(map(Path, (
+            source_audio, source_words, output_audio, output_words, artifact_path,
+        )))
+        calls["plan"] = kwargs["plan"]
+        Path(output_audio).write_bytes(b"edited-audio")
+        Path(output_words).write_text('{"words": []}', encoding="utf-8")
+        Path(artifact_path).write_text('{"schema": "dlstudio.speech-edit/v1"}', encoding="utf-8")
+        return type("Result", (), {
+            "source_duration": 2.0,
+            "duration": 1.6,
+            "removed_duration": 0.4,
+            "cut_count": 1,
+        })()
+
+    monkeypatch.setattr(dl_services_mod, "execute_speech_edit", fake_execute)
+
+    assert cli.main(["speech-edit", dotted, "b01", "agent_plan.json"]) == 0
+    assert calls["paths"][0:2] == (
+        Path("data/finalize/b01_vo.wav"),
+        Path("data/finalize/b01_words.json"),
+    )
+    assert calls["plan"].cuts[0].reasons == ("false_start",)
+    assert (finalize / "b01_vo.wav").read_bytes() == b"edited-audio"
+    assert json.loads((finalize / "b01_words.json").read_text(encoding="utf-8")) == {"words": []}
+    assert (finalize / "b01_speech_edit.json").exists()
+
+
+def test_speech_edit_bundle_promotion_rolls_back_on_replace_failure(tmp_path, monkeypatch):
+    staged_audio = tmp_path / "staged.wav"
+    staged_words = tmp_path / "staged.json"
+    audio = tmp_path / "audio.wav"
+    words = tmp_path / "words.json"
+    staged_audio.write_bytes(b"new-audio")
+    staged_words.write_bytes(b"new-words")
+    audio.write_bytes(b"old-audio")
+    words.write_bytes(b"old-words")
+    real_replace = cli.os.replace
+
+    def fail_second_promotion(src, dst):
+        if Path(src) == staged_words and Path(dst) == words:
+            raise OSError("simulated replace failure")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(cli.os, "replace", fail_second_promotion)
+    with pytest.raises(OSError, match="simulated"):
+        cli._promote_bundle([(staged_audio, audio), (staged_words, words)])
+
+    assert audio.read_bytes() == b"old-audio"
+    assert words.read_bytes() == b"old-words"
+
+
+def test_cmd_speech_edit_can_prepare_hash_bound_plan_for_agent(tmp_path, monkeypatch):
+    pkg = _unique_pkg("proj_speech_plan")
+    dotted = _make_fake_project(tmp_path, pkg, edit_body=_BEAT_EDIT_BODY)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    project = tmp_path / pkg
+    finalize = project / "data" / "finalize"
+    finalize.mkdir(parents=True)
+    (finalize / "b01_vo.wav").write_bytes(b"source-audio")
+    (finalize / "b01_words.json").write_text("{}", encoding="utf-8")
+    plan = dl_services_mod.SpeechEditPlan(
+        source_duration=2.0,
+        cuts=(),
+        input_audio_sha256="a" * 64,
+        input_words_sha256="b" * 64,
+    )
+    monkeypatch.setattr(
+        dl_services_mod, "build_automatic_plan_from_files", lambda *_args: plan,
+    )
+
+    assert cli.main([
+        "speech-edit", dotted, "b01",
+        "--prepare-plan", "data/review/b01_plan.json",
+    ]) == 0
+    prepared = json.loads(
+        (project / "data/review/b01_plan.json").read_text(encoding="utf-8")
+    )
+    assert prepared["input"]["audio_sha256"] == "a" * 64
+    assert prepared["cuts"] == []
+    assert (finalize / "b01_vo.wav").read_bytes() == b"source-audio"
 
 
 def test_cmd_transcribe_calls_service_with_right_args(tmp_path, monkeypatch):

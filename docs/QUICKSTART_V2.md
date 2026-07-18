@@ -96,7 +96,19 @@ data/review/keyframes/kf_NN.jpg    # 8 стоп-кадров
 dl2 studio myreel.edits.main       # http://127.0.0.1:8788 — запись/такейки
 # или из готовой записи:
 dl2 audio myreel.edits.main b01 data/recordings/take.webm
+
+# Speech edit выполняет агент автоматически, без авторского чекпоинта:
+dl2 speech-edit myreel.edits.main b01 \
+  --prepare-plan data/review/b01_speech_edit_plan.json
+# агент дополняет plan семантическими cuts и применяет его:
+dl2 speech-edit myreel.edits.main b01 data/review/b01_speech_edit_plan.json
+dl2 check myreel.edits.main
 ```
+
+Полный контракт плана, артефакта и перенумерации word-index ссылок:
+`docs/SPEECH_EDIT.md`. Если достаточно только консервативной чистки длинных
+пауз, явных слов-паразитов и точных повторов, агент вызывает
+`dl2 speech-edit myreel.edits.main b01` без файла плана.
 
 ## 7. Final
 

@@ -40,7 +40,7 @@ the `RESOLUTION` tuple in `design.py` — there is no separate format field.
 | Final upload-ready render | `dl2 final <edit>` (1080p, −14 LUFS loudnorm) |
 | Start a new video | `dl2 new-video <project> --format vertical` (or `landscape`) |
 | Scratch VO for a beat | `dl2 scratch-tts <edit> <beat>` → `dl2 transcribe <wav> <words.json>` → wire BOTH paths into the beat in `beats.py` |
-| Process a recorded take | `dl2 audio <edit> <beat> <take>` (takes live in `data/recordings/`) |
+| Process a recorded take | `dl2 audio <edit> <beat> <take>` → automatic agent speech edit per `docs/SPEECH_EDIT.md` (takes live in `data/recordings/`) |
 | Record VO / takes / feedback UI | `dl2 studio <edit>` → http://127.0.0.1:8788 |
 | Missing-asset / compile triage | `dl2 check <edit>` (its error list is the TODO); cache status: `dl2 beats <edit>` |
 | Ground-truth timings | `dl2 ir <edit> --out ir.json` |
@@ -92,6 +92,25 @@ Agent routing:
 7. **Draft first for a new reel.** Scaffold, provisional script, scratch
    VO, existing/stock/generated visuals, `dl2 preview`. Source capture is a
    short bounded step; use placeholders and replace next iteration.
+
+## Automatic speech edit — agent-owned, no author checkpoint
+
+Speech edit of an existing recorded take is an automatic agent stage, not a
+Studio UI task. After `dl2 audio`, follow `docs/SPEECH_EDIT.md`: prepare the
+hash-bound baseline plan, inspect the transcript, add only defensible semantic
+cuts (false starts, superseded repeats, filler/noise), apply it with
+`dl2 speech-edit`, update any affected `Chunk.words` / `SfxEvent.word` indices
+from the artifact map, then run `dl2 check`. Do not ask the author to approve
+the cut plan. Preserve the raw recording in `data/recordings/`.
+
+`speech_edit.json` is evidence, not a checkpoint. A stale input hash or a plan
+that removes the entire result is a hard failure. A cut that splits a word or
+lacks quiet guarded boundaries is never forced: retain that fragment and
+record it in `resolution.skipped_cuts`. A failed post-render join-continuity
+check blocks the whole bundle; remove/refine that cut and retry. The agent may
+automatically refine its plan, but uncertain speech stays. Stop and ask only
+when the fix requires new wording, a re-record, or a genuine change of
+meaning/product claim; those are not speech edits.
 
 ## Reel defaults
 
@@ -199,7 +218,8 @@ Safe to apply without asking (PLAN_STUDIO_V2 §2.2): clear typos; `size`,
 **only if the new path exists in `data/`**; wiring an existing asset;
 creating/editing HyperFrames assets; re-rendering drafts; running review.
 
-Stop and ask the user (§2.3): new real footage; final VO or any VO change;
+Stop and ask the user (§2.3): new real footage; new final-VO wording or a
+re-record (automatic speech edit of an existing take is explicitly safe);
 meaning or structure changes (split/merge beats, new chunks/beats);
 word-index re-mappings; contested product claims; a critical asset that
 can't be substituted; reviewer demands a 6th iteration.

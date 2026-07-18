@@ -16,6 +16,7 @@ Phase 2 commands (full mix assemble — music/ducking/SFX/transitions/loudnorm):
 
 Phase 3 commands (services + Studio backend):
   dl2 audio <edit> <beat> <rec>    process a take -> beat VO wav + words.json
+  dl2 speech-edit <edit> <beat>    apply agent plan -> edited WAV + remapped words
   dl2 transcribe <wav> <out.json>  standalone word-level transcription
   dl2 scratch-tts <edit> <beat>    scratch VO from beat.vo -> data/scratch/
   dl2 studio [edit] [--port]       serve the FastAPI Studio backend (127.0.0.1)
@@ -43,11 +44,13 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import importlib
+import json
 import os
 import shutil
 import subprocess
 import sys
 import tomllib
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -738,6 +741,134 @@ def cmd_audio(args: argparse.Namespace) -> int:
     return 0
 
 
+def _speech_edit_artifact_path(words_path: Path) -> Path:
+    stem = words_path.stem
+    base = stem[:-6] if stem.endswith("_words") else stem
+    return words_path.with_name(f"{base}_speech_edit.json")
+
+
+def _promote_bundle(replacements: list[tuple[Path, Path]]) -> None:
+    """Publish a staged bundle with best-effort rollback on replace failure."""
+
+    nonce = uuid.uuid4().hex[:8]
+    backups: list[tuple[Path, Path]] = []
+    promoted: list[Path] = []
+    try:
+        for _staged, target in replacements:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.exists():
+                backup = target.with_name(f".{target.name}.backup-{nonce}")
+                os.replace(target, backup)
+                backups.append((backup, target))
+        for staged, target in replacements:
+            os.replace(staged, target)
+            promoted.append(target)
+    except Exception:
+        for target in reversed(promoted):
+            target.unlink(missing_ok=True)
+        for backup, target in reversed(backups):
+            if backup.exists():
+                os.replace(backup, target)
+        raise
+    else:
+        for backup, _target in backups:
+            backup.unlink(missing_ok=True)
+
+
+def cmd_speech_edit(args: argparse.Namespace) -> int:
+    """Apply an agent-authored (or conservative automatic) speech edit."""
+
+    v2_config = _load_v2_config(_find_workspace_root())
+    dotted = _resolve_edit_arg(args.edit, v2_config)
+    edit = _load_edit(dotted)
+    if args.beat_id not in edit.beats:
+        raise CliError(
+            f"beat {args.beat_id!r} not in edit {edit.name!r}; "
+            f"available: {list(edit.beats)}"
+        )
+    beat = edit.beats[args.beat_id]
+    audio_out = Path(beat.audio)
+    words_out = Path(beat.words)
+    if not audio_out.exists():
+        raise CliError(f"beat audio not found: {audio_out}")
+    if not words_out.exists():
+        raise CliError(f"beat words not found: {words_out}")
+
+    from dlstudio import services
+
+    if args.plan and args.prepare_plan:
+        raise CliError("pass either an existing plan or --prepare-plan, not both")
+    if args.plan:
+        plan_path = Path(args.plan)
+        if not plan_path.exists():
+            raise CliError(f"speech edit plan not found: {plan_path}")
+        raw_plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        if not isinstance(raw_plan, dict):
+            raise CliError("speech edit plan must contain a JSON object")
+        plan = services.SpeechEditPlan.from_dict(raw_plan)
+        plan_source = str(plan_path)
+    else:
+        plan = services.build_automatic_plan_from_files(audio_out, words_out)
+        plan_source = "automatic baseline"
+
+    if args.prepare_plan:
+        prepared_path = Path(args.prepare_plan)
+        prepared_path.parent.mkdir(parents=True, exist_ok=True)
+        prepared_path.write_text(
+            json.dumps(plan.to_dict(), ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        print(f"[dl2] speech-edit: prepared agent plan -> {prepared_path}")
+        return 0
+
+    artifact_out = (
+        Path(args.artifact) if args.artifact else _speech_edit_artifact_path(words_out)
+    )
+    nonce = uuid.uuid4().hex[:8]
+    tmp_audio = audio_out.with_name(
+        f".{audio_out.stem}.speech-edit-{nonce}{audio_out.suffix or '.wav'}"
+    )
+    tmp_words = words_out.with_name(
+        f".{words_out.stem}.speech-edit-{nonce}{words_out.suffix or '.json'}"
+    )
+    tmp_artifact = artifact_out.with_name(
+        f".{artifact_out.stem}.speech-edit-{nonce}{artifact_out.suffix or '.json'}"
+    )
+    try:
+        result = services.execute_speech_edit(
+            audio_out,
+            words_out,
+            tmp_audio,
+            tmp_words,
+            tmp_artifact,
+            plan=plan,
+            output_audio_ref=str(beat.audio),
+        )
+        _promote_bundle([
+            (tmp_audio, audio_out),
+            (tmp_words, words_out),
+            (tmp_artifact, artifact_out),
+        ])
+    finally:
+        tmp_audio.unlink(missing_ok=True)
+        tmp_words.unlink(missing_ok=True)
+        tmp_artifact.unlink(missing_ok=True)
+
+    print(f"[dl2] speech-edit: {args.beat_id} ({plan_source})")
+    print(
+        f"[dl2]   {result.source_duration:.2f}s -> {result.duration:.2f}s; "
+        f"removed {result.removed_duration:.2f}s in {result.cut_count} cut(s)"
+    )
+    skipped = getattr(result, "skipped_cut_count", 0)
+    if skipped:
+        print(
+            f"[dl2]   retained {skipped} unsafe/uncertain cut(s); "
+            "see artifact resolution.skipped_cuts"
+        )
+    print(f"[dl2]   artifact -> {artifact_out}")
+    return 0
+
+
 def cmd_transcribe(args: argparse.Namespace) -> int:
     """Standalone word-level transcription (no beat/edit context)."""
     wav = Path(args.wav)
@@ -927,6 +1058,26 @@ def _build_parser() -> argparse.ArgumentParser:
     p_audio.add_argument("--language", default="ru", help="transcription language (default: ru)")
     p_audio.add_argument("--model", default="medium", help="whisper model size (default: medium)")
     p_audio.set_defaults(func=cmd_audio)
+
+    p_speech_edit = sub.add_parser(
+        "speech-edit",
+        help="apply an agent-authored speech edit to a beat WAV + words.json",
+    )
+    p_speech_edit.add_argument("edit", help="dotted edit module path")
+    p_speech_edit.add_argument("beat_id", help="beat whose audio/words to edit")
+    p_speech_edit.add_argument(
+        "plan", nargs="?",
+        help="agent-authored speech_edit.json; omit for conservative automatic cuts",
+    )
+    p_speech_edit.add_argument(
+        "--artifact",
+        help="resolved audit artifact path (default: beside beat words.json)",
+    )
+    p_speech_edit.add_argument(
+        "--prepare-plan",
+        help="write a hash-bound automatic baseline for the agent, without applying it",
+    )
+    p_speech_edit.set_defaults(func=cmd_speech_edit)
 
     p_transcribe = sub.add_parser(
         "transcribe", help="standalone word-level transcription of a wav")
