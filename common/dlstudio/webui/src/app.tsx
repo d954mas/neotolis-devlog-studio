@@ -257,6 +257,7 @@ export function App() {
               {label}
             </div>
           ))}
+          <a class="tab tab-link" href="/research/">Research</a>
         </div>
         <span class={"api " + (apiOk ? "ok" : "bad")}>
           API: <b>{apiOk ? "ok" : "offline"}</b>

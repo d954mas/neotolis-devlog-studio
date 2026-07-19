@@ -407,6 +407,14 @@ def create_app(edit_module: str) -> FastAPI:
     app.state.root = root
     app.state.jobs = jobs
 
+    # Research projects are shared by every production opened from the same
+    # workspace, rather than being buried inside the current edit's data.
+    from dlstudio.api.research import create_research_router
+    from dlstudio.cli import _find_workspace_root
+
+    research_root = _find_workspace_root(root) or root
+    app.include_router(create_research_router(research_root))
+
     def _feedback_path() -> Path:
         return root / "data" / "review" / "feedback.json"
 
@@ -600,6 +608,8 @@ def create_app(edit_module: str) -> FastAPI:
         app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
     @app.get("/", response_model=None)
+    @app.get("/research", response_model=None)
+    @app.get("/research/", response_model=None)
     def index() -> HTMLResponse | FileResponse:
         idx = _STATIC_DIR / "index.html"
         if idx.is_file():
