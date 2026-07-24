@@ -37,7 +37,16 @@ provider functions are the only place that imports requests, same rule.
 """
 from __future__ import annotations
 
-from .audio import AudioStageError, ProcessResult, process_take
+from .audio import (
+    AudioStageError,
+    ProcessResult,
+    VoiceTakeMarkers,
+    VoiceTakeQualityError,
+    load_voice_take_markers,
+    process_take,
+    recording_metadata_path,
+    write_voice_take_verdict,
+)
 from .boundary_report import build_boundary_report, write_boundary_report
 from .geometry_report import build_geometry_report, write_geometry_report
 from .hyperframes import init_project, render_html
@@ -63,7 +72,12 @@ from .tts import UnknownTTSBackendError, list_sapi_voices, scratch_tts
 __all__ = [
     "AudioStageError",
     "ProcessResult",
+    "VoiceTakeMarkers",
+    "VoiceTakeQualityError",
+    "load_voice_take_markers",
     "process_take",
+    "recording_metadata_path",
+    "write_voice_take_verdict",
     "build_boundary_report",
     "write_boundary_report",
     "build_geometry_report",

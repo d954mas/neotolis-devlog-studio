@@ -209,7 +209,7 @@
 
 ### A4 — VO lead-in, room tone, post-roll, and markers
 
-**Статус:** recording state/markers implemented; take-level transient verdict remains  
+**Статус:** marker-driven trim and take-level verdict implemented; real-device UAT remains
 **Дата:** 2026-07-24
 
 #### Реализовано
@@ -229,32 +229,47 @@
   `*.recording.json`;
 - session take хранит metadata path;
 - `devlog-record-media` skill синхронизирован с фактическим Studio protocol.
+- `dl2 audio` и Studio process-take используют sidecar для guarded trim:
+  - 250 ms материала до speech marker;
+  - 100 ms guard до Stop marker, поэтому физический click кнопки не остаётся
+    в retained VO;
+  - обе границы выбранного WAV проверяются до cleanup;
+- incomplete lead-in/post-roll теперь блокирует обработку с `re_record`, а не
+  маскируется legacy fallback;
+- legacy take без sidecar сохраняет старый cleanup-first путь и получает
+  честный статус `unverified`;
+- transient detector ловит не только full-scale single-sample impulse, но и
+  короткий sub-full-scale click с парой резких фронтов;
+- verdict содержит exact raw SHA-256, timestamp, фактическую selection geometry,
+  head/tail QC и recommended action;
+- PASS verdict публикуется только после успешной транскрипции; rejection
+  сохраняется отдельным `*.rejected.json`;
+- take card показывает `Clean`, `Unverified` или понятный `Re-record` reason.
 
 #### Проверка
 
 - Studio production TypeScript/Vite build: pass;
 - browser-component state test:
   countdown → room tone → read → post-roll → metadata: pass;
-- take upload/metadata API: `6 passed`;
-- полный engine gate: `825 passed, 3 skipped`;
+- browser take-card quality badge tests: `2 passed`;
+- targeted audio/API/CLI suite: `186 passed`;
+- полный changed-path engine gate: `527 passed`;
+- все Studio Web UI component tests: `11 passed`;
 - `dl2 verify --changed`: pass.
 
 #### Критика инкремента
 
-1. Markers больше не требуют угадывать безопасные области, но `dl2 audio`
-   пока не использует sidecar для guarded marker-based trim.
-2. Existing PCM click/clipping detector существует в
-   `script_preflight.check_wav_first_3s`, но ещё не публикует take-level
-   verdict после каждого Studio upload/process.
-3. Emergency stop при смене beat/tab сохраняет take без полного post-roll;
-   metadata ставит `post_roll_completed=false`, а take card показывает
-   degraded warning, но автоматическое решение recapture/repair ещё отсутствует.
-4. Реальная проверка микрофона/браузера всё ещё нужна; unit test доказывает
+1. Реальная проверка микрофона/браузера всё ещё нужна; unit test доказывает
    state machine и metadata, а не качество конкретного устройства.
+2. 100 ms Stop guard опирается на точность browser marker; дополнительный
+   head/tail QC блокирует найденный transient, но WebM/Opus device fixture ещё
+   не заменяет real-device UAT.
+3. Подробный старый Wave 6 всё ещё упоминает 2 s post-roll, тогда как
+   утверждённый Milestone A и реализованный быстрый протокол используют 1 s.
+   Перед дальнейшим редактированием плана это противоречие нужно удалить.
 
 #### Решение
 
-- core A4 не объявлять полностью закрытым;
-- следующим VO slice связать markers с guarded trim и transient verdict;
-- incomplete lead-in/post-roll не скрывать: показывать как recapture/repair
-  warning в take card.
+- A4 core принять после независимого re-review и commit;
+- провести короткий real-device UAT при следующей фактической записи VO;
+- перейти к A5 visible polish checkpoint.

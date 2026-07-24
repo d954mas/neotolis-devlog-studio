@@ -796,12 +796,25 @@ def cmd_audio(args: argparse.Namespace) -> int:
 
     audio_out = Path(beat.audio)
     words_out = Path(beat.words)
-    result = services.process_take(recording, audio_out)
+    verdict_out = (
+        Path("data") / "review" / "voice_takes" / f"{recording.stem}.json"
+    )
+    try:
+        result = services.process_take(recording, audio_out)
+    except services.VoiceTakeQualityError as exc:
+        rejected_out = verdict_out.with_name(f"{verdict_out.stem}.rejected.json")
+        services.write_voice_take_verdict(exc.verdict, rejected_out)
+        raise
     services.transcribe(audio_out, words_out, language=args.language, model=args.model)
+    result_verdict = getattr(result, "verdict", None)
+    if result_verdict is not None:
+        services.write_voice_take_verdict(result_verdict, verdict_out)
     print(f"[dl2] audio: {recording} -> {audio_out}")
     print(f"[dl2]   measured input loudness: {result.input_i:.2f} LUFS")
     print(f"[dl2]   duration: {result.duration:.2f}s")
     print(f"[dl2]   words -> {words_out}")
+    verdict = result_verdict or {}
+    print(f"[dl2]   take verdict -> {verdict_out} ({verdict.get('verdict', 'unknown')})")
     return 0
 
 

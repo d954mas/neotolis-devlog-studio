@@ -254,6 +254,12 @@ def _process_take_job(
     with beat_lock:
         audio_out.parent.mkdir(parents=True, exist_ok=True)
         words_out.parent.mkdir(parents=True, exist_ok=True)
+        verdict_out = (
+            root / "data" / "review" / "voice_takes" / f"{recording.stem}.json"
+        )
+        rejected_verdict_out = verdict_out.with_name(
+            f"{verdict_out.stem}.rejected.json"
+        )
         # Same-directory temp names keep os.replace atomic (same volume); the
         # real extensions are preserved because ffmpeg/whisper infer output
         # format from them.
@@ -263,7 +269,14 @@ def _process_take_job(
         tmp_words = words_out.with_name(
             f".{words_out.stem}.tmp-{nonce}{words_out.suffix or '.json'}")
         try:
-            result = services.process_take(recording, tmp_audio)
+            try:
+                result = services.process_take(recording, tmp_audio)
+            except services.VoiceTakeQualityError as exc:
+                services.write_voice_take_verdict(
+                    exc.verdict,
+                    rejected_verdict_out,
+                )
+                raise
             kwargs: dict = {}
             if language:
                 kwargs["language"] = language
@@ -272,6 +285,9 @@ def _process_take_job(
             services.transcribe(tmp_audio, tmp_words, **kwargs)
             os.replace(tmp_audio, audio_out)
             os.replace(tmp_words, words_out)
+            result_verdict = getattr(result, "verdict", None)
+            if result_verdict is not None:
+                services.write_voice_take_verdict(result_verdict, verdict_out)
         finally:
             tmp_audio.unlink(missing_ok=True)
             tmp_words.unlink(missing_ok=True)
@@ -280,6 +296,18 @@ def _process_take_job(
         "words": _rel(root, words_out),
         "measured_lufs": result.input_i,
         "duration": result.duration,
+        "voice_take_verdict": (
+            _rel(root, verdict_out) if verdict_out.exists() else None
+        ),
+        "voice_take_status": (
+            result_verdict.get("verdict") if result_verdict else None
+        ),
+        "voice_take_action": (
+            result_verdict.get("recommended_action") if result_verdict else None
+        ),
+        "voice_take_issues": (
+            result_verdict.get("issues", []) if result_verdict else []
+        ),
     }
 
 

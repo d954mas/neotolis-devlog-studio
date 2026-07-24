@@ -22,6 +22,17 @@ const COUNTDOWN_SECONDS = 3;
 const ROOM_TONE_SECONDS = 2;
 const POST_ROLL_SECONDS = 1;
 
+interface ProcessTakeResult {
+  voice_take_verdict?: string | null;
+  voice_take_status?: "pass" | "unverified" | null;
+  voice_take_action?: string | null;
+}
+
+function takeProcessResult(value: unknown): ProcessTakeResult | null {
+  if (!value || typeof value !== "object") return null;
+  return value as ProcessTakeResult;
+}
+
 export function RecordTab({
   beat,
   takes,
@@ -258,12 +269,29 @@ export function RecordTab({
         onStatus: (s) => updateTake(t.id, { processMessage: s.status }),
       });
       if (final.status === "done") {
-        updateTake(t.id, { processState: "done", processMessage: "processed" });
+        const result = takeProcessResult(final.result);
+        const clean = result?.voice_take_status === "pass";
+        updateTake(t.id, {
+          processState: "done",
+          processMessage: "processed",
+          qualityStatus: clean ? "clean" : "unverified",
+          qualityMessage: clean
+            ? "Clean · marker-trimmed · boundary QC passed"
+            : "Processed legacy take · markers unverified",
+          verdictPath: result?.voice_take_verdict || undefined,
+        });
         onAfterProcess();
       } else {
+        const qualityRejected = (final.error || "").includes("VoiceTakeQualityError");
         updateTake(t.id, {
           processState: "error",
-          processMessage: final.error || "process failed",
+          processMessage: qualityRejected
+            ? "Re-record this take"
+            : final.error || "process failed",
+          qualityStatus: qualityRejected ? "re_record" : undefined,
+          qualityMessage: qualityRejected
+            ? "Click, clipping, or incomplete clean handles detected"
+            : undefined,
         });
       }
     } catch (e) {
@@ -436,6 +464,23 @@ export function RecordTab({
                   ) && (
                     <div class="approval-warning">
                       Incomplete clean handles · prefer recapture or guarded trim
+                    </div>
+                  )}
+                  {t.qualityStatus && (
+                    <div
+                      class={
+                        t.qualityStatus === "re_record"
+                          ? "approval-warning"
+                          : "take-quality"
+                      }
+                    >
+                      {t.qualityStatus === "clean"
+                        ? "Clean"
+                        : t.qualityStatus === "re_record"
+                          ? "Re-record"
+                          : "Unverified"}
+                      {" · "}
+                      {t.qualityMessage}
                     </div>
                   )}
                   <audio controls preload="none" src={t.url} />

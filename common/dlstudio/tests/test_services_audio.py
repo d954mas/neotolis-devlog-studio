@@ -8,8 +8,12 @@ test_assemble_mix.py uses for its final-mix loudness assertion.
 """
 from __future__ import annotations
 
+import json
+import math
 import shutil
 import subprocess
+import wave
+from array import array
 
 import pytest
 
@@ -127,6 +131,48 @@ def _probe_dur(path) -> float:
     return float(r.stdout.strip())
 
 
+def _write_marker_sidecar(
+    recording,
+    *,
+    speech_start=5.0,
+    stop_requested=7.0,
+    post_roll_end=8.0,
+    completed_lead_in=True,
+    post_roll_completed=True,
+):
+    sidecar = audio_mod.recording_metadata_path(recording)
+    sidecar.write_text(json.dumps({
+        "schema": "devlog.voice_take",
+        "version": 1,
+        "countdown_seconds": 3.0,
+        "room_tone_seconds": 2.0,
+        "speech_start_seconds": speech_start,
+        "stop_requested_seconds": stop_requested,
+        "post_roll_end_seconds": post_roll_end,
+        "post_roll_target_seconds": 1.0,
+        "post_roll_completed": post_roll_completed,
+        "completed_lead_in": completed_lead_in,
+    }), encoding="utf-8")
+    return sidecar
+
+
+def _marker_take(path, *, impulse_at=None):
+    sample_rate = 48000
+    samples = array("h", [0]) * (sample_rate * 8)
+    tone_start = int((5.3 if impulse_at == 5.1 else 5.0) * sample_rate)
+    tone_end = int(6.7 * sample_rate)
+    for index in range(tone_start, tone_end):
+        phase = 2 * math.pi * 440 * (index - tone_start) / sample_rate
+        samples[index] = int(0.15 * 32767 * math.sin(phase))
+    if impulse_at is not None:
+        samples[int(impulse_at * sample_rate)] = 32767
+    with wave.open(str(path), "wb") as stream:
+        stream.setnchannels(1)
+        stream.setsampwidth(2)
+        stream.setframerate(sample_rate)
+        stream.writeframes(samples.tobytes())
+
+
 def _measure_lufs(path) -> float:
     r = subprocess.run(
         ["ffmpeg", "-i", str(path), "-af",
@@ -186,6 +232,104 @@ def test_process_take_custom_target(tmp_path):
     assert result.duration > 0
 
 
+def test_load_voice_take_markers_validates_timing_contract(tmp_path):
+    raw = tmp_path / "raw.webm"
+    raw.write_bytes(b"raw")
+    sidecar = _write_marker_sidecar(raw)
+
+    markers = audio_mod.load_voice_take_markers(raw)
+
+    assert markers is not None
+    assert markers.path == sidecar
+    assert markers.speech_start_seconds == 5.0
+    assert markers.stop_requested_seconds == 7.0
+
+
+def test_load_voice_take_markers_rejects_unordered_markers(tmp_path):
+    raw = tmp_path / "raw.webm"
+    raw.write_bytes(b"raw")
+    _write_marker_sidecar(raw, stop_requested=4.0, post_roll_end=8.0)
+
+    with pytest.raises(ValueError, match="stop marker precedes speech start"):
+        audio_mod.load_voice_take_markers(raw)
+
+
+@pytestmark_ffmpeg
+def test_process_take_applies_marker_trim_and_persists_verdict(tmp_path):
+    raw = tmp_path / "marker_take.wav"
+    out = tmp_path / "processed.wav"
+    verdict_path = tmp_path / "review" / "take.json"
+    _marker_take(raw)
+    _write_marker_sidecar(raw)
+
+    result = process_take(raw, out, verdict_path=verdict_path)
+
+    assert result.marker_status == "applied"
+    assert result.trim_start == pytest.approx(4.75)
+    assert result.trim_end == pytest.approx(6.90)
+    assert result.duration == pytest.approx(1.70, abs=0.15)
+    verdict = json.loads(verdict_path.read_text(encoding="utf-8"))
+    assert verdict["verdict"] == "pass"
+    assert verdict["selection"]["applied"] is True
+    assert verdict["boundary_qc"]["start"]["clipping"] is False
+    assert verdict["boundary_qc"]["start"]["impulse"] is False
+    assert verdict["boundary_qc"]["tail"]["impulse"] is False
+    assert len(verdict["artifact_sha256"]) == 64
+
+
+@pytestmark_ffmpeg
+def test_process_take_blocks_start_impulse_and_persists_rejection(tmp_path):
+    raw = tmp_path / "clicked_take.wav"
+    out = tmp_path / "processed.wav"
+    verdict_path = tmp_path / "review" / "take.json"
+    _marker_take(raw, impulse_at=5.1)
+    _write_marker_sidecar(raw)
+    out.write_bytes(b"previous-good-take")
+
+    with pytest.raises(audio_mod.VoiceTakeQualityError, match="START-IMPULSE"):
+        process_take(raw, out, verdict_path=verdict_path)
+
+    assert out.read_bytes() == b"previous-good-take"
+    verdict = json.loads(verdict_path.read_text(encoding="utf-8"))
+    assert verdict["verdict"] == "block"
+    assert verdict["boundary_qc"]["start"]["impulse"] is True
+    assert any(
+        issue["code"] == "VQ-AUDIO-START-IMPULSE"
+        for issue in verdict["issues"]
+    )
+
+
+@pytestmark_ffmpeg
+def test_process_take_excludes_click_at_stop_marker(tmp_path):
+    raw = tmp_path / "stop_clicked_take.wav"
+    out = tmp_path / "processed.wav"
+    _marker_take(raw, impulse_at=7.0)
+    _write_marker_sidecar(raw)
+
+    result = process_take(raw, out)
+
+    assert result.verdict["verdict"] == "pass"
+    assert result.trim_end == pytest.approx(6.90)
+    assert result.verdict["boundary_qc"]["tail"]["impulse"] is False
+
+
+@pytestmark_ffmpeg
+def test_process_take_rejects_incomplete_markers(tmp_path):
+    raw = tmp_path / "incomplete_take.wav"
+    out = tmp_path / "processed.wav"
+    verdict_path = tmp_path / "review" / "take.json"
+    _marker_take(raw)
+    _write_marker_sidecar(raw, post_roll_completed=False)
+
+    with pytest.raises(audio_mod.VoiceTakeQualityError, match="incomplete"):
+        process_take(raw, out, verdict_path=verdict_path)
+
+    verdict = json.loads(verdict_path.read_text(encoding="utf-8"))
+    assert verdict["verdict"] == "block"
+    assert verdict["recommended_action"] == "re_record"
+    assert verdict["issues"][0]["code"] == "VQ-AUDIO-MARKERS-INCOMPLETE"
+
+
 @pytestmark_ffmpeg
 def test_process_take_missing_recording_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
@@ -198,4 +342,7 @@ def test_process_take_bad_input_raises_audio_stage_error(tmp_path):
     bogus.write_text("this is not a real wav file", encoding="utf-8")
     with pytest.raises(audio_mod.AudioStageError) as excinfo:
         process_take(bogus, tmp_path / "out.wav")
-    assert excinfo.value.stage.startswith("cleanup")
+    assert excinfo.value.stage in {
+        "marker selection",
+        "cleanup (silenceremove/highpass/adeclip)",
+    }

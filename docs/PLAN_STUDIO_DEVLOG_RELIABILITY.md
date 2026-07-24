@@ -140,7 +140,7 @@ Devlog 1 в итоге удалось довести до приемлемого
 | Freeze/cadence/boundary analysis | частично есть в `render_preflight.py` | source identity, offsets, handles, intent |
 | Compact review pack | есть | единый geometry/source/boundary report |
 | HyperFrames visible-text preflight | частично есть | public-copy manifest и rendered OCR fallback |
-| Studio VO countdown | 3-second countdown добавлен | room-tone state, post-roll, markers, verdict |
+| Studio VO recording | A4 core: immediate record, countdown, room tone, post-roll, markers, guarded trim, verdict | real-device WebM/Opus UAT |
 | Exact-hash review | есть | обязательная known-constraints regression |
 | Iteration cap в инструкциях | есть | runtime enforcement |
 | Visual templates | HyperFrames bridge есть | curated commercial-quality blocks и grammar |

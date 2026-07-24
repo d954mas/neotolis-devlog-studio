@@ -575,7 +575,12 @@ def _channel_samples(samples: Sequence[float], channels: int) -> list[list[float
     return [list(samples[channel::channels]) for channel in range(channels)]
 
 
-def _has_impulse(channels: Sequence[Sequence[float]], threshold: float) -> bool:
+def _has_impulse(
+    channels: Sequence[Sequence[float]],
+    threshold: float,
+    *,
+    max_edge_distance: int,
+) -> bool:
     for samples in channels:
         for index in range(1, len(samples) - 1):
             value = samples[index]
@@ -585,6 +590,18 @@ def _has_impulse(channels: Sequence[Sequence[float]], threshold: float) -> bool:
                 and abs(value - samples[index + 1]) >= threshold
             ):
                 return True
+        steep_edges = [
+            (index, samples[index] - samples[index - 1])
+            for index in range(1, len(samples))
+            if abs(samples[index] - samples[index - 1]) >= threshold
+        ]
+        for edge_index, (first_index, first_delta) in enumerate(steep_edges):
+            for second_index, second_delta in steep_edges[edge_index + 1 :]:
+                distance = second_index - first_index
+                if distance > max_edge_distance:
+                    break
+                if distance > 0 and first_delta * second_delta < 0:
+                    return True
     return False
 
 
@@ -603,7 +620,7 @@ def check_wav_first_3s(
     *,
     seconds: float = 3.0,
     clipping_threshold: float = 0.985,
-    impulse_threshold: float = 0.50,
+    impulse_threshold: float = 0.30,
     noise_jump_ratio: float = 4.0,
     noise_jump_min_delta: float = 0.01,
 ) -> WavFirst3sResult:
@@ -640,7 +657,11 @@ def check_wav_first_3s(
     rms = math.sqrt(sum(sample * sample for sample in normalized) / len(normalized))
     clipped_samples = sum(abs(sample) >= clipping_threshold for sample in normalized)
     clipping = clipped_samples >= 2
-    impulse = _has_impulse(per_channel, impulse_threshold)
+    impulse = _has_impulse(
+        per_channel,
+        impulse_threshold,
+        max_edge_distance=max(1, sample_rate // 50),
+    )
 
     window_frames = max(1, sample_rate // 4)
     windows: list[float] = []

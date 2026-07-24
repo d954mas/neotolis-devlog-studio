@@ -244,6 +244,19 @@ def test_wav_first_three_seconds_detects_single_sample_impulse_as_blocker(tmp_pa
     assert any(i.code == "VQ-AUDIO-START-IMPULSE" and i.severity == "error" for i in result.issues)
 
 
+def test_wav_first_three_seconds_detects_broad_sub_full_scale_click(tmp_path):
+    wav_path = tmp_path / "broad_click.wav"
+    samples = [0] * (3 * 8_000)
+    samples[4_000:4_050] = [12_000] * 50
+    _write_wav(wav_path, samples)
+
+    result = check_wav_first_3s(wav_path)
+
+    assert result.impulse
+    assert not result.ok
+    assert any(i.code == "VQ-AUDIO-START-IMPULSE" for i in result.issues)
+
+
 def test_wav_first_three_seconds_reports_noise_jump_as_warning(tmp_path):
     wav_path = tmp_path / "noise_jump.wav"
     quiet = _sine_samples(seconds=1.0, amplitude=200, frequency=997.0)

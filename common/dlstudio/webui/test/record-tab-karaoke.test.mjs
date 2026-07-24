@@ -233,3 +233,51 @@ test("recording keeps the full VO visible and advances a live karaoke fragment",
     delete globalThis.__recordTabHooks;
   }
 });
+
+test("take card shows a clear re-record reason from machine QC", async () => {
+  globalThis.__recordTabHooks = { states: [], refs: [], stateIndex: 0, refIndex: 0 };
+  globalThis.window = {
+    setInterval() { return 1; },
+    clearInterval() {},
+    setTimeout() { return 2; },
+    clearTimeout() {},
+  };
+  try {
+    const { RecordTab } = await loadRecordTab();
+    const tree = render(RecordTab, {
+      beat: {
+        id: "b01",
+        title: "Hook",
+        vo: "Voice over",
+        stage: null,
+        face: "none",
+        duration: null,
+        n_chunks: 0,
+        audio: null,
+        words: null,
+        rendered: false,
+      },
+      takes: [{
+        id: "take-1",
+        beatId: "b01",
+        filename: "take.webm",
+        url: "blob:take",
+        size: 128,
+        createdAt: 1,
+        uploadState: "uploaded",
+        processState: "error",
+        qualityStatus: "re_record",
+        qualityMessage: "Click, clipping, or incomplete clean handles detected",
+      }],
+      addTake() {},
+      updateTake() {},
+      onAfterProcess() {},
+    });
+
+    assert.ok(textOf(tree).includes("Re-record"));
+    assert.ok(textOf(tree).includes("Click, clipping, or incomplete clean handles detected"));
+  } finally {
+    delete globalThis.window;
+    delete globalThis.__recordTabHooks;
+  }
+});

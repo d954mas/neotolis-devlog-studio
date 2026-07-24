@@ -637,6 +637,40 @@ def test_process_take_job_reports_error(light_client, monkeypatch):
     assert "ffmpeg exploded" in done["error"]
 
 
+def test_process_take_quality_rejection_persists_rejected_verdict(
+    light_client,
+    monkeypatch,
+):
+    client, root, _ = light_client
+    recording = root / "data" / "recordings" / "take.webm"
+    recording.parent.mkdir(parents=True, exist_ok=True)
+    recording.write_bytes(b"raw")
+
+    from dlstudio import services
+
+    verdict = {
+        "schema": "dlstudio.voice-take-verdict",
+        "version": 1,
+        "verdict": "block",
+        "recommended_action": "re_record",
+    }
+
+    def reject(recording, out_wav, **kw):
+        raise services.VoiceTakeQualityError("click detected", verdict)
+
+    monkeypatch.setattr("dlstudio.services.process_take", reject)
+    response = client.post("/api/actions/process-take", json={
+        "beat_id": "b01",
+        "recording_path": "data/recordings/take.webm",
+    })
+    done = _await_job(client, response.json()["job_id"])
+
+    assert done["status"] == "error"
+    assert "click detected" in done["error"]
+    rejected = root / "data" / "review" / "voice_takes" / "take.rejected.json"
+    assert json.loads(rejected.read_text(encoding="utf-8"))["verdict"] == "block"
+
+
 def test_process_take_failure_leaves_previous_take_intact(light_client, monkeypatch):
     """0.7 regression: WAV/words used to be written STRAIGHT to the beat's
     declared paths — a transcribe failure left a new wav with the OLD words
@@ -648,9 +682,12 @@ def test_process_take_failure_leaves_previous_take_intact(light_client, monkeypa
 
     audio_out = root / "data" / "finalize" / "b01_audio_tight_pause.wav"
     words_out = root / "data" / "finalize" / "b01_words_tight.json"
+    verdict_out = root / "data" / "review" / "voice_takes" / "take.json"
     audio_out.parent.mkdir(parents=True, exist_ok=True)
+    verdict_out.parent.mkdir(parents=True, exist_ok=True)
     audio_out.write_bytes(b"previous-take-wav")
     words_out.write_text('{"words": "previous"}', encoding="utf-8")
+    verdict_out.write_text('{"verdict": "previous"}', encoding="utf-8")
 
     def fake_process_take(recording, out_wav, **kw):
         Path(out_wav).write_bytes(b"new-take-wav")     # stage 1 succeeds...
@@ -671,6 +708,7 @@ def test_process_take_failure_leaves_previous_take_intact(light_client, monkeypa
     # the previous take survived untouched — nothing was promoted
     assert audio_out.read_bytes() == b"previous-take-wav"
     assert words_out.read_text(encoding="utf-8") == '{"words": "previous"}'
+    assert verdict_out.read_text(encoding="utf-8") == '{"verdict": "previous"}'
     assert not list(audio_out.parent.glob("*.tmp-*"))
 
 
