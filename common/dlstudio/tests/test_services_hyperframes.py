@@ -9,14 +9,22 @@ real against tmp_path.
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 import subprocess
+from pathlib import Path
 
 import pytest
 
 from dlstudio.services import hyperframes as hf
+from dlstudio.services import visual_block_evidence as vbe
 
 FAKE_NPX = "C:/fake/node/npx.cmd"
+
+
+def _sha256(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _completed(rc: int = 0, stdout: str = "", stderr: str = ""):
@@ -34,6 +42,80 @@ def _mock_toolchain(monkeypatch, captured: dict, *, rc: int = 0, stderr: str = "
         return _completed(rc=rc, stderr=stderr)
 
     monkeypatch.setattr(hf.subprocess, "run", fake_run)
+
+
+def _approved_source(video: Path) -> tuple[Path, str, Path, object]:
+    from dlstudio.services.asset_registry import (
+        approve_asset,
+        load_asset_registry,
+        register_validated_capture,
+    )
+
+    source = video / "data" / "footage" / "source.mp4"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"registered-source")
+    source_hash = _sha256(source)
+    facts = {
+        "request_id": "day4_visual",
+        "artifact_path": "data/footage/source.mp4",
+        "artifact_sha256": source_hash,
+        "editorial_role": "gameplay",
+        "capture_method": "realtime_window",
+        "state_id": "day4.paper",
+        "build_id": "git:test",
+        "actual_width": 1920,
+        "actual_height": 1080,
+        "actual_fps": 30,
+        "actual_duration": 10,
+        "head_handle_seconds": 2,
+        "tail_handle_seconds": 2,
+    }
+    register_validated_capture(video, facts)
+    asset_id = "capture:day4_visual"
+    approve_asset(
+        video,
+        asset_id,
+        expected_sha256=source_hash,
+        approved_by="test",
+    )
+    catalog = video / "data" / "assets" / "catalog.json"
+    catalog.write_text(json.dumps({"assets": [{
+        "path": "data/footage/source.mp4",
+        "sha256": source_hash,
+        "source_role": "real_product",
+    }]}), encoding="utf-8")
+    geometry = video / "data" / "review" / "geometry_report.json"
+    geometry.parent.mkdir(parents=True)
+    geometry.write_text(json.dumps({
+        "schema_version": 1,
+        "output_resolution": [1920, 1080],
+        "segments": [{
+            "beat_id": "day4",
+            "segment_index": 0,
+            "src": "data/footage/source.mp4",
+            "asset_id": asset_id,
+            "resolved": True,
+            "geometry": {
+                "fit": "cover",
+                "anchor_x": 0.5,
+                "anchor_y": 0.5,
+                "source_width": 1920,
+                "source_height": 1080,
+                "scaled_width": 1920,
+                "scaled_height": 1080,
+                "output_width": 1920,
+                "output_height": 1080,
+                "crop_x": 0,
+                "crop_y": 0,
+                "crop_width": 1920,
+                "crop_height": 1080,
+                "pad_x": None,
+                "pad_y": None,
+            },
+        }],
+    }), encoding="utf-8")
+    record = load_asset_registry(video).assets[0]
+    return source, asset_id, geometry, record
 
 
 # ─── init_project ───────────────────────────────────────────────────────
@@ -60,6 +142,88 @@ def test_init_project_starter_registers_paused_window_timelines(tmp_path):
     assert "gsap.timeline({ paused: true })" in html
     assert 'window.__timelines["root"] = tl;' in html
     assert 'data-composition-id="root"' in html
+
+
+@pytest.mark.parametrize(
+    "template",
+    ("day-card", "before-after", "focus-callout", "cta-endcard", "explain-steps"),
+)
+def test_init_project_scaffolds_reusable_visual_blocks(tmp_path, template):
+    root = hf.init_project(tmp_path / template, template=template)
+    html = (root / "index.html").read_text(encoding="utf-8")
+    meta = json.loads((root / "meta.json").read_text(encoding="utf-8"))
+
+    assert "data-composition-variables=" in html
+    assert 'data-duration="' in html
+    assert 'data-width="1920"' in html
+    assert 'data-height="1080"' in html
+    assert "gsap.timeline({ paused: true })" in html
+    assert 'window.__timelines["root"] = tl;' in html
+    assert "Math.random" not in html
+    assert "setTimeout" not in html
+    assert meta["template"] == template
+    assert meta["orientation"] == "landscape"
+    assert meta["purpose"]
+
+
+def test_visual_block_variable_declaration_is_raw_valid_json(tmp_path):
+    root = hf.init_project(tmp_path / "day", template="day-card")
+    html = (root / "index.html").read_text(encoding="utf-8")
+    match = re.search(r"data-composition-variables='([^']+)'", html)
+    assert match is not None
+    declarations = json.loads(match.group(1))
+    assert declarations[0]["id"] == "day"
+    assert declarations[0]["default"] == "ДЕНЬ 1"
+
+
+def test_init_project_visual_block_supports_vertical_orientation(tmp_path):
+    root = hf.init_project(
+        tmp_path / "vertical_day",
+        template="day-card",
+        orientation="vertical",
+    )
+    html = (root / "index.html").read_text(encoding="utf-8")
+    assert 'data-width="1080"' in html
+    assert 'data-height="1920"' in html
+
+
+def test_init_project_rejects_vertical_legacy_starter_without_writing(tmp_path):
+    target = tmp_path / "legacy_vertical"
+    with pytest.raises(ValueError, match="applies to a visual-block template"):
+        hf.init_project(target, orientation="vertical")
+    assert not target.exists()
+
+
+def test_init_project_rejects_unknown_visual_block_before_writing_files(tmp_path):
+    target = tmp_path / "bad"
+    with pytest.raises(ValueError, match="unknown visual-block template"):
+        hf.init_project(target, template="glossy-dashboard")
+    assert not target.exists()
+
+
+def test_shared_cta_template_has_no_project_specific_release_claims(tmp_path):
+    root = hf.init_project(tmp_path / "cta", template="cta-endcard")
+    html = (root / "index.html").read_text(encoding="utf-8")
+    assert "NOT A TROLLEY PROBLEM" not in html
+    assert "4654990" not in html
+    assert "СТРАНИЦА УЖЕ В STEAM" not in html
+    assert "YOUR GAME" in html
+
+
+@pytest.mark.parametrize(
+    ("template", "forbidden"),
+    [
+        ("day-card", "Бумага + графит"),
+        ("before-after", "Слой бумаги и графит"),
+        ("focus-callout", "БУМАЖНЫЙ СЛОЙ"),
+        ("cta-endcard", "NOT A TROLLEY PROBLEM"),
+        ("explain-steps", "Бумажный слой"),
+    ],
+)
+def test_shared_templates_have_neutral_preview_defaults(tmp_path, template, forbidden):
+    root = hf.init_project(tmp_path / template, template=template)
+    html = (root / "index.html").read_text(encoding="utf-8")
+    assert forbidden not in html
 
 
 def test_init_project_title_is_escaped_into_index(tmp_path):
@@ -121,6 +285,487 @@ def test_render_html_quality_final_maps_to_high(tmp_path, monkeypatch):
     hf.render_html(project, tmp_path / "out.mp4", quality="final")
     cmd = captured["cmd"]
     assert cmd[cmd.index("--quality") + 1] == "high"
+
+
+def test_render_html_passes_existing_variables_file(tmp_path, monkeypatch):
+    captured: dict = {}
+    _mock_toolchain(monkeypatch, captured)
+    project = hf.init_project(tmp_path / "steps", template="explain-steps")
+    values = tmp_path / "steps.json"
+    values.write_text(json.dumps({
+        "title": "HOW IT WORKS",
+        "step_1": "ONE",
+        "step_2": "TWO",
+        "step_3": "THREE",
+        "step_4": "FOUR",
+    }, ensure_ascii=False), encoding="utf-8")
+
+    hf.render_html(project, tmp_path / "out.mp4", variables_file=values)
+
+    cmd = captured["cmd"]
+    assert cmd[cmd.index("--variables-file") + 1] == str(values.resolve())
+    assert "--strict-variables" in cmd
+
+
+def test_successful_render_writes_hash_bound_manifest(tmp_path, monkeypatch):
+    monkeypatch.setattr(hf.shutil, "which", lambda name: FAKE_NPX)
+
+    def fake_run(cmd, **kwargs):
+        output = Path(cmd[cmd.index("--output") + 1])
+        output.write_bytes(b"rendered-mp4")
+        return _completed()
+
+    monkeypatch.setattr(hf.subprocess, "run", fake_run)
+    project = hf.init_project(tmp_path / "steps", template="explain-steps")
+    values = tmp_path / "steps.json"
+    values.write_text(json.dumps({
+        "title": "HOW IT WORKS",
+        "step_1": "ONE",
+        "step_2": "TWO",
+        "step_3": "THREE",
+        "step_4": "FOUR",
+    }), encoding="utf-8")
+    out = tmp_path / "out.mp4"
+
+    hf.render_html(project, out, quality="draft", variables_file=values)
+
+    manifest = json.loads(
+        (tmp_path / "out.mp4.render.json").read_text(encoding="utf-8")
+    )
+    assert manifest["schema"] == "devlog.hyperframes_render/v1"
+    assert manifest["template"] == "explain-steps"
+    assert manifest["artifact_sha256"] == _sha256(out)
+    assert manifest["entry_sha256"] == _sha256(project / "index.html")
+    assert manifest["variables"]["sha256"] == _sha256(values)
+
+
+def test_render_visual_block_requires_release_values_before_npx(tmp_path, monkeypatch):
+    captured: dict = {}
+    _mock_toolchain(monkeypatch, captured)
+    project = hf.init_project(tmp_path / "cta", template="cta-endcard")
+
+    with pytest.raises(RuntimeError, match="requires --variables-file"):
+        hf.render_html(project, tmp_path / "out.mp4")
+    assert "cmd" not in captured
+
+
+def test_render_visual_block_rejects_missing_required_values(tmp_path, monkeypatch):
+    captured: dict = {}
+    _mock_toolchain(monkeypatch, captured)
+    project = hf.init_project(tmp_path / "cta", template="cta-endcard")
+    values = tmp_path / "cta.json"
+    values.write_text('{"cta":"wishlist"}', encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="missing required variables"):
+        hf.render_html(project, tmp_path / "out.mp4", variables_file=values)
+    assert "cmd" not in captured
+
+
+def test_render_visual_block_rejects_bad_cta_semantics(tmp_path, monkeypatch):
+    captured: dict = {}
+    _mock_toolchain(monkeypatch, captured)
+    project = hf.init_project(tmp_path / "cta", template="cta-endcard")
+    background = project / "assets" / "game.png"
+    background.write_bytes(b"game")
+    values = tmp_path / "cta.json"
+    values.write_text(json.dumps({
+        "game_title": "TEST GAME",
+        "eyebrow": "Следующая остановка — Steam",
+        "cta": "Следить за игрой",
+        "steam_url": "https://example.test/",
+        "episode": "DEVLOG 1",
+        "background_image": "assets/game.png",
+    }, ensure_ascii=False), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="future stop"):
+        hf.render_html(project, tmp_path / "out.mp4", variables_file=values)
+    assert "cmd" not in captured
+
+
+def test_render_focus_requires_explicit_coordinates(tmp_path, monkeypatch):
+    captured: dict = {}
+    _mock_toolchain(monkeypatch, captured)
+    project = hf.init_project(tmp_path / "focus", template="focus-callout")
+    image = project / "assets" / "game.png"
+    image.write_bytes(b"game")
+    values = tmp_path / "focus.json"
+    values.write_text(json.dumps({
+        "image": "assets/game.png",
+        "label": "Look",
+        "explanation": "Here",
+    }), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match=r"focus_x.*focus_y"):
+        hf.render_html(project, tmp_path / "out.mp4", variables_file=values)
+    assert "cmd" not in captured
+
+
+def test_render_cta_rejects_future_stop_in_any_public_copy(tmp_path, monkeypatch):
+    captured: dict = {}
+    _mock_toolchain(monkeypatch, captured)
+    project = hf.init_project(tmp_path / "cta", template="cta-endcard")
+    background = project / "assets" / "game.png"
+    background.write_bytes(b"game")
+    values = tmp_path / "cta.json"
+    values.write_text(json.dumps({
+        "game_title": "TEST GAME",
+        "eyebrow": "PAGE IS LIVE",
+        "cta": "Следующая остановка — Steam. Добавь в вишлист",
+        "steam_url": "https://store.steampowered.com/app/123/Test_Game/",
+        "episode": "DEVLOG 1",
+        "background_image": "assets/game.png",
+    }, ensure_ascii=False), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="future stop"):
+        hf.render_html(project, tmp_path / "out.mp4", variables_file=values)
+    assert "cmd" not in captured
+
+
+def test_render_cta_rejects_steam_substring_on_foreign_host(tmp_path, monkeypatch):
+    captured: dict = {}
+    _mock_toolchain(monkeypatch, captured)
+    project = hf.init_project(tmp_path / "cta", template="cta-endcard")
+    background = project / "assets" / "game.png"
+    background.write_bytes(b"game")
+    values = tmp_path / "cta.json"
+    values.write_text(json.dumps({
+        "game_title": "TEST GAME",
+        "eyebrow": "PAGE IS LIVE",
+        "cta": "ADD TO WISHLIST",
+        "steam_url": "https://evil.test/?next=store.steampowered.com/app/123",
+        "episode": "DEVLOG 1",
+        "background_image": "assets/game.png",
+    }), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="canonical Steam app URL"):
+        hf.render_html(project, tmp_path / "out.mp4", variables_file=values)
+    assert "cmd" not in captured
+
+
+def test_render_before_after_requires_existing_distinct_project_assets(tmp_path, monkeypatch):
+    captured: dict = {}
+    _mock_toolchain(monkeypatch, captured)
+    project = hf.init_project(tmp_path / "compare", template="before-after")
+    image = project / "assets" / "same.png"
+    image.write_bytes(b"same-image")
+    values = tmp_path / "compare.json"
+    values.write_text(json.dumps({
+        "before_image": "assets/same.png",
+        "after_image": "assets/same.png",
+        "claim": "Changed",
+    }), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="identical inputs"):
+        hf.render_html(project, tmp_path / "out.mp4", variables_file=values)
+    assert "cmd" not in captured
+
+
+def test_render_before_after_accepts_hash_registered_controlled_pair(tmp_path, monkeypatch):
+    captured: dict = {}
+    _mock_toolchain(monkeypatch, captured)
+    video = tmp_path / "video"
+    project = hf.init_project(
+        tmp_path / "some" / "deep" / "compare",
+        template="before-after",
+    )
+    before = project / "assets" / "before.png"
+    after = project / "assets" / "after.png"
+    before.write_bytes(b"before")
+    after.write_bytes(b"after")
+    source, asset_id, geometry, record = _approved_source(video)
+    values = video / "compare.json"
+    values.write_text(json.dumps({
+        "before_image": "assets/before.png",
+        "after_image": "assets/after.png",
+        "claim": "Changed",
+    }), encoding="utf-8")
+    evidence = video / "compare.evidence.json"
+    evidence.write_text(json.dumps({
+        "schema": "devlog.visual_block_evidence/v2",
+        "template": "before-after",
+        "source": {
+            "asset_id": asset_id,
+            "path": "data/footage/source.mp4",
+            "sha256": _sha256(source),
+            "registry_revision": record.revision,
+            "validation_sha256": record.validation_sha256,
+        },
+        "geometry_report": {
+            "path": "data/review/geometry_report.json",
+            "sha256": _sha256(geometry),
+            "record": {"beat_id": "day4", "segment_index": 0},
+        },
+        "assets": {
+            "before_image": {
+                "path": "assets/before.png",
+                "sha256": _sha256(before),
+                "source_asset_id": asset_id,
+                "source_sha256": _sha256(source),
+                "recipe": {
+                    "source_time_seconds": 1.0,
+                    "crop": [0, 0, 1920, 1080],
+                    "output": [1920, 1080],
+                },
+            },
+            "after_image": {
+                "path": "assets/after.png",
+                "sha256": _sha256(after),
+                "source_asset_id": asset_id,
+                "source_sha256": _sha256(source),
+                "recipe": {
+                    "source_time_seconds": 3.0,
+                    "crop": [0, 0, 1920, 1080],
+                    "output": [1920, 1080],
+                },
+            },
+        },
+    }), encoding="utf-8")
+    expected = {
+        1.0: _sha256(before),
+        3.0: _sha256(after),
+    }
+    monkeypatch.setattr(
+        vbe,
+        "_recompute_derived_hash",
+        lambda source_path, recipe: expected[recipe["source_time_seconds"]],
+    )
+
+    hf.render_html(
+        project,
+        video / "compare.mp4",
+        variables_file=values,
+        evidence_file=evidence,
+        production_root=video,
+    )
+    assert "cmd" in captured
+
+
+def test_render_proof_rejects_reapproved_metadata_revision_with_same_media(
+    tmp_path,
+    monkeypatch,
+):
+    from dlstudio.services.asset_registry import (
+        approve_asset,
+        register_validated_capture,
+    )
+
+    captured: dict = {}
+    _mock_toolchain(monkeypatch, captured)
+    video = tmp_path / "video"
+    source, asset_id, geometry, old_record = _approved_source(video)
+    register_validated_capture(video, {
+        "request_id": "day4_visual",
+        "artifact_path": "data/footage/source.mp4",
+        "artifact_sha256": _sha256(source),
+        "editorial_role": "gameplay",
+        "capture_method": "realtime_window",
+        "state_id": "day4.different_state",
+        "build_id": "git:different",
+        "actual_width": 1920,
+        "actual_height": 1080,
+        "actual_fps": 30,
+        "actual_duration": 10,
+        "head_handle_seconds": 2,
+        "tail_handle_seconds": 2,
+    })
+    approve_asset(
+        video,
+        asset_id,
+        expected_sha256=_sha256(source),
+        approved_by="test",
+    )
+    project = hf.init_project(tmp_path / "proof", template="before-after")
+    before = project / "assets" / "before.png"
+    after = project / "assets" / "after.png"
+    before.write_bytes(b"before")
+    after.write_bytes(b"after")
+    values = video / "values.json"
+    values.write_text(json.dumps({
+        "before_image": "assets/before.png",
+        "after_image": "assets/after.png",
+        "claim": "Changed",
+    }), encoding="utf-8")
+    evidence = video / "evidence.json"
+    evidence.write_text(json.dumps({
+        "schema": "devlog.visual_block_evidence/v2",
+        "template": "before-after",
+        "source": {
+            "asset_id": asset_id,
+            "path": "data/footage/source.mp4",
+            "sha256": _sha256(source),
+            "registry_revision": old_record.revision,
+            "validation_sha256": old_record.validation_sha256,
+        },
+        "geometry_report": {
+            "path": "data/review/geometry_report.json",
+            "sha256": _sha256(geometry),
+            "record": {"beat_id": "day4", "segment_index": 0},
+        },
+        "assets": {},
+    }), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="exact approved registry revision"):
+        hf.render_html(
+            project,
+            video / "out.mp4",
+            variables_file=values,
+            evidence_file=evidence,
+            production_root=video,
+        )
+    assert "cmd" not in captured
+
+
+def test_render_proof_rejects_recipe_outside_a3_geometry(tmp_path, monkeypatch):
+    captured: dict = {}
+    _mock_toolchain(monkeypatch, captured)
+    video = tmp_path / "video"
+    source, asset_id, geometry, record = _approved_source(video)
+    project = hf.init_project(tmp_path / "proof", template="before-after")
+    before = project / "assets" / "before.png"
+    after = project / "assets" / "after.png"
+    before.write_bytes(b"before")
+    after.write_bytes(b"after")
+    values = video / "values.json"
+    values.write_text(json.dumps({
+        "before_image": "assets/before.png",
+        "after_image": "assets/after.png",
+        "claim": "Changed",
+    }), encoding="utf-8")
+    common_source = {
+        "source_asset_id": asset_id,
+        "source_sha256": _sha256(source),
+    }
+    evidence = video / "evidence.json"
+    evidence.write_text(json.dumps({
+        "schema": "devlog.visual_block_evidence/v2",
+        "template": "before-after",
+        "source": {
+            "asset_id": asset_id,
+            "path": "data/footage/source.mp4",
+            "sha256": _sha256(source),
+            "registry_revision": record.revision,
+            "validation_sha256": record.validation_sha256,
+        },
+        "geometry_report": {
+            "path": "data/review/geometry_report.json",
+            "sha256": _sha256(geometry),
+            "record": {"beat_id": "day4", "segment_index": 0},
+        },
+        "assets": {
+            "before_image": {
+                **common_source,
+                "path": "assets/before.png",
+                "sha256": _sha256(before),
+                "recipe": {
+                    "source_time_seconds": 1.0,
+                    "crop": [10, 0, 1910, 1080],
+                    "output": [1920, 1080],
+                },
+            },
+            "after_image": {
+                **common_source,
+                "path": "assets/after.png",
+                "sha256": _sha256(after),
+                "recipe": {
+                    "source_time_seconds": 3.0,
+                    "crop": [10, 0, 1910, 1080],
+                    "output": [1920, 1080],
+                },
+            },
+        },
+    }), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="does not match the A3 geometry"):
+        hf.render_html(
+            project,
+            video / "out.mp4",
+            variables_file=values,
+            evidence_file=evidence,
+            production_root=video,
+        )
+    assert "cmd" not in captured
+
+
+def test_render_before_after_rejects_stale_evidence_hash(tmp_path, monkeypatch):
+    captured: dict = {}
+    _mock_toolchain(monkeypatch, captured)
+    video = tmp_path / "video"
+    project = hf.init_project(
+        video / "data" / "hyperframes" / "compare",
+        template="before-after",
+    )
+    before = project / "assets" / "before.png"
+    after = project / "assets" / "after.png"
+    before.write_bytes(b"before")
+    after.write_bytes(b"after")
+    source, asset_id, geometry, record = _approved_source(video)
+    values = video / "compare.json"
+    values.write_text(json.dumps({
+        "before_image": "assets/before.png",
+        "after_image": "assets/after.png",
+        "claim": "Changed",
+    }), encoding="utf-8")
+    evidence = video / "compare.evidence.json"
+    evidence.write_text(json.dumps({
+        "schema": "devlog.visual_block_evidence/v2",
+        "template": "before-after",
+        "source": {
+            "asset_id": asset_id,
+            "path": "data/footage/source.mp4",
+            "sha256": "0" * 64,
+            "registry_revision": record.revision,
+            "validation_sha256": record.validation_sha256,
+        },
+        "geometry_report": {
+            "path": "data/review/geometry_report.json",
+            "sha256": _sha256(geometry),
+            "record": {"beat_id": "day4", "segment_index": 0},
+        },
+        "assets": {},
+    }), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="exact approved registry revision"):
+        hf.render_html(
+            project,
+            video / "compare.mp4",
+            variables_file=values,
+            evidence_file=evidence,
+        )
+    assert "cmd" not in captured
+
+
+def test_render_visual_block_rejects_asset_outside_project(tmp_path, monkeypatch):
+    captured: dict = {}
+    _mock_toolchain(monkeypatch, captured)
+    project = hf.init_project(tmp_path / "focus", template="focus-callout")
+    outside = tmp_path / "outside.png"
+    outside.write_bytes(b"png")
+    values = tmp_path / "focus.json"
+    values.write_text(json.dumps({
+        "image": "../outside.png",
+        "label": "Look",
+        "explanation": "Here",
+        "focus_x": 50,
+        "focus_y": 50,
+    }), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="must stay inside"):
+        hf.render_html(project, tmp_path / "out.mp4", variables_file=values)
+    assert "cmd" not in captured
+
+
+def test_render_html_rejects_missing_variables_file_before_subprocess(tmp_path, monkeypatch):
+    captured: dict = {}
+    _mock_toolchain(monkeypatch, captured)
+    project = hf.init_project(tmp_path / "cta", template="cta-endcard")
+
+    with pytest.raises(RuntimeError, match="variables file not found"):
+        hf.render_html(
+            project,
+            tmp_path / "out.mp4",
+            variables_file=tmp_path / "missing.json",
+        )
+    assert "cmd" not in captured
 
 
 def test_render_html_rejects_unknown_quality(tmp_path, monkeypatch):

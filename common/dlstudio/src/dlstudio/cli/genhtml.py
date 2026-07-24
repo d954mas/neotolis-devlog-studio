@@ -41,11 +41,23 @@ def cmd_gen_html(args: argparse.Namespace) -> int:
     from dlstudio.cli import CliError  # lazy: circular at module import time
 
     project_dir = _resolve_project_dir(args.dir)
+    if args.template and not args.init:
+        raise CliError("--template requires --init.")
+    if args.orientation != "landscape" and not args.init:
+        raise CliError("--orientation is only used with --init.")
+    if args.variables_file and not args.out:
+        raise CliError("--variables-file requires an explicit --out path.")
+    if args.evidence_file and not args.variables_file:
+        raise CliError("--evidence-file requires --variables-file.")
 
     if args.init:
         try:
-            services.init_project(project_dir)
-        except FileExistsError as e:
+            services.init_project(
+                project_dir,
+                template=args.template,
+                orientation=args.orientation,
+            )
+        except (FileExistsError, ValueError) as e:
             raise CliError(str(e)) from e
         print(f"[dl2] gen-html: scaffolded {project_dir}")
         if not args.out:
@@ -53,7 +65,18 @@ def cmd_gen_html(args: argparse.Namespace) -> int:
 
     out = Path(args.out) if args.out else INFOGRAPHICS_ROOT / f"{project_dir.name}.mp4"
     try:
-        rendered = services.render_html(project_dir, out, quality=args.quality)
+        render_options = {
+            "quality": args.quality,
+            "variables_file": Path(args.variables_file) if args.variables_file else None,
+            "evidence_file": Path(args.evidence_file) if args.evidence_file else None,
+        }
+        if args.production_root:
+            render_options["production_root"] = Path(args.production_root)
+        rendered = services.render_html(
+            project_dir,
+            out,
+            **render_options,
+        )
     except (RuntimeError, ValueError) as e:
         raise CliError(str(e)) from e
     print(f"[dl2] gen-html: rendered {rendered}")
@@ -74,11 +97,32 @@ def add_subparser(sub: argparse._SubParsersAction) -> None:
         help="scaffold a starter project instead of rendering",
     )
     p.add_argument(
+        "--template",
+        choices=("day-card", "before-after", "focus-callout", "cta-endcard", "explain-steps"),
+        help="production visual-block scaffold to create with --init",
+    )
+    p.add_argument(
+        "--orientation", choices=("landscape", "vertical"), default="landscape",
+        help="visual-block scaffold orientation (default: landscape)",
+    )
+    p.add_argument(
         "--out",
         help="output .mp4 path (default: data/infographics/<asset>.mp4)",
     )
     p.add_argument(
         "--quality", choices=("draft", "final"), default="draft",
         help="render quality tier (default: draft)",
+    )
+    p.add_argument(
+        "--variables-file",
+        help="JSON values passed to HyperFrames at render time",
+    )
+    p.add_argument(
+        "--evidence-file",
+        help="approved-source and reproducible-derivation evidence for proof blocks",
+    )
+    p.add_argument(
+        "--production-root",
+        help="video project root containing data/assets/registry.json",
     )
     p.set_defaults(func=cmd_gen_html)

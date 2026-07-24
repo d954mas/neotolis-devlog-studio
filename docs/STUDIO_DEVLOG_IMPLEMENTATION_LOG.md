@@ -273,3 +273,77 @@
 - A4 core принять после независимого re-review и commit;
 - провести короткий real-device UAT при следующей фактической записи VO;
 - перейти к A5 visible polish checkpoint.
+
+### A5 — Reusable visual polish blocks
+
+**Статус:** reusable core и real UAT готовы; интеграция блоков в новый edit остаётся отдельным checkpoint
+**Дата:** 2026-07-24
+
+#### Реализовано
+
+- `dl2 gen-html --init --template` создаёт пять повторяемых HyperFrames-блоков:
+  - `day-card`;
+  - `before-after`;
+  - `focus-callout`;
+  - `cta-endcard`;
+  - `explain-steps`;
+- каждый блок поддерживает `landscape` и `vertical`, объявляет типизированные
+  `data-composition-variables` и строит paused GSAP timeline без wall-clock
+  анимаций;
+- `dl2 gen-html --variables-file` передаёт фактические тексты, изображения и
+  координаты в рендер без ручной правки HTML;
+- variables-файл требует явный output, проверяется через HyperFrames
+  `--strict-variables`, а release-placeholder и пропущенные обязательные поля
+  блокируют рендер;
+- proof-блоки требуют evidence v2 и больше не доверяют ручным флагам:
+  - source обязан быть exact approved revision из `data/assets/registry.json`;
+    evidence фиксирует `registry_revision` и approved `validation_sha256`,
+    поэтому смена state/build при тех же медиабайтах инвалидирует proof;
+  - `catalog.json` используется только для роли `real_product`, а не как approval;
+  - evidence ссылается по path/SHA и `beat_id + segment_index` на A3
+    `geometry_report.json`;
+  - каждый derived image содержит source asset id/SHA, timestamp, crop и output;
+    Studio требует точного совпадения crop/output с полным A3 transform,
+    повторяет FFmpeg-рецепт и сверяет полученный SHA до запуска npx;
+- production root передаётся явно через `--production-root` или находится по
+  ближайшему ancestor с registry; фиксированной глубины директорий больше нет;
+- каждый успешный render создаёт `*.mp4.render.json` с SHA-256 artifact,
+  `index.html`, variables и evidence;
+- visual language использует палитру проекта: near-black, paper white,
+  trolley red, ink и muted grey; generic glass/neon/dashboard UI не используется;
+- Before/After показывает две полные карточки одновременно, без центрального
+  hybrid-cut; обе производные берутся из разных timestamp одного approved
+  continuous source с одинаковыми A3 crop/output;
+- Focus Callout требует явные `focus_x/focus_y`, использует контрастную
+  explanation-плашку и не выдаёт authorial focus за game-owned proof;
+- Explain Steps превращает длинную заметку в последовательность
+  `графит → бумажный слой → тени → контраст`;
+- CTA принимает только явные release values, проверяет wishlist-семантику,
+  canonical Steam app URL и блокирует фразу «Следующая остановка — Steam»;
+- реальный Day 4 Before/After получен из одного зарегистрированного source frame:
+  одна камера, одно состояние, без grayscale/contrast-фильтра и без debug overlay.
+
+#### Проверка
+
+- service/CLI tests: `68 passed`;
+- HyperFrames `check --strict --at-transitions` для всех пяти блоков:
+  `0 lint/runtime/layout errors`, `0 warnings`;
+- contrast gate: `56 passed samples`;
+- пять реальных renders: `1920x1080`, `30 fps`, `3.8–4.8 s`;
+- все пять manifests имеют `quality: final`;
+- Day 4 comparison SHA-256:
+  `2E4C9D500B27F6902507759DCB3E7B10AA337986B952F1E8504DA59505661E8E`;
+- contact sheet:
+  `not_a_trolley_problem/devlogs/2026_07_22_devlog_01/data/review/a5_visual_blocks_final_sheet.jpg`.
+
+#### Ограничения и следующий шаг
+
+1. Это пять минимальных блоков, а не весь Wave 8 catalog; Annotated Zoom и
+   Counter остаются последующими инкрементами.
+2. CTA semantics проверяется локально, но canonical Steam facts ещё нужно
+   перенести из project variables в единый `product.toml` contract.
+3. Реальный artifact создан как UAT и не коммитится; в git входят engine,
+   CLI, тесты и этот evidence log.
+4. Блоки намеренно не встроены в уже утверждённый devlog: это изменило бы его
+   структуру. Первый wiring checkpoint должен выполняться на следующем edit с
+   `dl2 preview`, boundary strips и review полного контекста.
