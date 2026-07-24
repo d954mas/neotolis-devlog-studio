@@ -37,6 +37,7 @@ the `RESOLUTION` tuple in `design.py` — there is no separate format field.
 | Quick result from a beats.py edit | `dl2 iter <edit> --stale -j 4` |
 | One-beat iteration | `dl2 compose <edit> <beat>` |
 | Watchable draft + review artifacts | `dl2 preview <edit>` → draft at `EDIT.output` + `data/review/contact_sheet.jpg` + `data/review/keyframes/` |
+| Product-first video run | `dl2 autopilot-run <product:production>` → author checkpoint → `--resume` → exact review → `--resume` |
 | Final upload-ready render | `dl2 final <edit>` (1080p, −14 LUFS loudnorm) |
 | Start a new video | `dl2 new-video <project> --format vertical` (or `landscape`) |
 | Scratch VO for a beat | `dl2 scratch-tts <edit> <beat>` → `dl2 transcribe <wav> <words.json>` → wire BOTH paths into the beat in `beats.py` |
@@ -44,9 +45,12 @@ the `RESOLUTION` tuple in `design.py` — there is no separate format field.
 | Record VO / takes / feedback UI | `dl2 studio <edit>` → http://127.0.0.1:8788 |
 | Missing-asset / compile triage | `dl2 check <edit>` (its error list is the TODO); cache status: `dl2 beats <edit>` |
 | Ground-truth timings | `dl2 ir <edit> --out ir.json` |
+| Record or validate gameplay / VO | Use `$devlog-record-media`; gameplay requires a real-time client-area stream, exact state/build identity, 5s head/tail handles, and a passing machine audit before ingest |
+| Controlled debug / presentation capture | Use `$devlog-debug-scenes`; keep frame-stepped DevAPI output classified as `debug_proof` or `presentation`, never ordinary gameplay |
 | Motion / infographic asset | `dl2 gen-html <asset> --init`, edit HTML, render to `data/infographics/` |
 | Stock b-roll | `dl2 stock search` / `dl2 stock download` |
 | YouTube package | `dl2 publish <edit>` → `data/publish/youtube_package.md` |
+| Completed or interrupted production run | Spawn `devlog-reflector` once; persist a timestamped report under `data/review/reflections/` |
 | Environment triage | `dl2 doctor` |
 | Engine-work verification | `dl2 verify --changed` |
 | Vertical reel, before any `dl2 final` | Run `docs/CHECKLIST_VERTICAL_REEL.md` section A in full — no deadline exception |
@@ -92,6 +96,19 @@ Agent routing:
 7. **Draft first for a new reel.** Scaffold, provisional script, scratch
    VO, existing/stock/generated visuals, `dl2 preview`. Source capture is a
    short bounded step; use placeholders and replace next iteration.
+8. **Review compact evidence first.** `autopilot-run` creates
+   `data/review/review_pack.json` and `review_pack_sheet.jpg`. Reviewers read
+   those first and open a full-resolution frame only after the pack exposes a
+   concrete anomaly. Never stream all keyframes into model context by default.
+9. **One run, one id, no polling.** Resume `data/review/autopilot_run.json`
+   at the author and exact-review boundaries. Do not rediscover and manually
+   dispatch inventory/preflight/storyboard/final/publish/delivery commands.
+10. **Capture method is part of asset identity.** DevAPI may prepare game state,
+    but ordinary gameplay is recorded as one real-time client-area media stream.
+    Frame-stepped `capture.frame` + `time.step` output is debug/presentation
+    evidence only. A gameplay asset is not ingestible without structured
+    capture method, state/build id, native geometry, edit handles, and a passing
+    `$devlog-record-media` audit.
 
 ## Automatic speech edit — agent-owned, no author checkpoint
 
@@ -122,7 +139,12 @@ meaning/product claim; those are not speech edits.
   failure, contrast, funny situation) — else rewrite/re-record before any
   visual polish.
 - **Standalone:** no "а ещё / теперь / можно…" openings, no dependency on a
-  prior reel.
+  prior reel. Before rendering, persist a one-sentence `standalone_story`
+  contract: the hook names the product/situation, the middle contains one causal
+  turn, and the ending resolves it. A numbered episode must still pass this gate.
+- **No internal edit labels:** `REEL 01`, `REEL 02`, `VERSION B`, production ids,
+  and similar workflow labels never appear on screen unless the user explicitly
+  requested a public serialized identity.
 - **Voice energy:** flat, disengaged VO is a re-record issue; visual edits
   can't hide it.
 - **Motion floor:** no static screenshot run over ~3s — `ken_burns`,
@@ -245,6 +267,11 @@ can't be substituted; reviewer demands a 6th iteration.
   music present and mixed, VO joins clean, no visual glitches, text inside
   safe zones, real product visuals where promised, deliberate ending,
   thumbnail QA for YouTube packaging.
+- Before the final handoff, after the artifact/package is ready, or when a meaningful production run is stopped,
+  spawn `devlog-reflector` once. Reflection is a non-blocking process audit,
+  separate from blind artifact review. It compares target vs actual wall and
+  human time, saves a timestamped report under `data/review/reflections/`, and
+  proposes at most three changes for the next run.
 
 ## Quality rules
 
@@ -262,6 +289,8 @@ against the rule files — never assumed from "looks fine". Unverified ≠ pass.
   `data/infographics/*` outputs unless the user wants assets versioned.
 - Don't invent file paths for `src` changes — Glob/Read first (VQ-ASSET).
 - Don't invent `dl2` commands or flags — `dl2 --help` is the surface.
+- Don't accept free-form capture notes as proof of method or state, and don't
+  satisfy a real-time gameplay request with frame-stepped DevAPI output.
 - Don't reuse a feedback verdict whose `artifact_sha256` no longer matches.
 - Don't loop improve iterations past the cap without checking in.
 - Don't touch `common/dlstudio` internals for content work — engine changes

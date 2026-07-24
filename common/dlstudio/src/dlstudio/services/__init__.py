@@ -38,6 +38,8 @@ provider functions are the only place that imports requests, same rule.
 from __future__ import annotations
 
 from .audio import AudioStageError, ProcessResult, process_take
+from .boundary_report import build_boundary_report, write_boundary_report
+from .geometry_report import build_geometry_report, write_geometry_report
 from .hyperframes import init_project, render_html
 from .publish import generate_youtube_package
 from .review import extract_keyframes, make_contact_sheet
@@ -62,6 +64,10 @@ __all__ = [
     "AudioStageError",
     "ProcessResult",
     "process_take",
+    "build_boundary_report",
+    "write_boundary_report",
+    "build_geometry_report",
+    "write_geometry_report",
     "init_project",
     "render_html",
     "extract_keyframes",

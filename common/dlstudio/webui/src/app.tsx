@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { api, pollJob } from "./api/client";
 import type {
   CheckReport,
+  AutopilotCheckpointData,
+  AutopilotRequestAction,
   Feedback,
   Project,
   Timeline,
@@ -13,8 +15,10 @@ import { ScriptTab } from "./components/ScriptTab";
 import { RecordTab } from "./components/RecordTab";
 import { FeedbackPanel } from "./components/FeedbackPanel";
 import { IRInspector } from "./components/IRInspector";
+import { AutopilotCheckpoint } from "./components/AutopilotCheckpoint";
+import { ProductOverview } from "./components/ProductOverview";
 
-type Tab = "script" | "record" | "feedback" | "ir";
+type Tab = "autopilot" | "script" | "record" | "feedback" | "ir";
 type RenderState = "idle" | "running" | "done" | "error";
 
 interface RenderInfo {
@@ -41,6 +45,9 @@ export function App() {
   const [check, setCheck] = useState<CheckReport | null>(null);
   const [checkErr, setCheckErr] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<Feedback>({});
+  const [checkpoint, setCheckpoint] = useState<AutopilotCheckpointData | null>(null);
+  const [checkpointErr, setCheckpointErr] = useState<string | null>(null);
+  const [checkpointBusy, setCheckpointBusy] = useState(false);
 
   const [activeBeatId, setActiveBeatId] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("script");
@@ -112,13 +119,63 @@ export function App() {
       /* feedback may not exist yet; keep quiet */
     }
   }
+  async function loadCheckpoint() {
+    try {
+      setCheckpoint(await api.autopilotCheckpoint());
+      setCheckpointErr(null);
+    } catch (e) {
+      setCheckpointErr((e as Error).message);
+    }
+  }
+
+  async function approveScript() {
+    try {
+      await api.approveScript("author");
+      await loadProject();
+    } catch (e) {
+      setProjectErr((e as Error).message);
+    }
+  }
 
   useEffect(() => {
     loadProject();
     loadIR();
     loadCheck();
     loadFeedback();
+    loadCheckpoint();
   }, []);
+
+  async function approveCheckpoint() {
+    setCheckpointBusy(true);
+    try {
+      const result = await api.approveAutopilotCheckpoint("author");
+      setCheckpoint(result.checkpoint);
+      setCheckpointErr(null);
+    } catch (e) {
+      setCheckpointErr((e as Error).message);
+    } finally {
+      setCheckpointBusy(false);
+    }
+  }
+
+  async function requestCheckpointChange(
+    action: AutopilotRequestAction,
+    shotId: string,
+  ) {
+    const label = action.replaceAll("_", " ");
+    const reason = window.prompt(`Reason for ${label} (${shotId}):`);
+    if (!reason?.trim()) return;
+    setCheckpointBusy(true);
+    try {
+      await api.requestAutopilotChange(action, shotId, reason.trim(), "author");
+      setCheckpointErr(null);
+      await loadCheckpoint();
+    } catch (e) {
+      setCheckpointErr((e as Error).message);
+    } finally {
+      setCheckpointBusy(false);
+    }
+  }
 
   // Select first beat once the project arrives.
   useEffect(() => {
@@ -226,6 +283,7 @@ export function App() {
     : "";
 
   const TABS: Array<[Tab, string]> = [
+    ["autopilot", "Autopilot"],
     ["script", "Script"],
     ["record", "Record"],
     ["feedback", "Feedback"],
@@ -245,6 +303,14 @@ export function App() {
               <b>{project.beats.length}</b> beats
             </span>
             <span class="stat">{designStr}</span>
+            <button
+              class={"btn sm " + (project.script_approved ? "secondary" : "")}
+              disabled={project.script_approved}
+              onClick={approveScript}
+              title={project.script_sha256}
+            >
+              {project.script_approved ? "Script approved" : "Approve script"}
+            </button>
           </>
         )}
         <div class="tabs" style={{ marginLeft: "12px" }}>
@@ -264,6 +330,8 @@ export function App() {
         </span>
       </header>
 
+      {project?.product && <ProductOverview product={project.product} />}
+
       <CheckBanner check={check} error={checkErr} />
 
       <main>
@@ -282,7 +350,17 @@ export function App() {
             Loading project…
           </div>
         ) : (
-          <>
+          tab === "autopilot" ? (
+            <section class="autopilot-pane">
+              <AutopilotCheckpoint
+                checkpoint={checkpoint}
+                busy={checkpointBusy}
+                error={checkpointErr}
+                onApproveAll={approveCheckpoint}
+                onRequest={requestCheckpointChange}
+              />
+            </section>
+          ) : <>
             <Sidebar
               project={project}
               activeBeatId={activeBeatId}
@@ -345,6 +423,7 @@ export function App() {
                       addTake={addTake}
                       updateTake={updateTake}
                       onAfterProcess={afterProcess}
+                      scriptApproved={project.script_approved}
                     />
                   )}
                   {tab === "feedback" && (

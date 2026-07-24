@@ -1,9 +1,8 @@
 # Studio v2 — quickstart (полный draft-путь)
 
 Одна страница для холодного старта. Все команды — `dl2`. Движок:
-`common/dlstudio`; edit — это Python-пакет с module-level `EDIT`
-(`__init__.py` + `beats.py` + `design.py`), на который указывает dotted
-module path, например `myreel.edits.main`.
+`common/dlstudio`. Новый рекомендуемый путь — product-first manifests и ссылка
+`product_id:production_id`; старые dotted edit paths остаются совместимыми.
 
 ## 0. Проверка окружения
 
@@ -11,7 +10,26 @@ module path, например `myreel.edits.main`.
 dl2 doctor          # ffmpeg/ffprobe/python/pydantic — всё должно быть OK
 ```
 
-## 1. Создать проект
+## 1. Создать product и production
+
+```bash
+dl2 new-product not_a_trolley_problem --game-root C:/projects/game-67-idle
+dl2 new-production not_a_trolley_problem --kind reel --date 2026-07-18
+dl2 list-productions not_a_trolley_problem
+```
+
+Получившийся edit адресуется как
+`not_a_trolley_problem:2026_07_18_reel_01`. Весь review/finalize/publish
+изолирован внутри production, а готовая публикационная папка — внутри общего
+product root. Точные дубликаты исходных assets можно безопасно собрать в одно
+физическое хранилище, не ломая production paths:
+
+```bash
+dl2 dedupe-assets not_a_trolley_problem          # read-only план
+dl2 dedupe-assets not_a_trolley_problem --apply  # verified hardlinks + report
+```
+
+### Legacy scaffold
 
 ```bash
 dl2 new-video myreel --format vertical    # или --format landscape
@@ -72,7 +90,37 @@ dl2 gen-html intro_chart --out data/infographics/intro_chart.mp4 --quality draft
 Требуется Node 22+ (npx). Подключение: `VideoShot(src="data/infographics/intro_chart.mp4")`
 или `Scene(kind="video", ...)`.
 
-## 5. Draft + артефакты ревью
+## 5. Autopilot preflight + draft
+
+Для product-first production сначала зафиксируй assets и shot contract:
+
+Перед запуском reel заполни созданный шаблон
+`data/plan/story_contract.json`: `premise`, `causal_turn`, `payoff`. Затем:
+
+```bash
+dl2 autopilot-run not_a_trolley_problem:2026_07_18_reel_01
+# автор проверяет один storyboard checkpoint
+dl2 autopilot-run not_a_trolley_problem:2026_07_18_reel_01 --resume --human-minutes 8
+# один exact-hash blind review
+dl2 autopilot-run not_a_trolley_problem:2026_07_18_reel_01 --resume
+```
+
+Run хранится в `data/review/autopilot_run.json`; все stage events получают
+один `run_id`. Команда останавливается на первом failed gate и продолжает тот
+же run после `--resume`, без polling и повторного command discovery.
+
+`inventory` создаёт `data/assets/catalog.json`, `preflight` проверяет approved
+script/VO/source/duplicate/pacing/readability и пишет JSON-отчёт, а
+`storyboard` создаёт watchable draft и review artifacts. Перед final blockers
+должны быть устранены; warning не является автоматическим pass.
+
+Autopilot также создаёт компактные `data/review/review_pack.json` и
+`review_pack_sheet.jpg`: exact SHA, границы/длительности shots, source paths,
+story contract, видимый HyperFrames-текст, preflight facts и не более 16
+маленьких кадров. Reviewer открывает full-resolution только при конкретной
+аномалии.
+
+Legacy/низкоуровневый preview остаётся доступен:
 
 ```bash
 dl2 preview myreel.edits.main
@@ -115,7 +163,18 @@ dl2 check myreel.edits.main
 ```bash
 dl2 final myreel.edits.main        # 1080p/upload, −14 LUFS loudnorm
 dl2 publish myreel.edits.main      # -> data/publish/youtube_package.md
+dl2 publish-evidence not_a_trolley_problem:2026_07_18_reel_01
+# -> data/publish/video.mp4 + exact hash/review evidence
+dl2 deliver not_a_trolley_problem:2026_07_18_reel_01
 ```
+
+`publish-evidence` после exact preflight/review кладёт сам готовый MP4 рядом с
+metadata/cover как `data/publish/video.mp4`. На одном диске используется
+hardlink без удвоения места; fallback-копия всегда проверяется по SHA-256.
+
+`deliver` идемпотентно собирает exact MP4, `metadata.md`, cover/thumbnail и
+`delivery_manifest.json` в `product/delivery/<kind>/<production_id>/` и
+проверяет хэши/hashtags.
 
 ## Пути вывода (сводка)
 
@@ -127,6 +186,6 @@ dl2 publish myreel.edits.main      # -> data/publish/youtube_package.md
 | Scratch VO | `data/scratch/<beat>_scratch_tts.wav` |
 | HyperFrames-ассеты | `data/infographics/<asset>.mp4` |
 | Feedback ревьюеров | `data/review/feedback.json` |
-| YouTube-пакет | `data/publish/youtube_package.md` |
+| Publish-пакет | `data/publish/video.mp4`, `metadata.md`, cover/thumbnail, `publish.json` |
 
 Тесты движка (при работе над самим Studio): `dl2 verify --changed`.

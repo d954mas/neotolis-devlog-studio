@@ -4,8 +4,12 @@ import {
   type ExperimentInput,
   type ExperimentResultInput,
   type ResearchCollectorStatus,
+  type ResearchMediaCacheSummary,
   type ResearchProjectFeed,
   type ResearchProjectSummary,
+  type ResearchQuickAddKind,
+  type ResearchQuickAddResult,
+  type ResearchReel,
   type ResearchSort,
   type ResearchWindow,
   type ResearchSyncResult,
@@ -13,8 +17,10 @@ import {
 } from "../../api/research";
 import { ReelCard } from "./ReelCard";
 import { AuthorForm, ProjectForm, ReferenceForm } from "./ResearchForms";
-
-const WINDOWS: Array<[ResearchWindow, string]> = [["7d", "7 days"], ["30d", "30 days"], ["90d", "90 days"], ["all", "All time"]];
+import { QuickAddSource } from "./QuickAddSource";
+import { ReelDateHeader } from "./ReelDateHeader";
+import { ResearchToolbar, type ResearchPanel } from "./ResearchToolbar";
+import { dateGroupLabel, groupReelsByDate } from "./research-feed-dates";
 
 function queryValue(name: string): string | null {
   return typeof location === "undefined" ? null : new URLSearchParams(location.search).get(name);
@@ -22,12 +28,12 @@ function queryValue(name: string): string | null {
 
 function initialWindow(): ResearchWindow {
   const value = queryValue("range");
-  return value === "30d" || value === "90d" || value === "all" ? value : "7d";
+  return value === "7d" || value === "30d" || value === "90d" ? value : "all";
 }
 
 function initialSort(): ResearchSort {
   const value = queryValue("sort");
-  return value === "velocity" || value === "views" || value === "newest" ? value : "outlier";
+  return value === "velocity" || value === "views" || value === "outlier" ? value : "newest";
 }
 
 export function ResearchLab() {
@@ -38,10 +44,17 @@ export function ResearchLab() {
   const [sort, setSort] = useState<ResearchSort>(initialSort);
   const [authorId, setAuthorId] = useState<string | null>(() => queryValue("author"));
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [collector, setCollector] = useState<ResearchCollectorStatus | null>(null);
   const [syncResult, setSyncResult] = useState<ResearchSyncResult | null>(null);
+  const [mediaCache, setMediaCache] = useState<ResearchMediaCacheSummary | null>(null);
+  const [panel, setPanel] = useState<ResearchPanel>(null);
+
+  async function refreshMediaCache() {
+    setMediaCache(await researchApi.mediaCache());
+  }
 
   async function loadProjects(preferred?: string) {
     const items = await researchApi.projects();
@@ -52,20 +65,35 @@ export function ResearchLab() {
     });
   }
 
-  async function loadFeed(projectId = activeId) {
+  async function loadFeed(projectId = activeId, cursor: string | null = null) {
     if (!projectId) {
       setFeed(null);
       setLoading(false);
       return;
     }
-    setLoading(true);
+    if (cursor) setLoadingMore(true);
+    else setLoading(true);
     try {
-      setFeed(await researchApi.project(projectId, range, sort, authorId));
+      const page = await researchApi.project(projectId, range, sort, authorId, cursor);
+      setFeed((current) => {
+        if (!cursor || !current || current.id !== page.id) return page;
+        const reelIds = new Set(current.reels.map((reel) => reel.id));
+        const experimentIds = new Set(current.experiments.map((experiment) => experiment.id));
+        return {
+          ...page,
+          reels: [...current.reels, ...page.reels.filter((reel) => !reelIds.has(reel.id))],
+          experiments: [
+            ...current.experiments,
+            ...page.experiments.filter((experiment) => !experimentIds.has(experiment.id)),
+          ],
+        };
+      });
       setError(null);
     } catch (caught) {
       setError((caught as Error).message);
     } finally {
-      setLoading(false);
+      if (cursor) setLoadingMore(false);
+      else setLoading(false);
     }
   }
 
@@ -77,11 +105,21 @@ export function ResearchLab() {
     researchApi.collectorStatus().then(setCollector).catch((caught) => {
       setError((caught as Error).message);
     });
+    refreshMediaCache().catch((caught) => setError((caught as Error).message));
   }, []);
 
   useEffect(() => {
     loadFeed();
   }, [activeId, range, sort, authorId]);
+
+  useEffect(() => {
+    if (!panel) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPanel(null);
+    };
+    addEventListener("keydown", closeOnEscape);
+    return () => removeEventListener("keydown", closeOnEscape);
+  }, [panel]);
 
   useEffect(() => {
     if (typeof location === "undefined" || !location.pathname.startsWith("/research")) return;
@@ -135,43 +173,172 @@ export function ResearchLab() {
     }
   }
 
+  async function quickAddSource(
+    kind: ResearchQuickAddKind,
+    value: string,
+  ): Promise<ResearchQuickAddResult> {
+    if (!feed) throw new Error("Сначала выберите проект");
+    setBusy(true);
+    try {
+      const result = await researchApi.quickAdd(feed.id, kind, value);
+      await loadProjects(feed.id);
+      await loadFeed(feed.id);
+      setError(null);
+      return result;
+    } catch (caught) {
+      setError((caught as Error).message);
+      throw caught;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createResearchProject(input: { title: string; description: string; style_profile: string }): Promise<boolean> {
+    setBusy(true);
+    try {
+      const created = await researchApi.createProject(input);
+      await loadProjects(created.id);
+      setPanel(null);
+      setError(null);
+      return true;
+    } catch (caught) {
+      setError((caught as Error).message);
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function clearMediaCache() {
+    if (!confirm("Удалить все скачанные видео? Авторы, метрики, заметки и эксперименты останутся.")) return;
+    setBusy(true);
+    try {
+      await researchApi.clearMediaCache();
+      await refreshMediaCache();
+      setError(null);
+    } catch (caught) {
+      setError((caught as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function renderReelCard(reel: ResearchReel, showDate: boolean) {
+    if (!feed) return null;
+    return (
+      <ReelCard
+        key={reel.id}
+        projectId={feed.id}
+        reel={reel}
+        showDate={showDate}
+        experimentBusy={busy}
+        onAuthor={setAuthorId}
+        onExperiment={(input: ExperimentInput) => mutate(() => researchApi.createExperiment(feed.id, input), true)}
+        onExperimentResult={(experimentId: string, input: ExperimentResultInput) => mutate(() => researchApi.recordExperimentResult(feed.id, experimentId, input), true)}
+        onCacheChange={() => { refreshMediaCache().catch((caught) => setError((caught as Error).message)); }}
+      />
+    );
+  }
+
   return (
     <section class="research-lab" aria-label="Research projects and Reel feed">
-      <aside class="research-projects">
-        <div class="research-brand"><span class="eyebrow">Library</span><h2>Projects</h2></div>
-        <nav aria-label="Research projects">
-          {projects.map((project) => (
-            <button
-              key={project.id}
-              class={`research-project-item ${activeId === project.id ? "active" : ""}`}
-              onClick={() => { setAuthorId(null); setActiveId(project.id); }}
-              aria-current={activeId === project.id ? "page" : undefined}
-            >
-              <b>{project.title}</b>
-              <span>{project.author_count} authors · {project.reel_count} Reels</span>
-              <small>{project.experiment_count} experiments</small>
-            </button>
-          ))}
-        </nav>
-        <details class="research-add-project" open={projects.length === 0}>
-          <summary>New research project</summary>
-          <ProjectForm busy={busy} onCreate={async (input) => {
-            setBusy(true);
-            try {
-              const created = await researchApi.createProject(input);
-              await loadProjects(created.id);
-              setError(null);
-              return true;
-            } catch (caught) {
-              setError((caught as Error).message);
-              return false;
-            } finally {
-              setBusy(false);
-            }
-          }} />
-        </details>
-      </aside>
+      <ResearchToolbar
+        projects={projects}
+        activeId={activeId}
+        feed={feed}
+        range={range}
+        sort={sort}
+        busy={busy}
+        collectorConfigured={Boolean(collector?.configured)}
+        syncLabel={selectedAuthor ? `Sync @${selectedAuthor.username}` : "Sync"}
+        syncDisabled={!collector?.configured || syncAuthorCount === 0 || syncAuthorCount > (collector?.max_authors_per_sync || 25)}
+        panel={panel}
+        onProject={(projectId) => {
+          setPanel(null);
+          setAuthorId(null);
+          setActiveId(projectId);
+        }}
+        onRange={setRange}
+        onSort={setSort}
+        onSync={syncAuthors}
+        onPanel={setPanel}
+        addPanel={feed ? (
+          <QuickAddSource
+            busy={busy}
+            collectorConfigured={Boolean(collector?.configured)}
+            onAdd={quickAddSource}
+          />
+        ) : null}
+        toolsPanel={(
+          <div class="research-tools-panel">
+            <header class="research-tools-head">
+              <div><span class="eyebrow">Workspace</span><h2>Инструменты</h2></div>
+              <button class="research-panel-close" aria-label="Закрыть" onClick={() => setPanel(null)}>×</button>
+            </header>
 
+            {feed && (
+              <section class="research-project-context">
+                <div>
+                  <span class="eyebrow">Текущий проект</span>
+                  <h3>{feed.title}</h3>
+                  <p>{feed.description || "Цель исследования пока не описана."}</p>
+                </div>
+                <small>{feed.counts.authors} авторов · {feed.counts.reels} Reels · {feed.counts.experiments} экспериментов</small>
+                <code title="Стабильный контекст для агентов">{feed.agent_brief_path}</code>
+                {feed.style_profile && <p class="research-project-style"><b>Наш стиль:</b> {feed.style_profile}</p>}
+              </section>
+            )}
+
+            {feed && (
+              <section class={`research-collector ${collector?.configured ? "connected" : "needs-key"}`} aria-label="Сборщик Reels">
+                <div class="research-collector-copy">
+                  <span class="eyebrow">Сборщик</span>
+                  <h3>ScrapeCreators</h3>
+                  {collector?.configured ? (
+                    <p>Подключён. Обновляет публичные Reels, сохраняя заметки.</p>
+                  ) : (
+                    <p>Для синхронизации задайте <code>SCRAPECREATORS_API_KEY</code> перед запуском Studio.</p>
+                  )}
+                </div>
+                <div class="research-collector-action">
+                  <span class={`research-provider-status ${collector?.configured ? "ready" : "offline"}`}>
+                    {collector?.configured ? "Подключён" : "Нужен ключ"}
+                  </span>
+                  <button class="btn sm primary" disabled={busy || !collector?.configured || syncAuthorCount === 0} onClick={syncAuthors}>
+                    {busy ? "Обновляю…" : selectedAuthor ? `Обновить @${selectedAuthor.username}` : "Обновить авторов"}
+                  </button>
+                  <small>До {syncMaxCredits} запросов за запуск</small>
+                </div>
+                {syncResult && <p class="research-sync-result" role="status">Импортировано {syncResult.reels_imported} Reels · {syncResult.credits_used} запросов.</p>}
+              </section>
+            )}
+
+            <section class="research-media-cache" aria-label="Локальный видеокэш">
+              <div>
+                <span class="eyebrow">Локально</span>
+                <b>Видеокэш</b>
+                <small>{mediaCache?.file_count || 0} видео · {mediaCache ? `${(mediaCache.size_bytes / (1024 * 1024)).toFixed(1)} MB` : "считаю…"}</small>
+              </div>
+              <button class="btn sm secondary" disabled={busy || !mediaCache?.file_count} onClick={clearMediaCache}>Очистить</button>
+            </section>
+
+            {feed && (
+              <details class="research-setup research-advanced-import">
+                <summary>Расширенный ручной импорт</summary>
+                <div class="research-setup-grid">
+                  <div><h3>Добавить автора</h3><AuthorForm busy={busy} onCreate={(input) => mutate(() => researchApi.addAuthor(feed.id, input), true)} /></div>
+                  <div><h3>Импортировать Reel</h3>{feed.authors.length ? <ReferenceForm authors={feed.authors} busy={busy} onCreate={(input: ReelInput) => mutate(() => researchApi.addReel(feed.id, input), true)} /> : <p class="hint">Сначала добавьте автора.</p>}</div>
+                </div>
+              </details>
+            )}
+
+            <details class="research-setup research-new-project" open={projects.length === 0}>
+              <summary>Новый проект исследования</summary>
+              <ProjectForm busy={busy} onCreate={createResearchProject} />
+            </details>
+          </div>
+        )}
+      />
       <div class="research-feed-pane">
         {error && <div class="research-error" role="alert">{error}</div>}
         {!activeId ? (
@@ -180,58 +347,6 @@ export function ResearchLab() {
           <div class="research-loading" aria-busy="true">Loading research feed…</div>
         ) : feed ? (
           <>
-            <header class="research-feed-head">
-              <div><span class="eyebrow">Research project</span><h2>{feed.title}</h2><p>{feed.description || "No research goal written yet."}</p><small class="research-project-stats">{feed.authors.length} authors · {feed.reels.length} references · {feed.experiments.length} experiments</small><code class="research-agent-brief" title="Stable project context for agents">Agent brief · {feed.agent_brief_path}</code></div>
-              <div class="research-window" aria-label="Publication window">
-                {WINDOWS.map(([id, label]) => <button key={id} aria-pressed={range === id} class={range === id ? "active" : ""} onClick={() => setRange(id)}>{label}</button>)}
-              </div>
-              <label class="research-sort">Sort<select value={sort} onChange={(event) => setSort(event.currentTarget.value as ResearchSort)}><option value="outlier">Outlier score</option><option value="velocity">Views per hour</option><option value="views">Views</option><option value="newest">Newest</option></select></label>
-            </header>
-
-            {feed.style_profile && (
-              <section class="research-style-contract" aria-label="Original style contract">
-                <span class="eyebrow">Keep every experiment recognisably ours</span>
-                <p>{feed.style_profile}</p>
-              </section>
-            )}
-
-            <section class={`research-collector ${collector?.configured ? "connected" : "needs-key"}`} aria-label="Automatic Reel collection">
-              <div class="research-collector-copy">
-                <span class="eyebrow">Automatic collection</span>
-                <h3>ScrapeCreators</h3>
-                {collector?.configured ? (
-                  <p>Ready. One current Reels page per author; existing analysis notes stay intact.</p>
-                ) : (
-                  <p>Set <code>SCRAPECREATORS_API_KEY</code> before starting Studio to enable sync.</p>
-                )}
-              </div>
-              <div class="research-collector-action">
-                <span class={`research-provider-status ${collector?.configured ? "ready" : "offline"}`}>
-                  {collector?.configured ? "Connected" : "Key needed"}
-                </span>
-                <button
-                  class="btn sm primary"
-                  disabled={busy || !collector?.configured || syncAuthorCount === 0 || syncAuthorCount > (collector?.max_authors_per_sync || 25)}
-                  onClick={syncAuthors}
-                >
-                  {busy ? "Syncing…" : selectedAuthor ? `Sync @${selectedAuthor.username}` : `Sync ${syncAuthorCount || "all"} authors`}
-                </button>
-                <small>
-                  Maximum {syncMaxCredits} credit{syncMaxCredits === 1 ? "" : "s"} this run
-                  {collector ? ` · fallback included · under $${collector.max_paid_cost_per_sync_usd.toFixed(2)} at the paid rate` : ""}
-                </small>
-              </div>
-              {syncAuthorCount > (collector?.max_authors_per_sync || 25) && (
-                <p class="research-collector-warning">Select one author first; a run is capped at {collector?.max_authors_per_sync || 25} credits.</p>
-              )}
-              {syncResult && (
-                <p class="research-sync-result" role="status">
-                  Imported <b>{syncResult.reels_imported}</b> Reels from {syncResult.authors_completed} author{syncResult.authors_completed === 1 ? "" : "s"} using {syncResult.credits_used} credit{syncResult.credits_used === 1 ? "" : "s"}.
-                  {syncResult.credits_remaining !== null ? ` ${syncResult.credits_remaining} credits remain.` : ""}
-                </p>
-              )}
-            </section>
-
             {selectedAuthor && (
               <section class="author-focus" aria-label={`Filtered by @${selectedAuthor.username}`}>
                 <div><span class="eyebrow">Author focus</span><h3>@{selectedAuthor.username}</h3></div>
@@ -241,28 +356,35 @@ export function ResearchLab() {
               </section>
             )}
 
-            <details class="research-setup" open={feed.authors.length === 0}>
-              <summary>Manage sources</summary>
-              <div class="research-setup-grid">
-                <div><h3>Add author</h3><AuthorForm busy={busy} onCreate={(input) => mutate(() => researchApi.addAuthor(feed.id, input), true)} /></div>
-                <div><h3>Import or update a reference</h3>{feed.authors.length ? <><p class="hint">Submitting the same Reel URL again adds a fresh metric snapshot without losing your hook and pattern notes.</p><ReferenceForm authors={feed.authors} busy={busy} onCreate={(input: ReelInput) => mutate(() => researchApi.addReel(feed.id, input), true)} /></> : <p class="hint">Add an author first. Automatic collection will plug into this same import contract.</p>}</div>
-              </div>
-            </details>
-
             <div class="research-feed" aria-live="polite">
               {loading && <div class="research-refreshing">Refreshing…</div>}
               {!loading && feed.reels.length === 0 ? (
                 <div class="research-empty"><span aria-hidden="true">▶</span><h3>No Reels in this window</h3><p>Import a reference above or choose a wider period.</p></div>
-              ) : feed.reels.map((reel) => (
-                <ReelCard
-                  key={reel.id}
-                  reel={reel}
-                  experimentBusy={busy}
-                  onAuthor={setAuthorId}
-                  onExperiment={(input: ExperimentInput) => mutate(() => researchApi.createExperiment(feed.id, input), true)}
-                  onExperimentResult={(experimentId: string, input: ExperimentResultInput) => mutate(() => researchApi.recordExperimentResult(feed.id, experimentId, input), true)}
-                />
-              ))}
+              ) : sort === "newest" ? (
+                groupReelsByDate(feed.reels).map((group) => (
+                  <section class="research-date-group" key={group.date} aria-label={dateGroupLabel(group.publishedAt)}>
+                    <ReelDateHeader publishedAt={group.publishedAt} count={group.reels.length} />
+                    <div class="research-feed-grid">
+                      {group.reels.map((reel) => renderReelCard(reel, false))}
+                    </div>
+                  </section>
+                ))
+              ) : (
+                <div class="research-feed-grid research-ranked-grid">
+                  {feed.reels.map((reel) => renderReelCard(reel, true))}
+                </div>
+              )}
+              {feed.page.has_more && (
+                <div class="research-load-more">
+                  <button
+                    class="btn secondary"
+                    disabled={loadingMore || !feed.page.next_cursor}
+                    onClick={() => loadFeed(feed.id, feed.page.next_cursor)}
+                  >
+                    {loadingMore ? "Загружаю…" : `Показать ещё · ${feed.reels.length} из ${feed.page.total}`}
+                  </button>
+                </div>
+              )}
             </div>
           </>
         ) : null}

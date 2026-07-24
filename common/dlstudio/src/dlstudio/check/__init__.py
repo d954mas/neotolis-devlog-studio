@@ -28,7 +28,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from dlstudio.ir import CheckIssue, CheckReport, Timeline
+from dlstudio.ir import CheckIssue, CheckReport, IRSegment, Timeline
 
 _EPS = 1e-3
 _MAX_DIM = 4096          # x264 practical safety ceiling per axis
@@ -38,8 +38,11 @@ _MAX_UPSCALE = 2.2       # full-bleed upscale factor cap (the 3840x6826 OOM clas
 def run_checks(timeline: Timeline) -> CheckReport:
     issues: list[CheckIssue] = []
     issues += _check_assets(timeline)
+    issues += _check_asset_identities(timeline)
     issues += _check_words(timeline)
     issues += _check_resolution(timeline)
+    issues += _check_geometry(timeline)
+    issues += _check_boundaries(timeline)
     issues += _promote_warnings(timeline)
 
     # dedupe exact repeats (defensive: gates are independent and could
@@ -71,6 +74,82 @@ def _check_assets(timeline: Timeline) -> list[CheckIssue]:
                 message=f"referenced {probe.kind} asset is present but unreadable: {path}",
                 where=path,
             ))
+    return out
+
+
+# ─── VQ-ASSET-ID ────────────────────────────────────────────────────────────
+
+def _check_asset_identities(timeline: Timeline) -> list[CheckIssue]:
+    from dlstudio.services.asset_registry import (
+        AssetRegistryError,
+        load_asset_registry,
+        resolve_approved_asset,
+    )
+
+    out: list[CheckIssue] = []
+    root = Path.cwd().resolve()
+    registry = load_asset_registry(root)
+    by_id = {asset.asset_id: asset for asset in registry.assets}
+    for beat in timeline.beats:
+        for index, segment in enumerate(beat.segments):
+            where = f"{beat.id}:seg{index}"
+            if segment.editorial_role == "gameplay" and not segment.asset_id:
+                out.append(CheckIssue(
+                    severity="error",
+                    code="VQ-ASSET-ID",
+                    message="declared gameplay requires an approved asset_id",
+                    where=where,
+                ))
+                continue
+            if not segment.asset_id:
+                continue
+            record = by_id.get(segment.asset_id)
+            if record is None:
+                out.append(CheckIssue(
+                    severity="error",
+                    code="VQ-ASSET-ID",
+                    message=f"unknown asset_id: {segment.asset_id}",
+                    where=where,
+                ))
+                continue
+            if (
+                segment.editorial_role is not None
+                and record.editorial_role != segment.editorial_role
+            ):
+                out.append(CheckIssue(
+                    severity="error",
+                    code="VQ-ASSET-ID",
+                    message=(
+                        f"asset role {record.editorial_role} does not satisfy "
+                        f"{segment.editorial_role}: {segment.asset_id}"
+                    ),
+                    where=where,
+                ))
+                continue
+            try:
+                approved_path = resolve_approved_asset(root, segment.asset_id)
+            except AssetRegistryError as exc:
+                out.append(CheckIssue(
+                    severity="error",
+                    code="VQ-ASSET-ID",
+                    message=str(exc),
+                    where=where,
+                ))
+                continue
+            source = Path(segment.src)
+            resolved_source = (
+                source.resolve() if source.is_absolute() else (root / source).resolve()
+            )
+            if resolved_source != approved_path:
+                out.append(CheckIssue(
+                    severity="error",
+                    code="VQ-ASSET-ID",
+                    message=(
+                        f"asset_id {segment.asset_id} resolves to "
+                        f"{record.artifact_path}, not {segment.src}"
+                    ),
+                    where=where,
+                ))
     return out
 
 
@@ -128,6 +207,164 @@ def _check_resolution(timeline: Timeline) -> list[CheckIssue]:
                              f"{scale:.2f}x to {w}x{h} (> {_MAX_UPSCALE}x cap)"),
                     where=f"{beat.id}:seg{si}",
                 ))
+    return out
+
+
+# ─── VQ-GEOMETRY ────────────────────────────────────────────────────────────
+
+def _check_geometry(timeline: Timeline) -> list[CheckIssue]:
+    out: list[CheckIssue] = []
+    for beat in timeline.beats:
+        for index, segment in enumerate(beat.segments):
+            geometry = segment.geometry
+            if geometry is None:
+                continue
+            where = f"{beat.id}:seg{index}"
+            output_width = geometry.output_width
+            output_height = geometry.output_height
+            if geometry.fit != segment.fit:
+                out.append(CheckIssue(
+                    severity="error",
+                    code="VQ-GEOMETRY",
+                    message=(
+                        f"segment fit {segment.fit} disagrees with resolved "
+                        f"geometry fit {geometry.fit}"
+                    ),
+                    where=where,
+                ))
+                continue
+
+            probe = timeline.assets.get(segment.src)
+            if probe is not None and probe.width and probe.height:
+                if (
+                    geometry.source_width != probe.width
+                    or geometry.source_height != probe.height
+                ):
+                    out.append(CheckIssue(
+                        severity="error",
+                        code="VQ-GEOMETRY",
+                        message=(
+                            "geometry source dimensions do not match probe: "
+                            f"{geometry.source_width}x{geometry.source_height} vs "
+                            f"{probe.width}x{probe.height}"
+                        ),
+                        where=where,
+                    ))
+                    continue
+
+            if not all((
+                geometry.source_width,
+                geometry.source_height,
+                geometry.scaled_width,
+                geometry.scaled_height,
+            )):
+                if segment.editorial_role == "gameplay":
+                    out.append(CheckIssue(
+                        severity="error",
+                        code="VQ-GEOMETRY",
+                        message="approved gameplay has unresolved source geometry",
+                        where=where,
+                    ))
+                continue
+
+            expected = geometry.for_output(output_width, output_height)
+            if geometry != expected:
+                out.append(CheckIssue(
+                    severity="error",
+                    code="VQ-GEOMETRY",
+                    message="resolved fit/anchor transform is internally inconsistent",
+                    where=where,
+                ))
+    return out
+
+
+# ─── VQ-BOUNDARY / VQ-RESTART ───────────────────────────────────────────────
+
+def _check_boundaries(timeline: Timeline) -> list[CheckIssue]:
+    from dlstudio.services.boundary_report import BOUNDARY_OFFSET_TOLERANCE
+
+    placement_by_beat = {item.beat_id: item.t0 for item in timeline.placements}
+    entries: list[tuple[float, str, int, IRSegment]] = []
+    for beat in timeline.beats:
+        beat_start = placement_by_beat.get(beat.id, 0.0)
+        for index, segment in enumerate(beat.segments):
+            entries.append((beat_start + segment.t0, beat.id, index, segment))
+    entries.sort(key=lambda item: item[0])
+
+    out: list[CheckIssue] = []
+    last_source_end: dict[str, float] = {}
+    explicit_restart_intents = {
+        "motivated_cut",
+        "before_after",
+        "chapter_boundary",
+    }
+    for position, (_, beat_id, index, right) in enumerate(entries):
+        where = f"{beat_id}:seg{index}"
+        source_key = right.asset_id or right.src
+        prior_end = last_source_end.get(source_key)
+
+        if position > 0:
+            left = entries[position - 1][3]
+            gameplay_boundary = (
+                left.editorial_role == "gameplay"
+                or right.editorial_role == "gameplay"
+            )
+            intent = right.transition_intent
+            if gameplay_boundary and intent is None:
+                out.append(CheckIssue(
+                    severity="error",
+                    code="VQ-BOUNDARY",
+                    message="gameplay boundary requires explicit transition_intent",
+                    where=where,
+                ))
+            elif gameplay_boundary and intent == "no_cut":
+                out.append(CheckIssue(
+                    severity="error",
+                    code="VQ-BOUNDARY",
+                    message="transition_intent=no_cut contradicts a compiled boundary",
+                    where=where,
+                ))
+            elif gameplay_boundary and intent == "continuous_same_take":
+                left_key = left.asset_id or left.src
+                expected_offset = left.offset + max(0.0, left.t1 - left.t0)
+                if source_key != left_key:
+                    out.append(CheckIssue(
+                        severity="error",
+                        code="VQ-BOUNDARY",
+                        message=(
+                            "continuous_same_take requires the same source asset "
+                            f"({left_key} -> {source_key})"
+                        ),
+                        where=where,
+                    ))
+                elif abs(right.offset - expected_offset) > BOUNDARY_OFFSET_TOLERANCE:
+                    out.append(CheckIssue(
+                        severity="error",
+                        code="VQ-RESTART",
+                        message=(
+                            "continuous_same_take source offset is discontinuous: "
+                            f"expected {expected_offset:.3f}s, got {right.offset:.3f}s"
+                        ),
+                        where=where,
+                    ))
+
+        if (
+            prior_end is not None
+            and right.offset < prior_end - BOUNDARY_OFFSET_TOLERANCE
+            and right.transition_intent not in explicit_restart_intents
+        ):
+            out.append(CheckIssue(
+                severity="error",
+                code="VQ-RESTART",
+                message=(
+                    f"source {source_key} restarts/rewinds from {prior_end:.3f}s "
+                    f"to {right.offset:.3f}s without explicit cut intent"
+                ),
+                where=where,
+            ))
+        last_source_end[source_key] = (
+            right.offset + max(0.0, right.t1 - right.t0)
+        )
     return out
 
 

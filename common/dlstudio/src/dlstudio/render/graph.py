@@ -267,8 +267,10 @@ def build_xfade_chain(
     `xfade_durs` may be a scalar (uniform crossfade, the legacy behaviour) or
     a per-boundary list of length len(labels)-1. `transitions` is an optional
     per-boundary list of ffmpeg transition names (default "fade"). Each
-    xfade's offset comes from `xfade_offsets`; the chain is appended to
-    `graph`. A single label is returned unchanged (no transition needed).
+    positive-duration xfade's offset comes from `xfade_offsets`. A zero-
+    duration boundary uses the concat filter: FFmpeg's ``xfade=duration=0``
+    is degenerate and emits roughly only its second input, so it is not a
+    hard cut. A single label is returned unchanged (no transition needed).
     """
     n = len(labels)
     if n <= 1:
@@ -281,16 +283,25 @@ def build_xfade_chain(
     prev = labels[0]
     for i in range(1, n):
         out = graph.new_label("xf")
-        graph.add(FilterNode(
-            "xfade",
-            args={
-                "transition": transitions[i - 1],
-                "duration": float(xfade_durs[i - 1]),
-                "offset": offs[i - 1],
-            },
-            inputs=[prev, labels[i]],
-            outputs=[out],
-        ))
+        dur = float(xfade_durs[i - 1])
+        if dur <= 0.0:
+            graph.add(FilterNode(
+                "concat",
+                args={"n": 2, "v": 1, "a": 0},
+                inputs=[prev, labels[i]],
+                outputs=[out],
+            ))
+        else:
+            graph.add(FilterNode(
+                "xfade",
+                args={
+                    "transition": transitions[i - 1],
+                    "duration": dur,
+                    "offset": offs[i - 1],
+                },
+                inputs=[prev, labels[i]],
+                outputs=[out],
+            ))
         prev = out
     return prev
 
@@ -305,6 +316,9 @@ def color_source(graph: Graph, color: str, w: int, h: int, dur: float,
         filters=[
             FilterNode("color", args={"c": color, "s": f"{w}x{h}",
                                       "d": float(dur), "r": fps}),
+            # concat outputs AVTB (1/1_000_000).  Keep every background
+            # source on that same timebase so a cut can be followed by xfade.
+            FilterNode("settb", args={"expr": "AVTB"}),
             FilterNode("format", positional=["yuv420p"]),
         ],
         outputs=[label],

@@ -90,6 +90,13 @@ export interface ResearchProjectFeed {
   authors: ResearchAuthor[];
   reels: ResearchReel[];
   experiments: ResearchExperiment[];
+  counts: { authors: number; reels: number; experiments: number };
+  page: {
+    limit: number;
+    total: number;
+    has_more: boolean;
+    next_cursor: string | null;
+  };
   agent_brief_path: string;
 }
 
@@ -116,6 +123,35 @@ export interface ResearchSyncResult {
   items_skipped: number;
   failures: Array<{ author_id: string; error: string }>;
   captured_at: string;
+}
+
+export type ResearchQuickAddKind = "author" | "reel";
+
+export interface ResearchQuickAddResult {
+  kind: ResearchQuickAddKind;
+  created: boolean;
+  author_created: boolean;
+  credits_used: number;
+  author: ResearchAuthor;
+  reel: ResearchReel | null;
+}
+
+export interface ResearchMediaStatus {
+  cached: boolean;
+  downloaded: boolean;
+  credits_used: number;
+  size_bytes: number;
+  media_url: string | null;
+}
+
+export interface ResearchMediaCacheSummary {
+  file_count: number;
+  size_bytes: number;
+}
+
+export interface ResearchMediaCacheCleared {
+  removed_files: number;
+  removed_bytes: number;
 }
 
 interface ProjectInput {
@@ -189,6 +225,10 @@ function post<T>(url: string, body: unknown): Promise<T> {
   });
 }
 
+function remove<T>(url: string): Promise<T> {
+  return request<T>(url, { method: "DELETE" });
+}
+
 export const researchApi = {
   projects: () => request<ResearchProjectSummary[]>("/api/research/projects"),
   collectorStatus: () => request<ResearchCollectorStatus>("/api/research/collector/status"),
@@ -199,9 +239,12 @@ export const researchApi = {
     window: ResearchWindow,
     sort: ResearchSort,
     authorId: string | null,
+    cursor: string | null = null,
+    limit = 60,
   ) => {
-    const query = new URLSearchParams({ range: window, sort });
+    const query = new URLSearchParams({ range: window, sort, limit: String(limit) });
     if (authorId) query.set("author_id", authorId);
+    if (cursor) query.set("cursor", cursor);
     return request<ResearchProjectFeed>(
       `/api/research/projects/${encodeURIComponent(projectId)}?${query}`,
     );
@@ -220,6 +263,22 @@ export const researchApi = {
     post<ResearchSyncResult>(
       `/api/research/projects/${encodeURIComponent(projectId)}/sync`,
       { author_ids: authorIds },
+    ),
+  quickAdd: (projectId: string, kind: ResearchQuickAddKind, value: string) =>
+    post<ResearchQuickAddResult>(
+      `/api/research/projects/${encodeURIComponent(projectId)}/quick-add`,
+      { kind, value },
+    ),
+  mediaCache: () => request<ResearchMediaCacheSummary>("/api/research/media-cache"),
+  clearMediaCache: () => remove<ResearchMediaCacheCleared>("/api/research/media-cache"),
+  cacheReelMedia: (projectId: string, reelId: string) =>
+    post<ResearchMediaStatus>(
+      `/api/research/projects/${encodeURIComponent(projectId)}/reels/${encodeURIComponent(reelId)}/media`,
+      {},
+    ),
+  deleteReelMedia: (projectId: string, reelId: string) =>
+    remove<{ removed: boolean }>(
+      `/api/research/projects/${encodeURIComponent(projectId)}/reels/${encodeURIComponent(reelId)}/media`,
     ),
   createExperiment: (projectId: string, body: ExperimentInput) =>
     post<ResearchExperiment>(

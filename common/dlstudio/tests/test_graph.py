@@ -112,7 +112,10 @@ def test_color_source_builder():
     g = Graph()
     lbl = color_source(g, "0x0A0E14", 320, 180, 3.0, 30, "bg1")
     assert lbl == "bg1"
-    assert g.render() == "color=c=0x0A0E14:s=320x180:d=3.000:r=30,format=yuv420p[bg1]"
+    assert g.render() == (
+        "color=c=0x0A0E14:s=320x180:d=3.000:r=30,"
+        "settb=expr=AVTB,format=yuv420p[bg1]"
+    )
 
 
 # ─── InputList registry ────────────────────────────────────────────────────
@@ -218,10 +221,10 @@ def test_nine_scenes_eight_xfades_offsets_monotonic():
         assert f"offset={off:.3f}" in s, f"missing offset={off}"
 
 
-def test_zero_crossfade_dur():
+def test_zero_crossfade_dur_uses_concat_hard_cut():
     g = Graph()
     label = build_xfade_chain(g, ["s0", "s1"], [5.0, 4.0], 0.0)
-    assert "duration=0.000" in g.render()
+    assert g.render() == "[s0][s1]concat=n=2:v=1:a=0[xf1]"
     assert label == "xf1"
 
 
@@ -236,4 +239,5 @@ def test_per_boundary_durations_and_transitions():
                       [0.3, 0.0], transitions=["fade", "fadeblack"])
     s = g.render()
     assert "transition=fade:duration=0.300:offset=5.000" in s
-    assert "transition=fadeblack:duration=0.000:offset=9.000" in s
+    assert "[xf1][s2]concat=n=2:v=1:a=0[xf2]" in s
+    assert "duration=0.000" not in s

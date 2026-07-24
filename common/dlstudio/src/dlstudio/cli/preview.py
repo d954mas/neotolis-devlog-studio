@@ -33,6 +33,8 @@ def cmd_preview(args: argparse.Namespace) -> int:
     edit = _load_edit(dotted)
 
     timeline = dl_compile.build_timeline(edit)
+    geometry_report = services.write_geometry_report(timeline)
+    boundary_report = services.write_boundary_report(timeline)
     rc = _iterate_render(
         edit, timeline,
         width_spec=args.width or "540p", quality=args.quality or "draft",
@@ -48,6 +50,8 @@ def cmd_preview(args: argparse.Namespace) -> int:
         output, Path("data/review/keyframes"), count=args.keyframes)
 
     print(f"[dl2] preview: draft   -> {output}")
+    print(f"[dl2] preview: geometry-> {geometry_report}")
+    print(f"[dl2] preview: boundary-> {boundary_report}")
     print(f"[dl2] preview: sheet   -> {sheet}")
     print(f"[dl2] preview: frames  -> {frames[0].parent} ({len(frames)} files)")
     return 0

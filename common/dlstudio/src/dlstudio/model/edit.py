@@ -41,6 +41,12 @@ class Beat(_Model):
     # compile groups words into phrases at pauses/length and render draws
     # them in the bottom safe zone, styled by Design.captions.
     subtitles: bool = False
+    # Optional semantic override for the automatic phrase grouping. Each
+    # inclusive (start, end) tuple addresses the beat transcript exactly like
+    # Chunk.words. Groups must be ordered and non-overlapping; gaps are allowed
+    # so filler/noise may intentionally remain absent from caption text. The
+    # compiler ignores this field unless subtitles=True.
+    caption_groups: list[tuple[int, int]] | None = None
 
 
 class Duck(_Model):

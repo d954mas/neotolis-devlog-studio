@@ -53,6 +53,7 @@ function findByClass(node, className) {
     }
     return null;
   }
+  if (typeof node.type === "function") return findByClass(node.type(node.props || {}), className);
   if (String(node.props?.class ?? "").split(/\s+/).includes(className)) return node;
   return findByClass(node.props?.children, className);
 }
@@ -60,6 +61,7 @@ function findByClass(node, className) {
 test("research card makes adaptation and agent context explicit", async () => {
   const { ReelCard } = await loadComponent();
   const tree = ReelCard({
+    projectId: "gamedev",
     reel: {
       id: "reference-1",
       author_id: "creator-1",
@@ -109,6 +111,7 @@ test("research card makes adaptation and agent context explicit", async () => {
     onAuthor() {},
     async onExperiment() { return true; },
     async onExperimentResult() { return true; },
+    onCacheChange() {},
   });
 
   assert.match(tree.props.class, /mode-adaptation/);
@@ -119,11 +122,13 @@ test("research card makes adaptation and agent context explicit", async () => {
   assert.match(text, /4×/);
   assert.match(text, /updated <1h ago/);
   assert.match(text, /Record our result/);
+  assert.match(text, /Скачать и смотреть/);
 });
 
 test("research card turns a long caption into a scannable headline", async () => {
   const { ReelCard } = await loadComponent();
   const tree = ReelCard({
+    projectId: "gamedev",
     reel: {
       id: "reference-2",
       author_id: "creator-2",
@@ -147,10 +152,13 @@ test("research card turns a long caption into a scannable headline", async () =>
     onAuthor() {},
     async onExperiment() { return true; },
     async onExperimentResult() { return true; },
+    onCacheChange() {},
   });
 
   const title = findByClass(tree, "reel-title");
   assert.equal(textOf(title), "Would you play for 400 real days?");
+  assert.equal(textOf(findByClass(tree, "reel-notes")), "The world changes while you are away.");
   assert.doesNotMatch(textOf(tree), /#gamedev|https:\/\//);
   assert.equal(findByClass(tree, "reel-visual").props["aria-label"], "Open Reel by @gamepitch");
+  assert.equal(findByClass(tree, "reel-metric-overlay").props["aria-label"], "Reel performance");
 });

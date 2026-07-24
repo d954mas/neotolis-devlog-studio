@@ -128,7 +128,16 @@ class ImageShot(_Model):
 
     type: Literal["image"] = "image"
     src: str
+    asset_id: str | None = None
+    editorial_role: Literal[
+        "gameplay",
+        "debug_proof",
+        "presentation",
+        "reference",
+    ] | None = None
     fit: Literal["cover", "contain"] = "cover"
+    anchor_x: float = Field(default=0.5, ge=0.0, le=1.0)
+    anchor_y: float = Field(default=0.5, ge=0.0, le=1.0)
     ken_burns: bool = False
 
 
@@ -137,7 +146,17 @@ class VideoShot(_Model):
 
     type: Literal["video"] = "video"
     src: str
+    asset_id: str | None = None
+    editorial_role: Literal[
+        "gameplay",
+        "debug_proof",
+        "presentation",
+        "reference",
+    ] | None = None
     offset: float = 0.0
+    fit: Literal["cover", "contain"] = "cover"
+    anchor_x: float = Field(default=0.5, ge=0.0, le=1.0)
+    anchor_y: float = Field(default=0.5, ge=0.0, le=1.0)
 
 
 Content = Annotated[
@@ -154,10 +173,19 @@ class Scene(_Model):
 
     kind: Literal["image", "video"]
     src: str
+    asset_id: str | None = None
+    editorial_role: Literal[
+        "gameplay",
+        "debug_proof",
+        "presentation",
+        "reference",
+    ] | None = None
     offset: float = 0.0
     ken_burns: bool = False
     loop: bool = False
     fit: Literal["cover", "contain"] = "cover"
+    anchor_x: float = Field(default=0.5, ge=0.0, le=1.0)
+    anchor_y: float = Field(default=0.5, ge=0.0, le=1.0)
 
 
 class Chunk(_Model):
@@ -167,5 +195,12 @@ class Chunk(_Model):
     decorations: list[Decoration] = Field(default_factory=list)
     anims: list[Anim] = Field(default_factory=list)
     transition: Transition | None = None
+    transition_intent: Literal[
+        "continuous_same_take",
+        "motivated_cut",
+        "before_after",
+        "chapter_boundary",
+        "no_cut",
+    ] | None = None
     pad_before: float = 0.0
     pad_after: float = 0.0

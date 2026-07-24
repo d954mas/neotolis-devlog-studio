@@ -5,6 +5,19 @@
 export type UploadState = "uploading" | "uploaded" | "error";
 export type ProcessState = "idle" | "running" | "done" | "error";
 
+export interface VoiceTakeMetadata {
+  schema: "devlog.voice_take";
+  version: 1;
+  countdown_seconds: number;
+  room_tone_seconds: number;
+  speech_start_seconds: number;
+  stop_requested_seconds: number;
+  post_roll_end_seconds: number;
+  post_roll_target_seconds: number;
+  post_roll_completed: boolean;
+  completed_lead_in: boolean;
+}
+
 export interface SessionTake {
   id: string;
   beatId: string;
@@ -15,6 +28,8 @@ export interface SessionTake {
   uploadState: UploadState;
   uploadError?: string;
   serverPath?: string;
+  metadataPath?: string;
+  recordingMetadata?: VoiceTakeMetadata;
   processState: ProcessState;
   processMessage?: string;
 }

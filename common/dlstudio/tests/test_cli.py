@@ -359,6 +359,7 @@ def test_doctor_missing_pydantic_import_fails(monkeypatch):
 
 def test_main_missing_edit_returns_1_with_pretty_message(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)  # isolated dir, no devlog.toml -> no default_edit
+    monkeypatch.setattr(cli, "_find_workspace_root", lambda *args, **kwargs: None)
     code = cli.main(["check"])
     assert code == 1
     err = capsys.readouterr().err
@@ -368,6 +369,7 @@ def test_main_missing_edit_returns_1_with_pretty_message(tmp_path, monkeypatch, 
 
 def test_main_debug_reraises_cli_error(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "_find_workspace_root", lambda *args, **kwargs: None)
     with pytest.raises(cli.CliError):
         cli.main(["--debug", "check"])
 

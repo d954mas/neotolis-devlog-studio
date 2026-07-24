@@ -249,6 +249,13 @@ def test_root_serves_placeholder_when_no_static(light_client):
     assert "Studio v2" in r.text
 
 
+def test_research_page_serves_the_same_ui_shell(light_client):
+    client, _, _ = light_client
+    r = client.get("/research/")
+    assert r.status_code == 200
+    assert '<base href="/"' in r.text or "Studio v2" in r.text
+
+
 # ─── feedback: read empty, write, deep-merge ─────────────────────────────────
 
 def test_feedback_empty_when_missing(light_client):
@@ -310,6 +317,65 @@ def test_feedback_rejects_too_deep(light_client):
     assert client.post("/api/feedback", json=deep).status_code == 400
 
 
+# ─── single Autopilot checkpoint ───
+
+def _write_checkpoint_inputs(root: Path) -> Path:
+    plan = root / "data" / "plan"
+    assets = root / "data" / "assets"
+    review = root / "data" / "review"
+    plan.mkdir(parents=True, exist_ok=True)
+    assets.mkdir(parents=True, exist_ok=True)
+    review.mkdir(parents=True, exist_ok=True)
+    manifest = plan / "shot_manifest.json"
+    manifest.write_text(json.dumps({"shots": [{
+        "id": "b01_s01", "vo_thesis": "real game proof",
+        "src": "data/footage/game.mp4", "t0": 0, "t1": 3,
+        "approved": False,
+    }]}), encoding="utf-8")
+    (assets / "catalog.json").write_text(json.dumps({"assets": [{
+        "path": "data/footage/game.mp4", "provenance": "game_capture",
+        "source_role": "real_product", "quality_flags": [],
+    }]}), encoding="utf-8")
+    (review / "preflight.json").write_text(json.dumps({
+        "wall_time": {"budget_minutes": 60, "elapsed_minutes": 12},
+        "issues": [],
+    }), encoding="utf-8")
+    return manifest
+
+
+def test_autopilot_checkpoint_get_and_approve_are_production_scoped(light_client):
+    client, root, _ = light_client
+    manifest = _write_checkpoint_inputs(root)
+
+    snapshot = client.get("/api/autopilot/checkpoint")
+    assert snapshot.status_code == 200
+    assert snapshot.json()["rows"][0]["shot"]["provenance"] == "game_capture"
+
+    approved = client.post(
+        "/api/autopilot/checkpoint/approve", json={"approved_by": "author"}
+    )
+    assert approved.status_code == 200
+    assert approved.json()["checkpoint"]["approved_all"] is True
+    assert json.loads(manifest.read_text(encoding="utf-8"))["shots"][0]["approved"] is True
+
+
+def test_autopilot_content_action_records_request_without_mutating_manifest(light_client):
+    client, root, _ = light_client
+    manifest = _write_checkpoint_inputs(root)
+    before = manifest.read_bytes()
+
+    response = client.post("/api/autopilot/checkpoint/request", json={
+        "action": "replace_shot", "shot_id": "b01_s01",
+        "reason": "Use the newer portrait capture", "requested_by": "author",
+    })
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "requested"
+    assert manifest.read_bytes() == before
+    request_file = root / "data" / "plan" / "autopilot_requests.json"
+    assert json.loads(request_file.read_text(encoding="utf-8"))["requests"][0]["action"] == "replace_shot"
+
+
 # ─── takes upload ────────────────────────────────────────────────────────────
 
 def test_takes_upload_saves_file(light_client):
@@ -325,6 +391,52 @@ def test_takes_upload_saves_file(light_client):
     saved = root / rel
     assert saved.is_file()
     assert saved.read_bytes() == b"AUDIO-BYTES"
+
+
+def test_takes_upload_persists_validated_recording_markers(light_client):
+    client, root, _ = light_client
+    metadata = {
+        "schema": "devlog.voice_take",
+        "version": 1,
+        "countdown_seconds": 3,
+        "room_tone_seconds": 2,
+        "speech_start_seconds": 5,
+        "stop_requested_seconds": 12.5,
+        "post_roll_end_seconds": 13.5,
+        "post_roll_target_seconds": 1,
+        "post_roll_completed": True,
+        "completed_lead_in": True,
+    }
+    r = client.post(
+        "/api/takes/b01",
+        files={"file": ("take.webm", b"AUDIO-BYTES", "audio/webm")},
+        data={"metadata": json.dumps(metadata)},
+    )
+    assert r.status_code == 200
+    metadata_path = root / r.json()["metadata_path"]
+    assert json.loads(metadata_path.read_text(encoding="utf-8")) == metadata
+
+
+def test_takes_upload_rejects_unordered_recording_markers(light_client):
+    client, _, _ = light_client
+    metadata = {
+        "schema": "devlog.voice_take",
+        "version": 1,
+        "countdown_seconds": 3,
+        "room_tone_seconds": 2,
+        "speech_start_seconds": 5,
+        "stop_requested_seconds": 12,
+        "post_roll_end_seconds": 11,
+        "post_roll_target_seconds": 1,
+        "post_roll_completed": False,
+        "completed_lead_in": True,
+    }
+    r = client.post(
+        "/api/takes/b01",
+        files={"file": ("take.webm", b"AUDIO-BYTES", "audio/webm")},
+        data={"metadata": json.dumps(metadata)},
+    )
+    assert r.status_code == 400
 
 
 def test_takes_upload_rejects_bad_beat_id(light_client):
@@ -773,6 +885,126 @@ def test_project_hot_reloads_edit_module(light_client):
 
     data = client.get("/api/project").json()
     assert [b["id"] for b in data["beats"]] == ["b01", "b02"]
+
+
+def test_script_approval_is_hash_bound_and_invalidates_after_vo_edit(light_client):
+    client, root, _ = light_client
+    initial = client.get("/api/project").json()
+    assert initial["script_approved"] is False
+    assert len(initial["script_sha256"]) == 64
+
+    approved = client.post("/api/script/approve", json={"approved_by": "author"})
+    assert approved.status_code == 200
+    assert approved.json()["script_approved"] is True
+    assert client.get("/api/project").json()["script_approved"] is True
+    assert (root / "data" / "plan" / "script_approval.json").is_file()
+
+    init_path = root / "edits" / "myedit" / "__init__.py"
+    source = init_path.read_text(encoding="utf-8")
+    init_path.write_text(source.replace("hi there world", "hi changed world"), encoding="utf-8")
+
+    changed = client.get("/api/project").json()
+    assert changed["script_approved"] is False
+    assert changed["script_sha256"] != initial["script_sha256"]
+
+
+def test_project_hot_reloads_filesystem_production(tmp_path, monkeypatch):
+    product = tmp_path / "not_a_trolley_problem"
+    production = product / "reels" / "2026_07_18_reel_01"
+    devlog = product / "devlogs" / "2026_07_17_devlog_01"
+    edit_dir = production / "edit"
+    edit_dir.mkdir(parents=True)
+    (devlog / "edit").mkdir(parents=True)
+    (tmp_path / "devlog.toml").write_text("", encoding="utf-8")
+    (product / "product.toml").write_text(
+        "\n".join(
+            [
+                'id = "not_a_trolley_problem"',
+                'title = "Not a Trolley Problem"',
+                'game_root = "C:/projects/game-67-idle"',
+                "[sources]",
+                'diary = "https://neotolis-diary.dev"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (production / "production.toml").write_text(
+        "\n".join(
+            [
+                'id = "2026_07_18_reel_01"',
+                'kind = "reel"',
+                'date = "2026-07-18"',
+                'orientation = "vertical"',
+                'edit_path = "edit"',
+                'data_root = "data"',
+                'delivery_root = "../../delivery/reels/2026_07_18_reel_01"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (devlog / "production.toml").write_text(
+        "\n".join(
+            [
+                'id = "2026_07_17_devlog_01"',
+                'kind = "devlog"',
+                'date = "2026-07-17"',
+                'orientation = "landscape"',
+                'edit_path = "edit"',
+                'data_root = "data"',
+                'delivery_root = "../../delivery/devlogs/2026_07_17_devlog_01"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    source_v1 = textwrap.dedent(
+        """
+        from dlstudio.model import Design, Edit, Fonts, Palette
+        EDIT = Edit(
+            name="filesystem-v1",
+            design=Design(
+                resolution=(1080, 1920),
+                palette=Palette(tokens={"bg": "#000000", "text": "#ffffff"}),
+                fonts=Fonts(main="data/fonts/main.ttf"),
+            ),
+            beats={}, order=[], output="data/finalize/final.mp4",
+        )
+        """
+    )
+    init_path = edit_dir / "__init__.py"
+    init_path.write_text(source_v1, encoding="utf-8")
+    (devlog / "edit" / "__init__.py").write_text(
+        source_v1.replace("filesystem-v1", "devlog-v1"), encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+
+    with TestClient(create_app(str(production))) as client:
+        project_data = client.get("/api/project").json()
+        assert project_data["edit_name"] == "filesystem-v1"
+        assert project_data["product"] == {
+            "id": "not_a_trolley_problem",
+            "title": "Not a Trolley Problem",
+            "current_production_id": "2026_07_18_reel_01",
+            "productions": [
+                {
+                    "id": "2026_07_17_devlog_01",
+                    "kind": "devlog",
+                    "date": "2026-07-17",
+                    "orientation": "landscape",
+                    "studio_ref": "not_a_trolley_problem:2026_07_17_devlog_01",
+                    "current": False,
+                },
+                {
+                    "id": "2026_07_18_reel_01",
+                    "kind": "reel",
+                    "date": "2026-07-18",
+                    "orientation": "vertical",
+                    "studio_ref": "not_a_trolley_problem:2026_07_18_reel_01",
+                    "current": True,
+                },
+            ],
+        }
+        init_path.write_text(source_v1.replace("filesystem-v1", "filesystem-v2"), encoding="utf-8")
+        assert client.get("/api/project").json()["edit_name"] == "filesystem-v2"
 
 
 # ─── job lifecycle: render-beat ──────────────────────────────────────────────

@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import json
+import math
 import os
 import re
 import shutil
@@ -26,12 +27,13 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from dlstudio.check import run_checks
 from dlstudio.compile import build_timeline
@@ -99,11 +101,45 @@ class BeatInfo(BaseModel):
     rendered: bool
 
 
+class ProductionOverviewInfo(BaseModel):
+    id: str
+    kind: str
+    date: str
+    orientation: str
+    studio_ref: str
+    current: bool
+
+
+class ProductOverviewInfo(BaseModel):
+    id: str
+    title: str
+    current_production_id: str
+    productions: list[ProductionOverviewInfo]
+
+
 class ProjectInfo(BaseModel):
     edit_name: str
     output: str
     design: DesignInfo
     beats: list[BeatInfo]
+    script_sha256: str
+    script_approved: bool
+    product: ProductOverviewInfo | None = None
+
+
+class ScriptApprovalRequest(BaseModel):
+    approved_by: str = "author"
+
+
+class AutopilotApprovalRequest(BaseModel):
+    approved_by: str = Field(default="author", min_length=1, max_length=120)
+
+
+class AutopilotChangeRequest(BaseModel):
+    action: Literal["replace_shot", "request_capture", "change_text"]
+    shot_id: str = Field(min_length=1, max_length=200)
+    reason: str = Field(min_length=1, max_length=4000)
+    requested_by: str = Field(default="author", min_length=1, max_length=120)
 
 
 # ─── small helpers ───────────────────────────────────────────────────────────
@@ -316,9 +352,10 @@ def create_app(edit_module: str) -> FastAPI:
     Loading the edit chdirs the process into the project root (via the shared
     CLI loader); `root` below is that absolute root, used for every file
     operation so the endpoints never depend on cwd staying put."""
-    from dlstudio.cli import load_edit
+    from dlstudio.cli import load_edit, loaded_edit_module_name
 
     edit, root = load_edit(edit_module)
+    edit_module = loaded_edit_module_name(edit_module)
     jobs = JobManager()
     render_lock = threading.Lock()
 
@@ -347,6 +384,11 @@ def create_app(edit_module: str) -> FastAPI:
         itself plus its conventional `.beats` / `.design` submodules (real
         edits compose EDIT from those; the test fixtures inline it in
         __init__)."""
+        from dlstudio.production import production_module_files
+
+        production_files = production_module_files(edit_module)
+        if production_files:
+            return production_files
         files: list[Path] = []
         for name in (edit_module, f"{edit_module}.beats", f"{edit_module}.design"):
             mod = sys.modules.get(name)
@@ -369,6 +411,10 @@ def create_app(edit_module: str) -> FastAPI:
         """Reload `.design`/`.beats` (if imported) then the edit module, in
         that order, so `from .beats import ...` in the edit __init__ rebinds
         the fresh objects. Mirrors legacy `_reload_edit` ordering."""
+        from dlstudio.production import production_module_files, reload_production_edit_module
+
+        if production_module_files(edit_module):
+            return reload_production_edit_module(edit_module).EDIT
         importlib.invalidate_caches()
         for name in (f"{edit_module}.design", f"{edit_module}.beats"):
             if name in sys.modules:
@@ -418,6 +464,33 @@ def create_app(edit_module: str) -> FastAPI:
     def _feedback_path() -> Path:
         return root / "data" / "review" / "feedback.json"
 
+    def _script_text(current_edit) -> str:
+        from dlstudio.services.script_preflight import canonical_script_text
+
+        return canonical_script_text(current_edit)
+
+    def _script_approval_path() -> Path:
+        return root / "data" / "plan" / "script_approval.json"
+
+    def _script_status(current_edit) -> tuple[str, bool]:
+        from dlstudio.services.script_preflight import (
+            script_sha256,
+            verify_script_approval,
+        )
+
+        script = _script_text(current_edit)
+        digest = script_sha256(script)
+        approval = _script_approval_path()
+        if not approval.is_file():
+            return digest, False
+        try:
+            verified = verify_script_approval(
+                script, approval, script_id=current_edit.name
+            )
+        except (OSError, ValueError, json.JSONDecodeError):
+            return digest, False
+        return digest, verified.ok
+
     # ── GET /api/project ─────────────────────────────────────────────────────
     @app.get("/api/project", response_model=ProjectInfo)
     def get_project() -> ProjectInfo:
@@ -441,11 +514,96 @@ def create_app(edit_module: str) -> FastAPI:
                 audio=b.audio, words=b.words,
                 rendered=(root / "data" / "finalize" / f"{bid}.mp4").is_file(),
             ))
+        script_digest, script_approved = _script_status(edit)
+        product_info = None
+        if (root / "production.toml").is_file():
+            from dlstudio.services.product_overview import build_product_overview
+
+            overview = build_product_overview(root)
+            product_info = ProductOverviewInfo(
+                id=overview.product_id,
+                title=overview.title,
+                current_production_id=overview.current_production_id,
+                productions=[
+                    ProductionOverviewInfo(
+                        id=item.id,
+                        kind=item.kind,
+                        date=item.date,
+                        orientation=item.orientation,
+                        studio_ref=item.studio_ref,
+                        current=item.current,
+                    )
+                    for item in overview.productions
+                ],
+            )
         return ProjectInfo(
             edit_name=edit.name, output=edit.output,
             design=DesignInfo(resolution=edit.design.resolution, fps=edit.design.fps),
             beats=beats,
+            script_sha256=script_digest,
+            script_approved=script_approved,
+            product=product_info,
         )
+
+    @app.post("/api/script/approve")
+    def approve_current_script(body: ScriptApprovalRequest) -> JSONResponse:
+        from dlstudio.services.script_preflight import approve_script
+
+        edit = _current_edit()
+        approved_by = body.approved_by.strip()
+        if not approved_by:
+            raise HTTPException(status_code=400, detail="approved_by must be non-empty")
+        script = _script_text(edit)
+        approval = approve_script(
+            script,
+            script_id=edit.name,
+            approved_by=approved_by,
+            approved_at=datetime.now().isoformat(timespec="seconds"),
+        )
+        path = _script_approval_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(approval.to_dict(), ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return JSONResponse({
+            "script_sha256": approval.script_sha256,
+            "script_approved": True,
+            "approved_by": approved_by,
+        })
+
+    # ── Autopilot single checkpoint ──
+    @app.get("/api/autopilot/checkpoint")
+    def get_autopilot_checkpoint() -> JSONResponse:
+        from dlstudio.services.autopilot_checkpoint import load_checkpoint
+
+        return JSONResponse(load_checkpoint(root))
+
+    @app.post("/api/autopilot/checkpoint/approve")
+    def approve_autopilot_checkpoint(body: AutopilotApprovalRequest) -> JSONResponse:
+        from dlstudio.services.autopilot_checkpoint import approve_all
+
+        try:
+            return JSONResponse(approve_all(root, approved_by=body.approved_by))
+        except ValueError as exc:
+            # Approval with blockers is a state conflict, not an automatic fix.
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/api/autopilot/checkpoint/request")
+    def request_autopilot_change(body: AutopilotChangeRequest) -> JSONResponse:
+        from dlstudio.services.autopilot_checkpoint import request_change
+
+        try:
+            result = request_change(
+                root,
+                action=body.action,
+                shot_id=body.shot_id,
+                reason=body.reason,
+                requested_by=body.requested_by,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return JSONResponse(result)
 
     # ── GET /api/ir ──────────────────────────────────────────────────────────
     @app.get("/api/ir")
@@ -503,10 +661,64 @@ def create_app(edit_module: str) -> FastAPI:
 
     # ── POST /api/takes/{beat_id} ────────────────────────────────────────────
     @app.post("/api/takes/{beat_id}")
-    async def upload_take(beat_id: str, file: UploadFile = File(...)) -> dict:
+    async def upload_take(
+        beat_id: str,
+        file: UploadFile = File(...),
+        metadata: str | None = Form(default=None),
+    ) -> dict:
         bid = safe_component(beat_id)
         if bid is None:
             raise HTTPException(status_code=400, detail="bad beat id")
+        metadata_payload: dict | None = None
+        if metadata is not None:
+            if len(metadata.encode("utf-8")) > 16 * 1024:
+                raise HTTPException(status_code=413, detail="take metadata is too large")
+            try:
+                parsed = json.loads(metadata)
+            except json.JSONDecodeError as exc:
+                raise HTTPException(status_code=400, detail="invalid take metadata JSON") from exc
+            if not isinstance(parsed, dict):
+                raise HTTPException(status_code=400, detail="take metadata must be an object")
+            if (
+                parsed.get("schema") != "devlog.voice_take"
+                or parsed.get("version") != 1
+            ):
+                raise HTTPException(status_code=400, detail="unsupported take metadata schema")
+            numeric_fields = (
+                "countdown_seconds",
+                "room_tone_seconds",
+                "speech_start_seconds",
+                "stop_requested_seconds",
+                "post_roll_end_seconds",
+                "post_roll_target_seconds",
+            )
+            if any(
+                not isinstance(parsed.get(name), (int, float))
+                or isinstance(parsed.get(name), bool)
+                or not math.isfinite(float(parsed[name]))
+                or float(parsed[name]) < 0
+                for name in numeric_fields
+            ):
+                raise HTTPException(status_code=400, detail="invalid take metadata timings")
+            if not all(
+                isinstance(parsed.get(name), bool)
+                for name in ("post_roll_completed", "completed_lead_in")
+            ):
+                raise HTTPException(status_code=400, detail="invalid take metadata markers")
+            expected_speech_start = (
+                float(parsed["countdown_seconds"])
+                + float(parsed["room_tone_seconds"])
+            )
+            if abs(float(parsed["speech_start_seconds"]) - expected_speech_start) > 0.01:
+                raise HTTPException(
+                    status_code=400,
+                    detail="take speech marker does not match countdown + room tone",
+                )
+            if float(parsed["post_roll_end_seconds"]) < float(
+                parsed["stop_requested_seconds"]
+            ):
+                raise HTTPException(status_code=400, detail="take metadata timings are unordered")
+            metadata_payload = parsed
         ext = _safe_ext(file.filename)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         rec_dir = root / "data" / "recordings"
@@ -533,7 +745,15 @@ def create_app(edit_module: str) -> FastAPI:
         if total == 0:
             dest.unlink(missing_ok=True)
             raise HTTPException(status_code=400, detail="empty upload")
-        return {"path": _rel(root, dest)}
+        result = {"path": _rel(root, dest)}
+        if metadata_payload is not None:
+            metadata_dest = dest.with_suffix(dest.suffix + ".recording.json")
+            metadata_dest.write_text(
+                json.dumps(metadata_payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            result["metadata_path"] = _rel(root, metadata_dest)
+        return result
 
     # ── POST /api/actions/process-take ───────────────────────────────────────
     @app.post("/api/actions/process-take")

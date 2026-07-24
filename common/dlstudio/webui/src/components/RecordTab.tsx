@@ -4,9 +4,10 @@ import { api, pollJob } from "../api/client";
 import { MicRecorder, fileExtForMime } from "../lib/recorder";
 import type { MeterLevels } from "../lib/recorder";
 import { newTakeId } from "../lib/takes";
-import type { SessionTake } from "../lib/takes";
+import type { SessionTake, VoiceTakeMetadata } from "../lib/takes";
 import { fmtClock, fmtBytes } from "../lib/format";
 import { LevelMeter } from "./LevelMeter";
+import { RecordingPrompter } from "./RecordingPrompter";
 
 interface Props {
   beat: ProjectBeat;
@@ -14,7 +15,12 @@ interface Props {
   addTake: (t: SessionTake) => void;
   updateTake: (id: string, patch: Partial<SessionTake>) => void;
   onAfterProcess: () => void;
+  scriptApproved?: boolean;
 }
+
+const COUNTDOWN_SECONDS = 3;
+const ROOM_TONE_SECONDS = 2;
+const POST_ROLL_SECONDS = 1;
 
 export function RecordTab({
   beat,
@@ -22,11 +28,15 @@ export function RecordTab({
   addTake,
   updateTake,
   onAfterProcess,
+  scriptApproved = true,
 }: Props) {
   const recRef = useRef<MicRecorder>(new MicRecorder());
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const timerRef = useRef<number>(0);
+  const postRollTimerRef = useRef<number>(0);
+  const elapsedRef = useRef(0);
+  const stopRequestedRef = useRef<number | null>(null);
   const meterGate = useRef(0);
   // The beat a take belongs to is pinned when recording STARTS (defect 0.7):
   // `beat` is a live prop — reading it at stop/upload time attributed the
@@ -39,12 +49,14 @@ export function RecordTab({
   const [micStatus, setMicStatus] = useState("mic not enabled");
   const [micReady, setMicReady] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [postRolling, setPostRolling] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [levels, setLevels] = useState<MeterLevels | null>(null);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedMic, setSelectedMic] = useState("");
   const [selectedCam, setSelectedCam] = useState("");
   const [cameraOn, setCameraOn] = useState(false);
+  const [promptText, setPromptText] = useState(beat.vo || "");
 
   // Stop the current take (if any) and save it to the beat captured at
   // record start. Idempotent — the ref hand-off makes exactly one caller
@@ -55,11 +67,29 @@ export function RecordTab({
     const beatId = takeBeatIdRef.current;
     takeBeatIdRef.current = null;
     if (!beatId || !rec.recording) return;
+    if (postRollTimerRef.current) clearTimeout(postRollTimerRef.current);
+    postRollTimerRef.current = 0;
+    const stoppedAt = elapsedRef.current;
+    const stopRequestedAt = stopRequestedRef.current ?? stoppedAt;
+    const recordingMetadata: VoiceTakeMetadata = {
+      schema: "devlog.voice_take",
+      version: 1,
+      countdown_seconds: COUNTDOWN_SECONDS,
+      room_tone_seconds: ROOM_TONE_SECONDS,
+      speech_start_seconds: COUNTDOWN_SECONDS + ROOM_TONE_SECONDS,
+      stop_requested_seconds: stopRequestedAt,
+      post_roll_end_seconds: stoppedAt,
+      post_roll_target_seconds: POST_ROLL_SECONDS,
+      post_roll_completed: stoppedAt - stopRequestedAt >= POST_ROLL_SECONDS - 0.1,
+      completed_lead_in: stopRequestedAt >= COUNTDOWN_SECONDS + ROOM_TONE_SECONDS,
+    };
+    stopRequestedRef.current = null;
     setRecording(false);
+    setPostRolling(false);
     stopTimer();
     try {
       const blob = await rec.stopTake();
-      await handleBlob(blob, beatId);
+      await handleBlob(blob, beatId, recordingMetadata);
     } catch (e) {
       setMicStatus(`stop failed: ${(e as Error).message}`);
     }
@@ -74,6 +104,7 @@ export function RecordTab({
     const rec = recRef.current;
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
+      if (postRollTimerRef.current) clearTimeout(postRollTimerRef.current);
       const salvage = rec.recording
         ? stopAndSaveRef.current()
         : Promise.resolve();
@@ -88,13 +119,14 @@ export function RecordTab({
   // (defect 0.7 — switching required a stop; this is that stop, without
   // losing the take), and in-flight process-take polls are aborted. (L2)
   useEffect(() => {
+    setPromptText(beat.vo || "");
     const aborters = pollAborters.current;
     return () => {
       void stopAndSaveRef.current();
       aborters.forEach((a) => a.abort());
       aborters.clear();
     };
-  }, [beat.id]);
+  }, [beat.id, beat.vo]);
 
   async function refreshDevices() {
     try {
@@ -132,9 +164,12 @@ export function RecordTab({
 
   function startTimer() {
     const start = Date.now();
+    elapsedRef.current = 0;
     setElapsed(0);
     timerRef.current = window.setInterval(() => {
-      setElapsed((Date.now() - start) / 1000);
+      const current = (Date.now() - start) / 1000;
+      elapsedRef.current = current;
+      setElapsed(current);
     }, 100);
   }
   function stopTimer() {
@@ -149,16 +184,32 @@ export function RecordTab({
       if (!recRef.current.ready) return;
     }
     if (recording) {
-      await stopAndSave();
+      if (postRolling) return;
+      stopRequestedRef.current = elapsedRef.current;
+      setPostRolling(true);
+      postRollTimerRef.current = window.setTimeout(() => {
+        elapsedRef.current = Math.max(
+          elapsedRef.current,
+          (stopRequestedRef.current ?? 0) + POST_ROLL_SECONDS,
+        );
+        void stopAndSaveRef.current();
+      }, POST_ROLL_SECONDS * 1000);
     } else {
+      setPromptText(beat.vo || "");
       recRef.current.beginTake();
       takeBeatIdRef.current = beat.id; // pin the take's beat at START (0.7)
+      stopRequestedRef.current = null;
+      setPostRolling(false);
       setRecording(true);
       startTimer();
     }
   }
 
-  async function handleBlob(blob: Blob, beatId: string) {
+  async function handleBlob(
+    blob: Blob,
+    beatId: string,
+    recordingMetadata: VoiceTakeMetadata,
+  ) {
     // `beatId` is the beat captured at record start — NEVER the live
     // `beat.id` prop, which may have changed mid-take (defect 0.7).
     const ext = fileExtForMime(recRef.current.mimeType);
@@ -174,11 +225,16 @@ export function RecordTab({
       createdAt: Date.now(),
       uploadState: "uploading",
       processState: "idle",
+      recordingMetadata,
     };
     addTake(take);
     try {
-      const res = await api.uploadTake(beatId, blob, filename);
-      updateTake(id, { uploadState: "uploaded", serverPath: res.path });
+      const res = await api.uploadTake(beatId, blob, filename, recordingMetadata);
+      updateTake(id, {
+        uploadState: "uploaded",
+        serverPath: res.path,
+        metadataPath: res.metadata_path,
+      });
     } catch (e) {
       updateTake(id, {
         uploadState: "error",
@@ -258,9 +314,14 @@ export function RecordTab({
       <div class="record-grid">
         <div class="record-main">
           {beat.stage && <div class="stage-note">{beat.stage}</div>}
-          <div class="vo-text" style={{ fontSize: "20px" }}>
-            {beat.vo || "(no VO text)"}
-          </div>
+          <RecordingPrompter
+            text={recording ? promptText : beat.vo || ""}
+            elapsed={elapsed}
+            recording={recording}
+            countdownSeconds={COUNTDOWN_SECONDS}
+            roomToneSeconds={ROOM_TONE_SECONDS}
+            postRolling={postRolling}
+          />
 
           <div class="device-row">
             <select
@@ -309,6 +370,11 @@ export function RecordTab({
           )}
 
           <div class="rec-controls">
+            {!scriptApproved && !recording && (
+              <span class="approval-warning">
+                Approve the current script before recording.
+              </span>
+            )}
             {!micReady && (
               <button class="btn secondary" onClick={enableMic}>
                 🎙 Enable mic
@@ -317,8 +383,13 @@ export function RecordTab({
             <button
               class={"btn record" + (recording ? " recording" : "")}
               onClick={toggleRecord}
+              disabled={postRolling || (!scriptApproved && !recording)}
             >
-              {recording ? "■ Stop & save" : "● Record"}
+              {postRolling
+                ? "… Saving post-roll"
+                : recording
+                  ? "■ Stop & save"
+                  : "● Record"}
             </button>
             {!cameraOn ? (
               <button class="btn secondary" onClick={enableCamera}>
@@ -359,6 +430,14 @@ export function RecordTab({
                         ? `upload failed: ${t.uploadError}`
                         : "uploaded"}
                   </div>
+                  {t.recordingMetadata && (
+                    !t.recordingMetadata.completed_lead_in
+                    || !t.recordingMetadata.post_roll_completed
+                  ) && (
+                    <div class="approval-warning">
+                      Incomplete clean handles · prefer recapture or guarded trim
+                    </div>
+                  )}
                   <audio controls preload="none" src={t.url} />
                   <div class="take-actions">
                     <button

@@ -1,0 +1,7 @@
+interface:
+  display_name: "Devlog Record Media"
+  short_description: "Record and validate clean gameplay and VO"
+  default_prompt: "Use $devlog-record-media to record and validate clean gameplay or voice media for a devlog."
+
+policy:
+  allow_implicit_invocation: true

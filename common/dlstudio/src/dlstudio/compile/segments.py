@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from dlstudio.ir import CheckIssue, IRSegment, WordSpan
+from dlstudio.ir import CheckIssue, IRSegment, IRSegmentGeometry, WordSpan
 from dlstudio.model import Chunk, Design, Scene
 
 from .roles import BgSpec, content_role
@@ -142,8 +142,11 @@ def _clamp_idx(idx: int, n: int) -> int:
 # ─── Background segments ────────────────────────────────────────────────────
 
 def _bg_from_scene(scene: Scene) -> _Bg:
-    return _Bg(kind=scene.kind, src=scene.src, offset=scene.offset,
-               ken_burns=scene.ken_burns, loop=scene.loop, fit=scene.fit)
+    return _Bg(kind=scene.kind, src=scene.src,
+               asset_id=scene.asset_id, editorial_role=scene.editorial_role,
+               offset=scene.offset,
+               ken_burns=scene.ken_burns, loop=scene.loop, fit=scene.fit,
+               anchor_x=scene.anchor_x, anchor_y=scene.anchor_y)
 
 
 def _content_bg(chunk: Chunk) -> _Bg | None:
@@ -180,6 +183,30 @@ def resolve_backgrounds(
             current = _bg_from_scene(ch.scene)      # switch running scene
         out.append(current)
     return out
+
+
+def _resolve_geometry(
+    bg: _Bg,
+    design: Design,
+    probe: object | None,
+) -> IRSegmentGeometry:
+    """Resolve fit/anchor into deterministic integer pixel geometry.
+
+    Missing probe dimensions remain explicit instead of being guessed.  The
+    report/check layer can flag that unresolved transform while old probe=False
+    unit paths remain compile-compatible.
+    """
+    source_width = getattr(probe, "width", None)
+    source_height = getattr(probe, "height", None)
+    return IRSegmentGeometry.resolve(
+        fit=bg.fit,
+        anchor_x=bg.anchor_x,
+        anchor_y=bg.anchor_y,
+        source_width=source_width,
+        source_height=source_height,
+        output_width=design.resolution[0],
+        output_height=design.resolution[1],
+    )
 
 
 def build_segments(
@@ -231,7 +258,16 @@ def build_segments(
         wt0, wt1 = windows[ci]
         if bg is None:
             continue
-        if runs and runs[-1].bg.src == bg.src:
+        if (
+            runs
+            and runs[-1].bg.src == bg.src
+            and runs[-1].bg.asset_id == bg.asset_id
+            and runs[-1].bg.editorial_role == bg.editorial_role
+            and runs[-1].bg.fit == bg.fit
+            and runs[-1].bg.anchor_x == bg.anchor_x
+            and runs[-1].bg.anchor_y == bg.anchor_y
+            and chunks[ci].transition_intent is None
+        ):
             runs[-1].t1 = wt1                       # extend; first spec wins
         else:
             runs.append(_Run(bg=bg, t0=wt0, t1=wt1, open_chunk=ci))
@@ -239,14 +275,14 @@ def build_segments(
     segments: list[IRSegment] = []
     for ri, run in enumerate(runs):
         bg = run.bg
+        source_probe = assets.get(bg.src)
         seg_t0 = _round(run.t0)
         seg_t1 = _round(duration if ri == len(runs) - 1 else run.t1)
         seg_dur = max(0.0, seg_t1 - seg_t0)
         offset = bg.offset
 
         if bg.kind == "video":
-            probe = assets.get(bg.src)
-            src_dur = probe.duration if probe is not None else None
+            src_dur = source_probe.duration if source_probe is not None else None
             if src_dur is not None and offset >= src_dur - _EPS:
                 new_offset = _round(max(0.0, src_dur - seg_dur))
                 msg = (f"scene offset {offset:.2f}s is at/past source "
@@ -265,9 +301,13 @@ def build_segments(
                 kind="fade", dur=design.crossfade_dur)
 
         segments.append(IRSegment(
-            kind=bg.kind, src=bg.src, offset=_round(offset),
+            kind=bg.kind, src=bg.src,
+            asset_id=bg.asset_id, editorial_role=bg.editorial_role,
+            offset=_round(offset),
             t0=seg_t0, t1=seg_t1,
             ken_burns=bg.ken_burns, loop=bg.loop, fit=bg.fit,
+            geometry=_resolve_geometry(bg, design, source_probe),
+            transition_intent=chunks[run.open_chunk].transition_intent,
             xfade=xfade,
         ))
     return segments, warnings, diagnostics

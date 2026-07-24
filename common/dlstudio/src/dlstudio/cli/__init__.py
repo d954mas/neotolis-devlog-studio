@@ -49,6 +49,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import tomllib
 import uuid
 from dataclasses import dataclass
@@ -57,9 +58,14 @@ from pathlib import Path
 from dlstudio.ir import IRBeat
 from dlstudio.model import Design, Edit
 
+from . import autopilot as dl_autopilot
+from . import delivery as dl_delivery
 from . import genhtml as dl_genhtml
+from . import migration as dl_migration
 from . import newvideo as dl_newvideo
 from . import preview as dl_preview
+from . import product as dl_product
+from . import telemetry as dl_telemetry
 from . import verify as dl_verify
 
 CONFIG_NAME = "devlog.toml"
@@ -157,18 +163,43 @@ def _project_root_for_module(module_file: Path, workspace_root: Path | None) -> 
     return module_dir.parent.parent
 
 
+_LOADED_EDIT_MODULES: dict[str, str] = {}
+
+
+def loaded_edit_module_name(edit_ref: str) -> str:
+    """Return the actual module name used for a previously loaded edit ref."""
+    return _LOADED_EDIT_MODULES.get(edit_ref, edit_ref)
+
+
 def load_edit(dotted: str) -> tuple[Edit, Path]:
-    """Import `dotted`, read its EDIT attribute, validate it, find the
+    """Import a dotted module or filesystem production, read its EDIT, find the
     project root (mirrors legacy loader semantics), and os.chdir there so
     beats.py paths stay relative. Returns (edit, project_root).
 
     Shared by the CLI handlers (via `_load_edit`) and the API app factory
     (`dlstudio.api.create_app`), which also needs the resolved project root
     for its file-serving/recording endpoints."""
+    from dlstudio.production import (
+        ProductionError,
+        is_filesystem_edit_ref,
+        load_production_edit_module,
+    )
+
+    workspace_root = _find_workspace_root()
+    production_root: Path | None = None
+    filesystem_ref = is_filesystem_edit_ref(dotted)
     try:
-        mod = importlib.import_module(dotted)
-    except ImportError as e:
-        raise CliError(f"cannot import edit module {dotted!r}: {e}") from e
+        if filesystem_ref:
+            mod, manifest, module_name = load_production_edit_module(
+                dotted, workspace_root=workspace_root, force_reload=True
+            )
+            production_root = manifest.root
+        else:
+            mod = importlib.import_module(dotted)
+            module_name = dotted
+    except (ImportError, ProductionError) as e:
+        prefix = "cannot load production edit" if filesystem_ref else "cannot import edit module"
+        raise CliError(f"{prefix} {dotted!r}: {e}") from e
     if not hasattr(mod, "EDIT"):
         raise CliError(
             f"module {dotted!r} has no EDIT object — expected `EDIT = Edit(...)`"
@@ -176,11 +207,35 @@ def load_edit(dotted: str) -> tuple[Edit, Path]:
     edit = mod.EDIT
     if not isinstance(edit, Edit):
         raise CliError(f"{dotted}.EDIT is a {type(edit).__name__}, not dlstudio.model.Edit")
+    if production_root is not None:
+        output = Path(edit.output)
+        resolved_output = (production_root / output).resolve() if not output.is_absolute() else output.resolve()
+        try:
+            resolved_output.relative_to(manifest.finalize_dir)
+        except ValueError as exc:
+            raise CliError(
+                f"production edit output must stay inside data/finalize: {edit.output!r}"
+            ) from exc
+        for beat_id, beat in edit.beats.items():
+            for label, declared in (("audio", beat.audio), ("words", beat.words)):
+                value = Path(declared)
+                resolved = (
+                    (production_root / value).resolve()
+                    if not value.is_absolute()
+                    else value.resolve()
+                )
+                try:
+                    resolved.relative_to(manifest.data_dir)
+                except ValueError as exc:
+                    raise CliError(
+                        f"production beat {beat_id!r} {label} must stay inside "
+                        f"data/: {declared!r}"
+                    ) from exc
     module_file = getattr(mod, "__file__", None)
     if not module_file:
         raise CliError(f"module {dotted!r} has no __file__ (namespace package?)")
-    workspace_root = _find_workspace_root()
-    project_root = _project_root_for_module(Path(module_file), workspace_root)
+    project_root = production_root or _project_root_for_module(Path(module_file), workspace_root)
+    _LOADED_EDIT_MODULES[dotted] = module_name
     os.chdir(project_root)
     print(f"[dl2] cwd -> {project_root}")
     return edit, project_root
@@ -591,6 +646,7 @@ def cmd_final(args: argparse.Namespace) -> int:
     """Shipping render: same machinery as `render`, but defaults come from the
     workspace `[v2.final]` table (width/quality) when present, else 1080p/upload.
     Explicit --width/--quality still win."""
+    started = time.perf_counter_ns()
     workspace_root = _find_workspace_root()
     v2_config = _load_v2_config(workspace_root)
     final_cfg = _load_v2_final_config(workspace_root)
@@ -602,11 +658,19 @@ def cmd_final(args: argparse.Namespace) -> int:
     timeline = dl_compile.build_timeline(edit)
     width_spec = args.width or final_cfg.get("width") or "1080p"
     quality = args.quality or final_cfg.get("quality") or "upload"
-    return _iterate_render(
+    result = _iterate_render(
         edit, timeline,
         width_spec=width_spec, quality=quality,
         gpu=args.gpu, no_cache=args.no_cache, stale=args.stale, jobs=args.jobs,
     )
+    if result == 0:
+        from dlstudio.cli.telemetry import record_automatic_stage
+
+        record_automatic_stage(
+            Path.cwd(), stage="final_render", agent_role="renderer",
+            started_ns=started, artifact_paths=((Path.cwd() / edit.output).resolve(),),
+        )
+    return result
 
 
 def _format_beats_table(rows: list[tuple[str, float, int, bool]]) -> str:
@@ -946,6 +1010,7 @@ def cmd_publish(args: argparse.Namespace) -> int:
     placeholders + chapters derived from the compiled Timeline's beat
     placements + beat titles). See services.publish.generate_youtube_package
     for the section shape; this handler only wires CLI args through to it."""
+    started = time.perf_counter_ns()
     v2_config = _load_v2_config(_find_workspace_root())
     dotted = _resolve_edit_arg(args.edit, v2_config)
     edit = _load_edit(dotted)
@@ -957,6 +1022,12 @@ def cmd_publish(args: argparse.Namespace) -> int:
     out_path = Path(args.out) if args.out else Path("data/publish/youtube_package.md")
     result = services.generate_youtube_package(
         edit, out_path=out_path, chapters_from_timeline=timeline,
+    )
+    from dlstudio.cli.telemetry import record_automatic_stage
+
+    record_automatic_stage(
+        Path.cwd(), stage="publish", agent_role="packager", started_ns=started,
+        artifact_paths=(result,),
     )
     print(f"[dl2] youtube package -> {result}")
     return 0
@@ -1135,6 +1206,11 @@ def _build_parser() -> argparse.ArgumentParser:
     dl_genhtml.add_subparser(sub)
     dl_newvideo.add_subparser(sub)
     dl_preview.add_subparser(sub)
+    dl_product.add_subparsers(sub)
+    dl_migration.add_subparser(sub)
+    dl_autopilot.add_subparsers(sub)
+    dl_telemetry.add_subparser(sub)
+    dl_delivery.add_subparser(sub)
     dl_verify.add_subparser(sub)
 
     return parser

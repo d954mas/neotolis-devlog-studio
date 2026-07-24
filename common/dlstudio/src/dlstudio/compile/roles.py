@@ -39,10 +39,14 @@ class BgSpec:
 
     kind: str          # "image" | "video"
     src: str
+    asset_id: str | None
+    editorial_role: str | None
     offset: float
     ken_burns: bool
     loop: bool
     fit: str
+    anchor_x: float
+    anchor_y: float
 
 
 @dataclass(frozen=True)
@@ -79,13 +83,19 @@ register_content(Overlay, ContentRole(role="overlay"))
 register_content(ImageShot, ContentRole(
     role="segment",
     referenced_paths=lambda c: [(c.src, "image")],
-    background=lambda c: BgSpec(kind="image", src=c.src, offset=0.0,
-                                ken_burns=c.ken_burns, loop=False, fit=c.fit),
+    background=lambda c: BgSpec(kind="image", src=c.src,
+                                asset_id=c.asset_id,
+                                editorial_role=c.editorial_role, offset=0.0,
+                                ken_burns=c.ken_burns, loop=False, fit=c.fit,
+                                anchor_x=c.anchor_x, anchor_y=c.anchor_y),
 ))
 
 register_content(VideoShot, ContentRole(
     role="segment",
     referenced_paths=lambda c: [(c.src, "video")],
-    background=lambda c: BgSpec(kind="video", src=c.src, offset=c.offset,
-                                ken_burns=False, loop=False, fit="cover"),
+    background=lambda c: BgSpec(kind="video", src=c.src,
+                                asset_id=c.asset_id,
+                                editorial_role=c.editorial_role, offset=c.offset,
+                                ken_burns=False, loop=False, fit=c.fit,
+                                anchor_x=c.anchor_x, anchor_y=c.anchor_y),
 ))

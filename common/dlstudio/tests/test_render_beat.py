@@ -17,6 +17,7 @@ from dlstudio.ir import (
     IRBeat,
     IRMix,
     IROverlayItem,
+    IRSegmentGeometry,
     IRSegment,
     Timeline,
     WordSpan,
@@ -78,6 +79,77 @@ def _fake_raster(chunk, design, out_path):
         d.rectangle([10, 10, 70, 50], fill=(0, 255, 0, 255))
     img.save(out_path)
     return out_path
+
+
+def test_normalize_segment_uses_explicit_ir_crop_coordinates():
+    design = Design(
+        resolution=(100, 100), fps=24,
+        palette=Palette(tokens={"bg": "#000000", "text": "#ffffff"}),
+        fonts=Fonts(main="none.ttf"),
+    )
+    segment = IRSegment(
+        kind="video",
+        src="wide.mp4",
+        offset=0.0,
+        t0=0.0,
+        t1=2.0,
+        fit="cover",
+        geometry=IRSegmentGeometry(
+            fit="cover",
+            anchor_x=0.5,
+            anchor_y=0.5,
+            source_width=200,
+            source_height=100,
+            scaled_width=200,
+            scaled_height=100,
+            output_width=100,
+            output_height=100,
+            crop_x=50,
+            crop_y=0,
+            crop_width=100,
+            crop_height=100,
+        ),
+    )
+
+    chain = beat_mod._normalize_segment(
+        0, segment, 2.0, 0.0, design, "0x000000", "explicit",
+    ).render()
+
+    assert "scale=200:100" in chain
+    assert "crop=100:100:50:0" in chain
+
+
+def test_normalize_segment_retargets_ir_geometry_for_draft_profile():
+    design = Design(
+        resolution=(100, 100), fps=24,
+        palette=Palette(tokens={"bg": "#000000", "text": "#ffffff"}),
+        fonts=Fonts(main="none.ttf"),
+    )
+    delivery_geometry = IRSegmentGeometry.resolve(
+        fit="cover",
+        anchor_x=0.5,
+        anchor_y=0.5,
+        source_width=200,
+        source_height=100,
+        output_width=200,
+        output_height=200,
+    )
+    segment = IRSegment(
+        kind="video",
+        src="wide.mp4",
+        offset=0.0,
+        t0=0.0,
+        t1=2.0,
+        fit="cover",
+        geometry=delivery_geometry,
+    )
+
+    chain = beat_mod._normalize_segment(
+        0, segment, 2.0, 0.0, design, "0x000000", "draft",
+    ).render()
+
+    assert "scale=200:100" in chain
+    assert "crop=100:100:50:0" in chain
 
 
 def test_render_beat_two_segments_with_overlays(tmp_path, monkeypatch):
@@ -146,6 +218,145 @@ def test_render_beat_two_segments_with_overlays(tmp_path, monkeypatch):
     assert sum(_box_mean(f2, 160, 90)) / 3 > 140            # white centre (A)
     g = _box_mean(f2, 40, 30)                               # top-left corner
     assert g[1] > 110 and g[1] > g[0] and g[1] > g[2]       # green block (B)
+
+
+def test_ken_burns_changes_every_draft_frame(tmp_path):
+    """A slow Ken Burns zoom must not hold an integer scale for many frames.
+
+    This exercises the exact normalize chain before lossy encoding, where the
+    old ``scale=iw*(1+...)`` implementation repeated raw frames at 304x540.
+    """
+    design = Design(
+        resolution=(304, 540), fps=24,
+        palette=Palette(tokens={"bg": "#000000", "text": "#ffffff"}),
+        fonts=Fonts(main="none.ttf"),
+    )
+    source = tmp_path / "portrait-grid.png"
+    image = Image.new("RGB", (608, 1080), (12, 18, 28))
+    draw = ImageDraw.Draw(image)
+    for x in range(0, image.width, 12):
+        draw.line((x, 0, x, image.height), fill=(220, 80, 40), width=3)
+    for y in range(0, image.height, 12):
+        draw.line((0, y, image.width, y), fill=(40, 160, 230), width=3)
+    image.save(source)
+
+    duration = 3.0
+    segment = IRSegment(
+        kind="image", src=str(source), offset=0.0,
+        t0=0.0, t1=duration, ken_burns=True,
+    )
+    chain = beat_mod._normalize_segment(
+        0, segment, duration, 0.0, design, "0x000000", "smooth",
+    ).render()
+    result = subprocess.run(
+        [
+            "ffmpeg", "-v", "error", "-loop", "1", "-i", str(source),
+            "-filter_complex", chain, "-map", "[smooth]",
+            "-frames:v", str(round(duration * design.fps)),
+            "-f", "framemd5", "-",
+        ],
+        check=True, capture_output=True, text=True,
+    )
+    hashes = [
+        line.rsplit(",", 1)[-1].strip()
+        for line in result.stdout.splitlines()
+        if line.startswith("0,")
+    ]
+
+    assert len(hashes) == round(duration * design.fps)
+    assert all(left != right for left, right in zip(hashes, hashes[1:]))
+
+
+def test_render_beat_hard_cuts_preserve_all_segment_video(tmp_path):
+    """A zero-duration scene transition is a concat cut, not xfade=dur=0.
+
+    FFmpeg's xfade filter treats ``duration=0`` as a degenerate transition
+    and emits roughly only its second input.  The MP4 container can still
+    have the expected duration because the VO stream is intact, hiding the
+    truncated video track unless VQ-SYNC checks streams separately.
+    """
+    design = _design()
+    dur = 3.0
+    audio = tmp_path / "vo.wav"
+    _make_wav(audio, dur)
+
+    images = []
+    for i, color in enumerate(((120, 10, 10), (10, 120, 10), (10, 10, 120))):
+        image = tmp_path / f"seg{i}.png"
+        _solid_png(image, color)
+        images.append(image)
+
+    beat = IRBeat(
+        id="b_cuts",
+        duration=dur,
+        audio=str(audio),
+        words_path=str(tmp_path / "words.json"),
+        words=[WordSpan(t0=0.0, t1=dur, text="hi")],
+        segments=[
+            IRSegment(kind="image", src=str(images[0]), offset=0.0,
+                      t0=0.0, t1=1.0,
+                      xfade=Transition(kind="cut", dur=0.0)),
+            IRSegment(kind="image", src=str(images[1]), offset=0.0,
+                      t0=1.0, t1=1.75,
+                      xfade=Transition(kind="cut", dur=0.0)),
+            IRSegment(kind="image", src=str(images[2]), offset=0.0,
+                      t0=1.75, t1=dur),
+        ],
+        overlays=[],
+    )
+    opts = RenderOpts(quality="draft", workdir=tmp_path / "finalize")
+
+    out = render_beat(beat, design, None, opts)
+
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream=duration", "-of", "csv=p=0", str(out)],
+        check=True, capture_output=True, text=True,
+    )
+    assert float(probe.stdout.strip()) == pytest.approx(dur, abs=0.10)
+
+
+def test_render_beat_hard_cut_then_fade_uses_one_timebase(tmp_path):
+    """A concat cut followed by xfade must keep compatible input timebases."""
+    design = _design()
+    dur = 3.0
+    audio = tmp_path / "vo.wav"
+    _make_wav(audio, dur)
+
+    images = []
+    for i, color in enumerate(((120, 10, 10), (10, 120, 10), (10, 10, 120))):
+        image = tmp_path / f"mixed{i}.png"
+        _solid_png(image, color)
+        images.append(image)
+
+    beat = IRBeat(
+        id="b_cut_fade",
+        duration=dur,
+        audio=str(audio),
+        words_path=str(tmp_path / "words.json"),
+        words=[WordSpan(t0=0.0, t1=dur, text="hi")],
+        segments=[
+            IRSegment(kind="image", src=str(images[0]), offset=0.0,
+                      t0=0.0, t1=1.0,
+                      xfade=Transition(kind="cut", dur=0.0)),
+            IRSegment(kind="image", src=str(images[1]), offset=0.0,
+                      t0=1.0, t1=1.75,
+                      xfade=Transition(kind="fade", dur=0.2)),
+            IRSegment(kind="image", src=str(images[2]), offset=0.0,
+                      t0=1.75, t1=dur),
+        ],
+        overlays=[],
+    )
+    opts = RenderOpts(quality="draft", workdir=tmp_path / "finalize")
+
+    out = render_beat(beat, design, None, opts)
+
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream=duration", "-of", "csv=p=0", str(out)],
+        check=True, capture_output=True, text=True,
+    )
+    assert float(probe.stdout.strip()) == pytest.approx(dur, abs=0.10)
 
 
 def test_render_beat_no_segments_solid_bg(tmp_path, monkeypatch):

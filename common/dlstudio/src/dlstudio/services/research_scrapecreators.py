@@ -12,7 +12,7 @@ from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 from dlstudio.services import research
 
@@ -21,6 +21,7 @@ PROVIDER = "scrapecreators"
 DEFAULT_BASE_URL = "https://api.scrapecreators.com"
 REELS_PATH = "/v1/instagram/user/reels"
 POSTS_PATH = "/v2/instagram/user/posts"
+POST_DETAIL_PATH = "/v1/instagram/post"
 MAX_AUTHORS_PER_SYNC = 25
 CREDITS_PER_AUTHOR = 1
 MAX_CREDITS_PER_AUTHOR = 2
@@ -69,7 +70,7 @@ def _request_json(url: str, headers: Mapping[str, str], timeout: float) -> Mappi
     if response.status_code == 402:
         raise ScrapeCreatorsError("ScrapeCreators credits are exhausted")
     if response.status_code == 404:
-        raise ScrapeCreatorsNotFoundError("Instagram author was not found or is unavailable")
+        raise ScrapeCreatorsNotFoundError("Instagram source was not found or is unavailable")
     if response.status_code == 429:
         raise ScrapeCreatorsError("ScrapeCreators rate limit reached; try again later")
     try:
@@ -113,6 +114,25 @@ def _caption(media: Mapping[str, Any]) -> str:
         text = value.get("text")
         return text if isinstance(text, str) else ""
     return value if isinstance(value, str) else ""
+
+
+def _edge_count(media: Mapping[str, Any], key: str) -> int:
+    edge = media.get(key)
+    return _nonnegative_int(edge.get("count")) if isinstance(edge, Mapping) else 0
+
+
+def _post_detail_caption(media: Mapping[str, Any]) -> str:
+    edge = media.get("edge_media_to_caption")
+    if not isinstance(edge, Mapping):
+        return _caption(media)
+    edges = edge.get("edges")
+    if not isinstance(edges, list) or not edges or not isinstance(edges[0], Mapping):
+        return ""
+    node = edges[0].get("node")
+    if not isinstance(node, Mapping):
+        return ""
+    text = node.get("text")
+    return text if isinstance(text, str) else ""
 
 
 def _thumbnail(media: Mapping[str, Any]) -> str:
@@ -164,6 +184,167 @@ def _normalize_reel(media: Mapping[str, Any], author_id: str) -> dict[str, Any] 
         "likes": _nonnegative_int(media.get("like_count")),
         "comments": _nonnegative_int(media.get("comment_count")),
         "platform": "instagram",
+    }
+
+
+def _post_detail_media(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+    data = payload.get("data")
+    if isinstance(data, Mapping):
+        media = data.get("xdt_shortcode_media") or data.get("shortcode_media")
+        if isinstance(media, Mapping):
+            return media
+    media = payload.get("xdt_shortcode_media") or payload.get("shortcode_media")
+    if isinstance(media, Mapping):
+        return media
+    raise ScrapeCreatorsError("ScrapeCreators returned an unexpected post response")
+
+
+def _post_detail_video_url(media: Mapping[str, Any]) -> str:
+    direct = media.get("video_url")
+    if isinstance(direct, str) and direct:
+        return direct
+    versions = media.get("video_versions")
+    if isinstance(versions, list):
+        for version in versions:
+            if isinstance(version, Mapping):
+                url = version.get("url")
+                if isinstance(url, str) and url:
+                    return url
+    raise ScrapeCreatorsError("Instagram Reel has no downloadable video URL")
+
+
+def resolve_reel_video_url(
+    source_url: str,
+    *,
+    api_key: str | None = None,
+    base_url: str | None = None,
+    fetch_json: FetchJson | None = None,
+) -> str:
+    """Resolve a temporary CDN URL with one on-demand post-detail credit."""
+    key = (api_key if api_key is not None else os.environ.get("SCRAPECREATORS_API_KEY", "")).strip()
+    if not key:
+        raise ScrapeCreatorsError(
+            "ScrapeCreators is not configured; set SCRAPECREATORS_API_KEY before starting Studio"
+        )
+    endpoint = (base_url or os.environ.get("SCRAPECREATORS_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
+    request_url = f"{endpoint}{POST_DETAIL_PATH}?{urlencode({'url': source_url})}"
+    requester = fetch_json or _request_json
+    payload = requester(request_url, {"x-api-key": key, "Accept": "application/json"}, 45.0)
+    return _post_detail_video_url(_post_detail_media(payload))
+
+
+def _normalize_post_detail(
+    media: Mapping[str, Any],
+    author_id: str,
+    source_url: str,
+) -> dict[str, Any]:
+    reel_id = str(media.get("id") or media.get("pk") or media.get("shortcode") or "").strip()
+    published_at = _timestamp(media.get("taken_at_timestamp") or media.get("taken_at"))
+    if not reel_id or published_at is None:
+        raise ScrapeCreatorsError("Instagram Reel is missing an id or publication date")
+    views = media.get("video_play_count")
+    if views is None:
+        views = media.get("play_count")
+    if views is None:
+        views = media.get("video_view_count")
+    thumbnail = media.get("display_url") or media.get("thumbnail_src")
+    return {
+        "reel_id": reel_id,
+        "author_id": author_id,
+        "url": source_url,
+        "published_at": published_at,
+        "caption": _post_detail_caption(media),
+        "thumbnail_url": thumbnail if isinstance(thumbnail, str) else "",
+        "duration_seconds": _optional_float(media.get("video_duration")),
+        "views": _nonnegative_int(views),
+        "likes": _edge_count(media, "edge_media_preview_like")
+        or _nonnegative_int(media.get("like_count")),
+        "comments": _edge_count(media, "edge_media_to_parent_comment")
+        or _edge_count(media, "edge_media_preview_comment")
+        or _nonnegative_int(media.get("comment_count")),
+        "platform": "instagram",
+    }
+
+
+def import_reel_url(
+    workspace_root: Path,
+    project_id: str,
+    *,
+    url: str,
+    api_key: str | None = None,
+    base_url: str | None = None,
+    fetch_json: FetchJson | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Import one public Reel URL and add its author when needed."""
+    key = (api_key if api_key is not None else os.environ.get("SCRAPECREATORS_API_KEY", "")).strip()
+    if not key:
+        raise ScrapeCreatorsError(
+            "ScrapeCreators is not configured; set SCRAPECREATORS_API_KEY before starting Studio"
+        )
+    source_url = url.strip()
+    parsed = urlparse(source_url)
+    host = parsed.netloc.lower().split(":", 1)[0]
+    parts = [part for part in parsed.path.split("/") if part]
+    if parsed.scheme not in {"http", "https"} or host not in {
+        "instagram.com", "www.instagram.com", "m.instagram.com"
+    } or len(parts) < 2 or parts[0].lower() not in {"reel", "reels", "p", "tv"}:
+        raise research.ResearchError("paste a public Instagram Reel link")
+
+    requester = fetch_json or _request_json
+    endpoint = (base_url or os.environ.get("SCRAPECREATORS_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
+    request_url = f"{endpoint}{POST_DETAIL_PATH}?{urlencode({'url': source_url})}"
+    payload = requester(request_url, {"x-api-key": key, "Accept": "application/json"}, 45.0)
+    media = _post_detail_media(payload)
+    if not media.get("is_video") and media.get("product_type") != "clips" and not media.get("video_url"):
+        raise research.ResearchError("the Instagram link is a post, not a Reel video")
+    owner = media.get("owner")
+    if not isinstance(owner, Mapping):
+        raise ScrapeCreatorsError("Instagram Reel owner is missing from the provider response")
+    username = str(owner.get("username") or "").strip().lstrip("@").lower()
+    if not username:
+        raise ScrapeCreatorsError("Instagram Reel owner has no public username")
+    normalized = _normalize_post_detail(media, username, source_url)
+
+    authors = _project_authors(workspace_root, project_id)
+    author = next((item for item in authors if item.get("id") == username), None)
+    author_created = author is None
+    if author is None:
+        followers = owner.get("edge_followed_by")
+        followers_count = (
+            _nonnegative_int(followers.get("count"))
+            if isinstance(followers, Mapping)
+            else None
+        )
+        author = research.add_author(
+            workspace_root,
+            project_id,
+            username=username,
+            display_name=str(owner.get("full_name") or ""),
+            profile_url=f"https://www.instagram.com/{username}/",
+            followers_count=followers_count,
+        )
+
+    captured = now or datetime.now(timezone.utc)
+    if captured.tzinfo is None:
+        captured = captured.replace(tzinfo=timezone.utc)
+    captured_at = captured.astimezone(timezone.utc).isoformat(timespec="seconds").replace(
+        "+00:00", "Z"
+    )
+    reel = research.ingest_reel(
+        workspace_root,
+        project_id,
+        **normalized,
+        metrics_captured_at=captured_at,
+    )
+    research.refresh_author_medians(workspace_root, project_id, [str(author["id"])])
+    return {
+        "kind": "reel",
+        "created": True,
+        "author_created": author_created,
+        "credits_used": 1,
+        "author": author,
+        "reel": reel,
     }
 
 

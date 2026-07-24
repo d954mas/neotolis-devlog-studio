@@ -87,3 +87,5 @@ def test_cmd_preview_runs_stale_draft_then_review_artifacts(tmp_path, monkeypatc
     assert calls["sheet"][1] == Path("data/review/contact_sheet.jpg")
     assert calls["frames"][1] == Path("data/review/keyframes")
     assert calls["frames"][2] == 8
+    assert Path("data/review/geometry_report.json").exists()
+    assert Path("data/review/boundary_report.json").exists()

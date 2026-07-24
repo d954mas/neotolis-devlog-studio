@@ -1,6 +1,6 @@
 ---
 name: dl-make-video
-description: "Canonical Studio v2 production workflow (CLI dl2) for ALL new video work — devlog, reel, promo, trailer. Triggers on: 'сделай видео', 'сделай девлог', 'сделай рилс/reel', 'сделай промо', 'сделай трейлер', 'make a video', 'make a devlog', 'make a reel', 'promo', 'trailer', /dl-make-video. Full pipeline: изучение проекта → сценарий → edit → scratch VO → assets → dl2 check → dl2 preview (draft + contact sheet) → blind review → безопасные правки (≤3 итераций) → dl2 final → dl2 publish. Никогда не использовать v1-команды."
+description: "Canonical Studio v2 production workflow (CLI dl2) for ALL new video work — devlog, reel, promo, trailer. Triggers on: 'сделай видео', 'сделай девлог', 'сделай рилс/reel', 'сделай промо', 'сделай трейлер', 'make a video', 'make a devlog', 'make a reel', 'promo', 'trailer', /dl-make-video. Full pipeline: изучение проекта → сценарий → edit → scratch VO → assets → dl2 check → dl2 preview (draft + contact sheet) → blind review → безопасные правки (≤3 итераций) → dl2 final → dl2 publish → post-run reflection. Никогда не использовать v1-команды."
 ---
 
 # Производство видео — Studio v2 (`dl2`)
@@ -37,7 +37,7 @@ dl2 new-video <project> --format vertical   # или --format landscape
 (Python-пакет `<project>/edits/<name>/` с module-level `EDIT` в
 `__init__.py`) и работай с его dotted path: `<project>.edits.<name>`.
 
-## Workflow — 17 шагов
+## Workflow — 18 шагов
 
 1. **Прочитать `AGENTS.md` и активный проект.** Правила workspace и
    контекст проекта — до любых действий.
@@ -148,6 +148,22 @@ dl2 new-video <project> --format vertical   # или --format landscape
     `data/publish/youtube_package.md`; затем заспавнить
     `thumbnail-designer` (обложка) и `publish-packager` (titles,
     description, chapters, tags, pre-upload checklist).
+18. **Post-run reflection**: после готового handoff или после остановленного,
+    но содержательного production run один раз заспавнить
+    `devlog-reflector`. Это отдельный разбор процесса, не замена blind review.
+    Он должен:
+    - анализировать точную root-задачу вместе с дочерними агентами;
+    - сравнить фактическое время с бюджетом ролика, отдельно total wall time и
+      личное время автора; если личное время неизвестно, задать не более одного
+      короткого необязательного вопроса либо пометить его как unknown;
+    - сохранить отчёт в
+      `data/review/reflections/<YYYY-MM-DDTHH-MM-SS>_<edit>.md`;
+    - назвать не более трёх изменений и один эксперимент следующего запуска.
+
+    Рефлексия не блокирует публикацию и не открывает новый цикл монтажа, кроме
+    обнаруженной критической ошибки вроде спорного claim, лицензии или
+    устаревшего review artifact. Метрики результата ролика проверяются
+    отдельно через 48 часов / 7 дней по YouTube и Neotolis Diary.
 
 ## Продолжай сам (не спрашивая пользователя)
 
@@ -253,6 +269,7 @@ python -c "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],'rb').read()
 | `motion-infographic-designer` | нужен новый график/анимация | HyperFrames-ассет в `data/infographics/` + как подключить |
 | `thumbnail-designer` | после final | обложка для YouTube |
 | `publish-packager` | после final | titles/description/chapters/tags + pre-upload checklist |
+| `devlog-reflector` | после handoff или остановки run | измеримый разбор процесса + ≤3 улучшения следующего запуска |
 
 ## Не делай
 

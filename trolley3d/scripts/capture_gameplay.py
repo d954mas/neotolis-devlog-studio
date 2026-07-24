@@ -161,7 +161,10 @@ def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else "smoke"
     OUTROOT.mkdir(parents=True, exist_ok=True)
 
-    with running_game(exe=str(EXE), cwd=str(GAME), window_size=LAUNCH_SIZE) as g:
+    with running_game(
+        exe=str(EXE), cwd=str(GAME), window_size=LAUNCH_SIZE,
+        extra_args=["--capture-clean"],
+    ) as g:
         g.file.close()
         g.file = FastFile(g.sock)  # buffered reads (see FastFile docstring)
         # Park the window off-screen IMMEDIATELY and WITHOUT activating it:
@@ -195,6 +198,15 @@ def main():
         g.wait_frames(30)
         key_tap(g, "F1")  # hide testbed menu
         g.wait_frames(5)
+        # The debug build can keep the testbed panel visible after the F1
+        # shortcut. Close the panel through its stable UI node before capture;
+        # this keeps portrait footage product-facing instead of shipping the
+        # developer overlay.
+        try:
+            g.click_ui("testbed/close", wait_frames=2, observe=None)
+            g.wait_frames(5)
+        except Exception:
+            pass
 
         if mode == "smoke":
             enter_scene_clean(g, "1", 30)

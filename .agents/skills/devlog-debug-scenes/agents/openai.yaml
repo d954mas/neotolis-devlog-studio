@@ -1,0 +1,7 @@
+interface:
+  display_name: "Devlog Debug Scenes"
+  short_description: "Build deterministic game debug capture scenes"
+  default_prompt: "Use $devlog-debug-scenes to create and validate a deterministic game-owned capture scene."
+
+policy:
+  allow_implicit_invocation: true

@@ -27,11 +27,99 @@ export interface ProjectBeat {
   rendered: boolean;
 }
 
+export interface ProductProduction {
+  id: string;
+  kind: "devlog" | "reel" | string;
+  date: string;
+  orientation: "landscape" | "vertical" | string;
+  studio_ref: string;
+  current: boolean;
+}
+
+export interface ProductOverview {
+  id: string;
+  title: string;
+  current_production_id: string;
+  productions: ProductProduction[];
+}
+
 export interface Project {
   edit_name: string;
   output: string;
   design: ProjectDesign;
   beats: ProjectBeat[];
+  script_sha256: string;
+  script_approved: boolean;
+  product: ProductOverview | null;
+}
+
+export interface ScriptApprovalResult {
+  script_sha256: string;
+  script_approved: boolean;
+  approved_by: string;
+}
+
+// ── GET /api/autopilot/checkpoint ──
+export interface AutopilotWallTime {
+  budget_minutes: number;
+  elapsed_minutes: number;
+  remaining_minutes: number;
+  stage: string;
+}
+
+export interface AutopilotBlocker {
+  severity: string;
+  code: string;
+  message: string;
+  where?: string;
+}
+
+export interface AutopilotCheckpointRow {
+  id: string;
+  vo_thesis: string;
+  shot: {
+    src: string;
+    provenance: string;
+    source_role: string;
+  };
+  duration_seconds: number;
+  quality_flags: string[];
+  proposed_fix: string;
+  approved: boolean;
+}
+
+export interface AutopilotCheckpointData {
+  wall_time: AutopilotWallTime;
+  blockers: AutopilotBlocker[];
+  notices?: AutopilotBlocker[];
+  missing_inputs: string[];
+  rows: AutopilotCheckpointRow[];
+  approved_all: boolean;
+  can_approve_all: boolean;
+}
+
+export type AutopilotRequestAction =
+  | "replace_shot"
+  | "request_capture"
+  | "change_text";
+
+export interface AutopilotApprovalResult {
+  approved_count: number;
+  changed_count: number;
+  checkpoint: AutopilotCheckpointData;
+}
+
+export interface AutopilotChangeResult {
+  status: "requested";
+  request: {
+    id: string;
+    action: AutopilotRequestAction;
+    shot_id: string;
+    reason: string;
+    requested_by: string;
+    timestamp: string;
+    status: "requested";
+  };
 }
 
 export type FaceMode = "full" | "pip" | "none";
@@ -197,6 +285,7 @@ export type Feedback = Record<string, BeatFeedback>;
 // ── Actions & jobs ──────────────────────────────────────────────────────────
 export interface TakeUploadResult {
   path: string;
+  metadata_path?: string;
 }
 
 export interface ProcessTakeRequest {

@@ -113,7 +113,16 @@ def _compile_beat(
         beat.chunks, windows, beat.scene, duration, edit.design, assets)
     overlays = _build_overlays(beat.chunks, windows)
     sfx = _build_sfx(beat, words)
-    captions = _build_captions(words, duration) if beat.subtitles else []
+    caption_issues: list[str] = []
+    caption_diags: list[CheckIssue] = []
+    if beat.subtitles:
+        if beat.caption_groups is None:
+            captions = _build_captions(words, duration)
+        else:
+            captions, caption_issues, caption_diags = _build_explicit_captions(
+                beat.caption_groups, words, duration)
+    else:
+        captions = []
 
     ir_beat = IRBeat(
         id=beat_id,
@@ -128,9 +137,13 @@ def _compile_beat(
         transition_out=beat.transition_out,
         captions=captions,
     )
-    warnings = [f"[{beat_id}] {w}" for w in (*word_issues, *seg_warnings)]
+    warnings = [
+        f"[{beat_id}] {w}"
+        for w in (*word_issues, *seg_warnings, *caption_issues)
+    ]
     diagnostics = [
-        d.model_copy(update={"where": beat_id}) for d in (*word_diags, *seg_diags)
+        d.model_copy(update={"where": beat_id})
+        for d in (*word_diags, *seg_diags, *caption_diags)
     ]
     return ir_beat, warnings, diagnostics
 
@@ -239,6 +252,81 @@ def _build_captions(words: list[WordSpan], duration: float) -> list[IRCaption]:
             t0=round(t0, 4), t1=round(t1, 4),
         ))
     return captions
+
+
+def _build_explicit_captions(
+    groups: list[tuple[int, int]],
+    words: list[WordSpan],
+    duration: float,
+) -> tuple[list[IRCaption], list[str], list[CheckIssue]]:
+    """Compile author-specified inclusive word ranges into captions.
+
+    Ranges use the same index contract as ``Chunk.words``: indices are
+    nonnegative and within the transcript, start <= end, and successive
+    groups are ordered and non-overlapping. Gaps are deliberately allowed;
+    omitted words are not added to either neighboring caption's text.
+
+    Valid captions retain the existing no-flicker timing rule: each caption
+    holds until the next valid group's first word begins, while the last one
+    receives ``CAPTION_LAST_TAIL`` clamped to the beat duration. Invalid
+    groups emit VQ-WORDS diagnostics and are omitted from IR so compilation
+    remains inspectable without manufacturing text from clamped indices.
+    """
+    issues: list[str] = []
+    diagnostics: list[CheckIssue] = []
+    valid: list[tuple[int, int]] = []
+    nw = len(words)
+    prev_end: int | None = None
+
+    def report(message: str) -> None:
+        issues.append(f"VQ-WORDS: {message}")
+        diagnostics.append(CheckIssue(
+            severity="error", code="VQ-WORDS", message=message))
+
+    for gi, (start, end) in enumerate(groups):
+        range_ok = True
+        if nw == 0:
+            report(f"caption group {gi} references words but the transcript is empty")
+            range_ok = False
+        else:
+            if not (0 <= start < nw):
+                report(
+                    f"caption group {gi} start index {start} out of range "
+                    f"[0,{nw - 1}]")
+                range_ok = False
+            if not (0 <= end < nw):
+                report(
+                    f"caption group {gi} end index {end} out of range "
+                    f"[0,{nw - 1}]")
+                range_ok = False
+        if start > end:
+            report(
+                f"caption group {gi} has start index {start} > end index {end}")
+            range_ok = False
+
+        ordered = prev_end is None or start > prev_end
+        if not ordered:
+            report(
+                f"caption group {gi} word range starts at {start} which "
+                f"overlaps/precedes previous caption group end {prev_end}")
+        if range_ok and ordered:
+            valid.append((start, end))
+        prev_end = end
+
+    captions: list[IRCaption] = []
+    for gi, (start, end) in enumerate(valid):
+        t0 = words[start].t0
+        if gi + 1 < len(valid):
+            t1 = words[valid[gi + 1][0]].t0
+        else:
+            t1 = min(duration, words[end].t1 + CAPTION_LAST_TAIL)
+        if t1 <= t0:
+            continue
+        captions.append(IRCaption(
+            text=" ".join(word.text for word in words[start:end + 1]),
+            t0=round(t0, 4), t1=round(t1, 4),
+        ))
+    return captions, issues, diagnostics
 
 
 def _build_sfx(beat: Beat, words: list[WordSpan]) -> list[IRSfx]:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -9,6 +11,130 @@ from dlstudio.services import research
 
 
 NOW = datetime(2026, 7, 19, 12, 0, tzinfo=timezone.utc)
+
+
+def test_research_uses_a_normalized_sqlite_database(tmp_path):
+    project = research.create_project(tmp_path, title="Gamedev", now=NOW)
+    research.add_author(tmp_path, project["id"], username="creator")
+    research.ingest_reel(
+        tmp_path,
+        project["id"],
+        reel_id="first-reel",
+        author_id="creator",
+        url="https://www.instagram.com/reel/first-reel/",
+        published_at="2026-07-18T12:00:00Z",
+        views=1_000,
+        patterns=["failure first", "fast reveal"],
+        metrics_captured_at="2026-07-19T12:00:00Z",
+    )
+
+    database = tmp_path / "data" / "research" / "research.sqlite3"
+    assert database.is_file()
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+        assert connection.execute("PRAGMA foreign_key_list('reels')").fetchall()
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        assert {
+            "schema_migrations",
+            "projects",
+            "authors",
+            "reels",
+            "reel_metrics",
+            "reel_patterns",
+            "experiments",
+            "experiment_items",
+            "experiment_results",
+        }.issubset(tables)
+        assert connection.execute("SELECT count(*) FROM reels").fetchone()[0] == 1
+        assert connection.execute("SELECT count(*) FROM reel_patterns").fetchone()[0] == 2
+
+
+def test_existing_json_store_is_migrated_once_without_data_loss(tmp_path):
+    source = tmp_path / "data" / "research" / "index.json"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        json.dumps(
+            {
+                "schema": "dlstudio.research/v1",
+                "projects": [
+                    {
+                        "id": "gamedev",
+                        "title": "Gamedev",
+                        "description": "Learn",
+                        "style_profile": "Keep our voice",
+                        "created_at": "2026-07-19T12:00:00Z",
+                        "authors": [
+                            {
+                                "id": "creator",
+                                "username": "creator",
+                                "display_name": "Creator",
+                                "profile_url": "https://www.instagram.com/creator/",
+                                "followers_count": 100,
+                                "median_views": 500,
+                            }
+                        ],
+                        "reels": [
+                            {
+                                "id": "legacy-reel",
+                                "author_id": "creator",
+                                "platform": "instagram",
+                                "url": "https://www.instagram.com/reel/legacy-reel/",
+                                "caption": "Legacy caption",
+                                "thumbnail_url": "",
+                                "published_at": "2026-07-18T12:00:00Z",
+                                "duration_seconds": 20,
+                                "views": 2_000,
+                                "likes": 100,
+                                "comments": 5,
+                                "metrics_captured_at": "2026-07-19T12:00:00Z",
+                                "metrics_history": [
+                                    {
+                                        "captured_at": "2026-07-19T12:00:00Z",
+                                        "views": 2_000,
+                                        "likes": 100,
+                                        "comments": 5,
+                                    }
+                                ],
+                                "hook": "Legacy hook",
+                                "patterns": ["legacy pattern"],
+                            }
+                        ],
+                        "experiments": [],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    first = research.get_project_feed(tmp_path, "gamedev", now=NOW)
+    second = research.get_project_feed(tmp_path, "gamedev", now=NOW)
+
+    assert [item["id"] for item in first["reels"]] == ["legacy-reel"]
+    assert [item["id"] for item in second["reels"]] == ["legacy-reel"]
+    assert first["reels"][0]["patterns"] == ["legacy pattern"]
+    assert (tmp_path / "data" / "research" / "research.sqlite3").is_file()
+    imported = list((tmp_path / "data" / "research" / "backups").glob("index-v1-imported-*.json"))
+    assert len(imported) == 1
+    assert not source.exists()
+
+
+def test_store_keeps_a_daily_local_database_backup(tmp_path):
+    project = research.create_project(tmp_path, title="Gamedev", now=NOW)
+
+    research.add_author(tmp_path, project["id"], username="creator")
+
+    backups = list((tmp_path / "data" / "research" / "backups").glob("research-*.sqlite3"))
+    assert len(backups) == 1
+    with sqlite3.connect(backups[0]) as connection:
+        assert connection.execute("SELECT count(*) FROM projects").fetchone()[0] == 1
+        assert connection.execute("SELECT count(*) FROM authors").fetchone()[0] == 0
 
 
 def _seed(root: Path) -> str:
@@ -56,8 +182,19 @@ def test_feed_filters_by_window_and_ranks_relative_outliers(tmp_path):
     assert recent["reels"][0]["outlier_score"] == 5.0
     assert recent["reels"][0]["views_per_hour"] == pytest.approx(4166.7)
 
-    all_time = research.get_project_feed(tmp_path, project_id, window="all", now=NOW)
+    all_time = research.get_project_feed(
+        tmp_path,
+        project_id,
+        window="all",
+        sort="outlier",
+        now=NOW,
+    )
     assert [item["id"] for item in all_time["reels"]] == ["old-hit", "fresh-hit"]
+
+    historical = research.get_project_feed(tmp_path, project_id, now=NOW)
+    assert historical["window"] == "all"
+    assert historical["sort"] == "newest"
+    assert [item["id"] for item in historical["reels"]] == ["fresh-hit", "old-hit"]
 
 
 def test_experiment_defaults_to_adaptation_and_writes_agent_context(tmp_path):
@@ -188,3 +325,59 @@ def test_repeated_ingest_keeps_metric_history_and_calculates_growth(tmp_path):
     assert reel["metrics_age_hours"] == 0
     assert reel["hook"] == "Original hook analysis"
     assert reel["patterns"] == ["failure first"]
+
+
+def test_feed_uses_stable_cursor_pagination(tmp_path):
+    project_id = _seed(tmp_path)
+    for index in range(35):
+        research.ingest_reel(
+            tmp_path,
+            project_id,
+            reel_id=f"reel-{index:03d}",
+            author_id="topdev",
+            url=f"https://www.instagram.com/reel/{index:03d}/",
+            published_at=f"2026-07-{(index % 19) + 1:02d}T12:00:00Z",
+            views=1_000 + index,
+        )
+
+    first = research.get_project_feed(tmp_path, project_id, limit=20, now=NOW)
+    second = research.get_project_feed(
+        tmp_path,
+        project_id,
+        limit=20,
+        cursor=first["page"]["next_cursor"],
+        now=NOW,
+    )
+
+    first_ids = {item["id"] for item in first["reels"]}
+    second_ids = {item["id"] for item in second["reels"]}
+    assert len(first_ids) == 20
+    assert len(second_ids) == 15
+    assert first_ids.isdisjoint(second_ids)
+    assert first["page"] == {
+        "limit": 20,
+        "total": 35,
+        "has_more": True,
+        "next_cursor": first["page"]["next_cursor"],
+    }
+    assert second["page"]["has_more"] is False
+    assert second["page"]["next_cursor"] is None
+
+    for sort in ("views", "outlier", "velocity"):
+        ranked_first = research.get_project_feed(
+            tmp_path, project_id, sort=sort, limit=20, now=NOW
+        )
+        ranked_second = research.get_project_feed(
+            tmp_path,
+            project_id,
+            sort=sort,
+            limit=20,
+            cursor=ranked_first["page"]["next_cursor"],
+            now=NOW,
+        )
+        ranked_ids = [item["id"] for item in ranked_first["reels"] + ranked_second["reels"]]
+        assert len(ranked_ids) == 35
+        assert len(set(ranked_ids)) == 35
+
+    with pytest.raises(research.ResearchError, match="invalid feed cursor"):
+        research.get_project_feed(tmp_path, project_id, cursor="not-a-cursor", now=NOW)
