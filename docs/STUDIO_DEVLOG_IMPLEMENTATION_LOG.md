@@ -4,7 +4,7 @@
 
 ### A1 — Capture contract and mandatory ingest gate
 
-**Статус:** core ingest implemented; independent game-state proof remains  
+**Статус:** core ingest implemented; independent game-state proof remains
 **Дата:** 2026-07-24
 
 #### Реализовано
@@ -60,7 +60,7 @@
 
 ### A2 — Minimal approved asset identity
 
-**Статус:** core registry and render-gate binding implemented; Studio UI/migration remains  
+**Статус:** core registry and render-gate binding implemented; Studio UI/migration remains
 **Дата:** 2026-07-24
 
 #### Реализовано
@@ -110,7 +110,7 @@
 
 ### A3 — Deterministic geometry and centering evidence
 
-**Статус:** core geometry contract implemented; focus proof and Studio inspector remain  
+**Статус:** core geometry contract implemented; focus proof and Studio inspector remain
 **Дата:** 2026-07-24
 
 #### Реализовано
@@ -159,7 +159,7 @@
 
 ### A3b — Boundary intent and restart detection
 
-**Статус:** pre-render boundary core implemented; post-render strips/density remain  
+**Статус:** pre-render boundary core implemented; post-render strips/density remain
 **Дата:** 2026-07-24
 
 #### Реализовано

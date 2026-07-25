@@ -1,6 +1,6 @@
 # Not a Trolley Problem — devlog 01 production brief
 
-Дата подготовки: 2026-07-17  
+Дата подготовки: 2026-07-17
 Статус: подготовка; landscape-проект и новый gameplay capture ещё не созданы.
 
 ## Результат и ограничения

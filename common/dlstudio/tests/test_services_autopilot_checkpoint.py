@@ -133,4 +133,3 @@ def test_request_change_is_structured_and_never_changes_shot_meaning(tmp_path):
         (tmp_path / "data" / "plan" / "autopilot_requests.json").read_text(encoding="utf-8")
     )
     assert requests["requests"][0]["reason"] == "Shorten the sentence"
-

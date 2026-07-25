@@ -1,7 +1,7 @@
 # Studio v2: план надёжного и качественного производства девлогов
 
-**Статус:** approved for incremental execution; Milestone A started  
-**Основание:** Devlog 1, пользовательская оценка 3/10, подробная рефлексия от 2026-07-24  
+**Статус:** approved for incremental execution; Milestone A started
+**Основание:** Devlog 1, пользовательская оценка 3/10, подробная рефлексия от 2026-07-24
 **Связанные документы:** `ARCHITECTURE_V2.md`, `PLAN_STUDIO_V2.md`,
 `PLAN_STUDIO_AUTOPILOT_60.md`,
 `REVIEW_STUDIO_DEVLOG_RELIABILITY_PLAN.md`
@@ -395,8 +395,8 @@ verdict
 
 ## Wave 0 — Regression corpus и измеримый baseline
 
-**Приоритет:** P0  
-**Effort:** 0.5–1 день  
+**Приоритет:** P0
+**Effort:** 0.5–1 день
 **Зависимости:** нет
 
 ### Работы
@@ -424,8 +424,8 @@ verdict
 
 ## Wave 1 — Capture contract v2 и обязательный ingest gate
 
-**Приоритет:** P0  
-**Effort:** 1–2 дня  
+**Приоритет:** P0
+**Effort:** 1–2 дня
 **Зависимости:** Wave 0
 
 ### Owning files
@@ -458,8 +458,8 @@ verdict
 
 ## Wave 2 — Approved Asset Registry
 
-**Приоритет:** P0  
-**Effort:** 2–3 дня  
+**Приоритет:** P0
+**Effort:** 2–3 дня
 **Зависимости:** Wave 1
 
 ### Owning files
@@ -493,8 +493,8 @@ verdict
 
 ## Wave 3 — Source geometry и центрирование
 
-**Приоритет:** P0  
-**Effort:** 1–2 дня  
+**Приоритет:** P0
+**Effort:** 1–2 дня
 **Зависимости:** Wave 2
 
 ### Owning files
@@ -534,8 +534,8 @@ focus rect, итоговый subjective center остаётся creative review.
 
 ## Wave 4 — Continuity и Machine-first Boundary Pack
 
-**Приоритет:** P0  
-**Effort:** 2–3 дня  
+**Приоритет:** P0
+**Effort:** 2–3 дня
 **Зависимости:** Waves 2–3
 
 ### Owning files
@@ -576,8 +576,8 @@ focus rect, итоговый subjective center остаётся creative review.
 
 ## Wave 5 — Public copy, debug leaks и canonical claims
 
-**Приоритет:** P0/P1  
-**Effort:** 1–2 дня  
+**Приоритет:** P0/P1
+**Effort:** 1–2 дня
 **Зависимости:** Wave 2
 
 ### Owning files
@@ -611,8 +611,8 @@ focus rect, итоговый subjective center остаётся creative review.
 
 ## Wave 6 — Полный VO recording state machine
 
-**Приоритет:** P0  
-**Effort:** 1–2 дня  
+**Приоритет:** P0
+**Effort:** 1–2 дня
 **Зависимости:** Wave 0
 
 ### Текущий статус
@@ -668,8 +668,8 @@ idle
 
 ## Wave 7 — Studio Preflight UI
 
-**Приоритет:** P1  
-**Effort:** 2–3 дня  
+**Приоритет:** P1
+**Effort:** 2–3 дня
 **Зависимости:** Waves 1–6
 
 ### Основной экран production
@@ -703,8 +703,8 @@ Studio показывает одну таблицу:
 
 ## Wave 8 — Visual direction и рекламный polish
 
-**Приоритет:** P1  
-**Effort:** 3–5 дней  
+**Приоритет:** P1
+**Effort:** 3–5 дней
 **Зависимости:** machine gates должны быть готовы
 
 Mechanical correctness не решает жалобу «монтаж выглядит как черновик».
@@ -757,8 +757,8 @@ Mechanical correctness не решает жалобу «монтаж выгля�
 
 ## Wave 9 — Iteration budget, storage и stop rules
 
-**Приоритет:** P1  
-**Effort:** 1–2 дня  
+**Приоритет:** P1
+**Effort:** 1–2 дня
 **Зависимости:** gate pipeline
 
 ### Работы

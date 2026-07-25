@@ -57,4 +57,3 @@ def test_product_overview_lists_devlogs_and_reels_with_current_marker(tmp_path):
     assert overview.productions[0].studio_ref == (
         "not_a_trolley_problem:2026_07_17_devlog_01"
     )
-

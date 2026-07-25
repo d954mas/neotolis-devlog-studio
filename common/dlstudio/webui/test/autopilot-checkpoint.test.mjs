@@ -110,4 +110,3 @@ test("checkpoint disables package approval while blockers exist", async () => {
   assert.equal(approve.props.disabled, true);
   assert.match(textOf(tree), /capture missing/);
 });
-

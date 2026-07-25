@@ -59,4 +59,3 @@ test("product overview shows devlog and reel on the same Studio page", async () 
   assert.match(text, /2026_07_18/);
   assert.match(text, /open/);
 });
-
