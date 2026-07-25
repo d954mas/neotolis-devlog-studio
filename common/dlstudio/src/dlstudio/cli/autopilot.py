@@ -352,6 +352,139 @@ def cmd_capture_batch(args: argparse.Namespace) -> int:
     return 0
 
 
+def _capture_shot_snippet(asset: Any) -> str:
+    """Emit a paste-ready, identity-complete VideoShot for one registry row."""
+    fields = [
+        f"    src={json.dumps(asset.artifact_path, ensure_ascii=False)},",
+        f"    asset_id={json.dumps(asset.asset_id, ensure_ascii=False)},",
+        f"    editorial_role={json.dumps(asset.editorial_role, ensure_ascii=False)},",
+    ]
+    if asset.editorial_role == "gameplay":
+        fields.extend([
+            f"    expected_state_id={json.dumps(asset.state_id, ensure_ascii=False)},",
+            f"    expected_build_id={json.dumps(asset.build_id, ensure_ascii=False)},",
+            f"    expected_action_id={json.dumps(asset.action_id, ensure_ascii=False)},",
+            f"    offset={float(asset.head_handle_seconds or 0.0):.3f},",
+            '    fit="cover",',
+            "    anchor_x=0.5,",
+            "    anchor_y=0.5,",
+        ])
+    return "VideoShot(\n" + "\n".join(fields) + "\n)\n"
+
+
+def cmd_capture_flow(args: argparse.Namespace) -> int:
+    """One resumable path: request -> external capture -> ingest -> approve -> wire."""
+    from dlstudio.cli import CliError
+    from dlstudio.services.asset_registry import (
+        AssetRegistryError,
+        approve_asset,
+        load_asset_registry,
+    )
+    from dlstudio.services.capture_batch import (
+        CaptureBatchError,
+        ingest_capture_results,
+        prepare_capture_batch,
+    )
+
+    _edit, root, canonical = _load_target(args.edit)
+    requests = (
+        Path(args.requests)
+        if args.requests
+        else root / "data" / "plan" / "capture_requests.json"
+    )
+    batch_path = root / "data" / "plan" / "capture_batch.json"
+    if args.refresh_batch or not batch_path.is_file():
+        try:
+            prepare_capture_batch(root, requests, out_path=batch_path)
+        except CaptureBatchError as exc:
+            raise CliError(str(exc)) from exc
+
+    try:
+        batch_payload = json.loads(batch_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise CliError(f"invalid capture batch {batch_path}: {exc}") from exc
+    batch_requests = batch_payload.get("requests") if isinstance(batch_payload, dict) else None
+    selected = next(
+        (
+            item
+            for item in batch_requests or []
+            if isinstance(item, dict) and item.get("id") == args.request_id
+        ),
+        None,
+    )
+    if selected is None:
+        raise CliError(
+            f"capture request {args.request_id!r} is absent from {batch_path}"
+        )
+    if batch_payload.get("version") != 2:
+        raise CliError("capture-flow requires version 2 capture requests.")
+
+    if args.ingest:
+        try:
+            ingest_capture_results(root, args.ingest, batch_path=batch_path)
+        except CaptureBatchError as exc:
+            raise CliError(str(exc)) from exc
+
+    asset_id = f"capture:{args.request_id}"
+    registry = load_asset_registry(root)
+    asset = next((item for item in registry.assets if item.asset_id == asset_id), None)
+    if asset is None:
+        print(f"[dl2] capture-flow: prepared {args.request_id} -> {batch_path}")
+        print("[dl2] next: record the batch with $devlog-record-media, then run:")
+        print(
+            f"  dl2 capture-flow {canonical} {args.request_id} "
+            "--ingest data/plan/capture_results.json"
+        )
+        return 0
+
+    if args.approve:
+        try:
+            registry = approve_asset(
+                root,
+                asset.asset_id,
+                expected_sha256=asset.artifact_sha256,
+                expected_revision=asset.revision,
+                expected_validation_sha256=asset.validation_sha256,
+                approved_by=args.approved_by,
+            )
+        except AssetRegistryError as exc:
+            raise CliError(str(exc)) from exc
+        asset = next(item for item in registry.assets if item.asset_id == asset_id)
+
+    if asset.status != "approved":
+        print(
+            f"[dl2] capture-flow: validated {asset.asset_id} "
+            f"revision={asset.revision} sha256={asset.artifact_sha256}"
+        )
+        print("[dl2] author checkpoint: inspect the clip, then approve this exact revision:")
+        print(
+            f"  dl2 capture-flow {canonical} {args.request_id} "
+            f"--approve --approved-by {args.approved_by}"
+        )
+        return 0
+
+    snippet = _capture_shot_snippet(asset)
+    snippet_path = (
+        root / "data" / "plan" / "capture_snippets" / f"{args.request_id}.py"
+    )
+    snippet_path.parent.mkdir(parents=True, exist_ok=True)
+    snippet_path.write_text(snippet, encoding="utf-8")
+    handoff_path = snippet_path.with_suffix(".json")
+    _write_json(handoff_path, {
+        "schema": "devlog.capture_handoff/v1",
+        "request_id": args.request_id,
+        "asset_id": asset.asset_id,
+        "artifact_path": asset.artifact_path,
+        "artifact_sha256": asset.artifact_sha256,
+        "registry_revision": asset.revision,
+        "validation_sha256": asset.validation_sha256,
+        "snippet_path": snippet_path.relative_to(root).as_posix(),
+    })
+    print(f"[dl2] capture-flow: approved and ready -> {snippet_path}")
+    print(snippet.rstrip())
+    return 0
+
+
 def cmd_preflight(args: argparse.Namespace) -> int:
     from pydantic import ValidationError
 
@@ -800,6 +933,34 @@ def add_subparsers(sub: argparse._SubParsersAction) -> None:
         "--batch", help="batch JSON used for ingest (default: data/plan/capture_batch.json)"
     )
     capture.set_defaults(func=cmd_capture_batch)
+
+    flow = sub.add_parser(
+        "capture-flow",
+        help="resume one capture from request through approved VideoShot snippet",
+    )
+    flow.add_argument("edit", help="production path or product:id")
+    flow.add_argument("request_id", help="id from data/plan/capture_requests.json")
+    flow.add_argument(
+        "--ingest",
+        metavar="RESULTS_JSON",
+        help="ingest external recorder results before resolving the next action",
+    )
+    flow.add_argument(
+        "--approve",
+        action="store_true",
+        help="author-approve the exact current validated revision",
+    )
+    flow.add_argument("--approved-by", default="author")
+    flow.add_argument(
+        "--requests",
+        help="request JSON (default: data/plan/capture_requests.json)",
+    )
+    flow.add_argument(
+        "--refresh-batch",
+        action="store_true",
+        help="rebuild capture_batch.json from the current request file",
+    )
+    flow.set_defaults(func=cmd_capture_flow)
 
     preflight = sub.add_parser(
         "preflight",

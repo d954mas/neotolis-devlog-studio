@@ -51,6 +51,113 @@ def test_parser_exposes_inventory_preflight_and_storyboard_commands():
     assert approve.revision == 3
     assert approve.validation_sha == "b" * 64
     assert approve.approved_by == "author"
+    flow = _parse([
+        "capture-flow",
+        "some.edit",
+        "day5_station",
+        "--ingest",
+        "data/plan/capture_results.json",
+    ])
+    assert flow.func is autopilot.cmd_capture_flow
+    assert flow.request_id == "day5_station"
+    assert flow.ingest == "data/plan/capture_results.json"
+
+
+def test_capture_flow_prepares_once_and_names_the_external_recording_boundary(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    from dlstudio.cli import autopilot
+    from dlstudio.services import asset_registry, capture_batch
+
+    production = tmp_path / "production"
+    requests = production / "data" / "plan" / "capture_requests.json"
+    requests.parent.mkdir(parents=True)
+    requests.write_text('{"version":2,"requests":[]}', encoding="utf-8")
+    monkeypatch.setattr(
+        autopilot,
+        "_load_target",
+        lambda ref: (SimpleNamespace(), production, "product:production"),
+    )
+
+    def fake_prepare(root, requests_path, *, out_path):
+        Path(out_path).write_text(json.dumps({
+            "version": 2,
+            "requests": [{"id": "day5_station"}],
+        }), encoding="utf-8")
+        return SimpleNamespace(requests=[SimpleNamespace(id="day5_station")])
+
+    monkeypatch.setattr(capture_batch, "prepare_capture_batch", fake_prepare)
+    monkeypatch.setattr(
+        asset_registry,
+        "load_asset_registry",
+        lambda root: SimpleNamespace(assets=[]),
+    )
+
+    assert autopilot.cmd_capture_flow(_parse([
+        "capture-flow", "product:production", "day5_station",
+    ])) == 0
+
+    output = capsys.readouterr().out
+    assert "$devlog-record-media" in output
+    assert "capture_results.json" in output
+
+
+def test_capture_flow_writes_identity_complete_gameplay_snippet(
+    tmp_path,
+    monkeypatch,
+):
+    from dlstudio.cli import autopilot
+    from dlstudio.services import asset_registry
+
+    production = tmp_path / "production"
+    batch = production / "data" / "plan" / "capture_batch.json"
+    batch.parent.mkdir(parents=True)
+    batch.write_text(json.dumps({
+        "version": 2,
+        "requests": [{"id": "day5_station"}],
+    }), encoding="utf-8")
+    monkeypatch.setattr(
+        autopilot,
+        "_load_target",
+        lambda ref: (SimpleNamespace(), production, "product:production"),
+    )
+    asset = SimpleNamespace(
+        asset_id="capture:day5_station",
+        status="approved",
+        artifact_path="data/footage/day5_station.mp4",
+        artifact_sha256="a" * 64,
+        validation_sha256="b" * 64,
+        revision=3,
+        editorial_role="gameplay",
+        state_id="day5.station.new_visual",
+        build_id="exe-sha256:" + "c" * 64,
+        action_id="station_queue_and_tram_pass",
+        head_handle_seconds=5.0,
+    )
+    monkeypatch.setattr(
+        asset_registry,
+        "load_asset_registry",
+        lambda root: SimpleNamespace(assets=[asset]),
+    )
+
+    assert autopilot.cmd_capture_flow(_parse([
+        "capture-flow", "product:production", "day5_station",
+    ])) == 0
+
+    snippet = (
+        production
+        / "data"
+        / "plan"
+        / "capture_snippets"
+        / "day5_station.py"
+    ).read_text(encoding="utf-8")
+    assert 'asset_id="capture:day5_station"' in snippet
+    assert 'expected_state_id="day5.station.new_visual"' in snippet
+    assert 'expected_action_id="station_queue_and_tram_pass"' in snippet
+    assert "offset=5.000" in snippet
+    assert "loop=" not in snippet
 
 
 def test_autopilot_run_stops_at_checkpoint_and_resumes_to_exact_review(

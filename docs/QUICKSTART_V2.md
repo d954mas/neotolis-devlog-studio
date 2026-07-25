@@ -87,8 +87,39 @@ dl2 gen-html intro_chart --init        # каркас в data/hyperframes/intro_
 dl2 gen-html intro_chart --out data/infographics/intro_chart.mp4 --quality draft
 ```
 
-Требуется Node 22+ (npx). Подключение: `VideoShot(src="data/infographics/intro_chart.mp4")`
-или `Scene(kind="video", ...)`.
+Требуется Node 22+ (npx). Подключай сгенерированный MP4 вместе с его
+hash-bound manifest — финальный gate заново проверит MP4, HTML, variables и
+evidence:
+
+```python
+VideoShot(
+    src="data/infographics/intro_chart.mp4",
+    render_manifest="data/infographics/intro_chart.mp4.render.json",
+    editorial_role="presentation",
+)
+```
+
+### Запись gameplay без ручной склейки шагов
+
+Сначала опиши нужные состояния в `data/plan/capture_requests.json` версии 2.
+Для gameplay обязательны `state_id`, точный `build_id`, `action_id`,
+`capture_method="realtime_window"`, скорость `1.0`, чистый UI и запас не
+меньше 5 секунд с обеих сторон. Затем веди одну сцену одной resumable-командой:
+
+```bash
+dl2 capture-flow not_a_trolley_problem:2026_07_18_devlog_01 day5_station
+# внешний recorder выполняет созданный data/plan/capture_batch.json
+dl2 capture-flow not_a_trolley_problem:2026_07_18_devlog_01 day5_station \
+  --ingest data/plan/capture_results.json
+# после просмотра валидированного клипа — явный авторский checkpoint:
+dl2 capture-flow not_a_trolley_problem:2026_07_18_devlog_01 day5_station --approve
+```
+
+Последний вызов создаёт
+`data/plan/capture_snippets/day5_station.py`: готовый `VideoShot` с точными
+`asset_id`, state/build/action identity, центрированным anchor и offset после
+пятиисекундного head handle. Не переписывай эти поля вручную и не включай
+`loop` для gameplay.
 
 ## 5. Autopilot preflight + draft
 
