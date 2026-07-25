@@ -358,6 +358,53 @@ def test_realtime_recorder_hydrates_exact_task_and_writes_ingest_result(tmp_path
     assert saved["game_report_path"] == "data/footage/day5.mp4.game.json"
 
 
+def test_realtime_recorder_staging_merges_existing_shared_results(tmp_path):
+    recorder = _record_script_module()
+    production = _production(tmp_path)
+    output = production / "data" / "footage" / "day5.mp4"
+    output.parent.mkdir(parents=True)
+    output.write_bytes(b"video")
+    metadata = output.with_suffix(".mp4.capture.json")
+    metadata.write_bytes(b"metadata")
+    game_report = output.with_suffix(".mp4.game.json")
+    game_report.write_bytes(b"game")
+    results = production / "data" / "plan" / "capture_results.json"
+    results.parent.mkdir(parents=True)
+    results.write_text(json.dumps({
+        "version": 2,
+        "production_id": "2026_07_18_reel_01",
+        "results": [{
+            "request_id": "day4",
+            "status": "captured",
+            "path": "data/footage/day4.mp4",
+        }],
+    }), encoding="utf-8")
+    staging = results.with_name(".capture_results.json.staged")
+
+    recorder._write_result(
+        staging,
+        existing_path=results,
+        production_id="2026_07_18_reel_01",
+        request_id="day5",
+        production_root=production,
+        output=output,
+        artifact_sha=hashlib.sha256(output.read_bytes()).hexdigest(),
+        metadata_path=metadata,
+        metadata_sha=hashlib.sha256(metadata.read_bytes()).hexdigest(),
+        game_report_path=game_report,
+        game_report_sha=hashlib.sha256(game_report.read_bytes()).hexdigest(),
+        state_id="day5.station",
+        build_id="exe-sha256:" + "a" * 64,
+        captured_at="2026-07-24T00:00:11Z",
+    )
+
+    payload = json.loads(staging.read_text(encoding="utf-8"))
+    assert [item["request_id"] for item in payload["results"]] == [
+        "day4",
+        "day5",
+    ]
+
+
 def test_realtime_recorder_probe_locks_game_reported_semantic_hashes(
     tmp_path,
     monkeypatch,

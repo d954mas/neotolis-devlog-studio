@@ -28,6 +28,7 @@ resolution lives here.
 from __future__ import annotations
 
 import hashlib
+from pathlib import Path
 
 from dlstudio.ir import (
     AssetProbe,
@@ -50,6 +51,7 @@ from .probe import Kind, build_registry
 from .roles import content_role
 from .segments import build_segments, resolve_windows
 from .words import load_words
+from dlstudio.services.bundle import bundle_read_lock
 
 __all__ = ["build_timeline"]
 
@@ -70,33 +72,44 @@ def build_timeline(
     Words JSON is always read from disk (the transcript is the master clock);
     only media *facts* are probe-gated.
     """
-    assets = build_registry(_referenced_paths(edit), probe=probe, injected=probes)
+    referenced = _referenced_paths(edit)
+    read_paths = [
+        path if Path(path).is_absolute() else Path.cwd() / path
+        for path in referenced
+    ]
+    with bundle_read_lock(read_paths):
+        assets = build_registry(referenced, probe=probe, injected=probes)
 
-    warnings: list[str] = []
-    diagnostics: list[CheckIssue] = []
-    ir_beats: list[IRBeat] = []
-    for beat_id in edit.order:
-        beat = edit.beats[beat_id]
-        ir_beat, beat_warnings, beat_diagnostics = _compile_beat(beat_id, beat, edit, assets)
-        ir_beats.append(ir_beat)
-        warnings.extend(beat_warnings)
-        diagnostics.extend(beat_diagnostics)
+        warnings: list[str] = []
+        diagnostics: list[CheckIssue] = []
+        ir_beats: list[IRBeat] = []
+        for beat_id in edit.order:
+            beat = edit.beats[beat_id]
+            ir_beat, beat_warnings, beat_diagnostics = _compile_beat(
+                beat_id,
+                beat,
+                edit,
+                assets,
+            )
+            ir_beats.append(ir_beat)
+            warnings.extend(beat_warnings)
+            diagnostics.extend(beat_diagnostics)
 
-    placements = _placements(edit.order, ir_beats)
-    mix = _build_mix(edit, placements, ir_beats)
+        placements = _placements(edit.order, ir_beats)
+        mix = _build_mix(edit, placements, ir_beats)
 
-    return Timeline(
-        edit_name=edit.name,
-        design=edit.design,
-        beats=ir_beats,
-        placements=placements,
-        mix=mix,
-        assets=assets,
-        output=edit.output,
-        asset_policy=edit.asset_policy,
-        warnings=warnings,
-        diagnostics=diagnostics,
-    )
+        return Timeline(
+            edit_name=edit.name,
+            design=edit.design,
+            beats=ir_beats,
+            placements=placements,
+            mix=mix,
+            assets=assets,
+            output=edit.output,
+            asset_policy=edit.asset_policy,
+            warnings=warnings,
+            diagnostics=diagnostics,
+        )
 
 
 # ─── beat compilation ───────────────────────────────────────────────────────

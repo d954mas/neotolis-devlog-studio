@@ -117,6 +117,49 @@ def _recover_directory(directory: Path) -> None:
         _recover_journal(journal)
 
 
+def _nearest_data_root(path: Path) -> Path | None:
+    for candidate in (path, *path.parents):
+        if candidate.name.casefold() == "data":
+            return candidate
+    return None
+
+
+def _transaction_root(paths: list[Path]) -> Path:
+    data_roots = {
+        root.resolve()
+        for path in paths
+        if (root := _nearest_data_root(path.resolve())) is not None
+    }
+    if len(data_roots) == 1:
+        return next(iter(data_roots))
+    return Path(os.path.commonpath([str(path.parent) for path in paths])).resolve()
+
+
+@contextmanager
+def bundle_read_lock(paths: list[str | Path]):
+    """Keep readers from observing a partially promoted production bundle."""
+
+    resolved = [Path(path).resolve() for path in paths]
+    if not resolved:
+        yield
+        return
+    data_roots = {
+        root.resolve()
+        for path in resolved
+        if (root := _nearest_data_root(path)) is not None
+    }
+    if len(data_roots) != 1:
+        yield
+        return
+    root = next(iter(data_roots))
+    if not root.exists():
+        yield
+        return
+    with _bundle_transaction_lock(root):
+        _recover_directory(root)
+        yield
+
+
 def recover_bundle_transactions(root: str | Path) -> None:
     """Restore interrupted transactions without touching a live promotion."""
 
@@ -144,8 +187,15 @@ def promote_bundle(replacements: list[tuple[Path, Path]]) -> None:
     missing = [path for path in staged_paths if not path.is_file()]
     if missing:
         raise FileNotFoundError(f"bundle staged file is missing: {missing[0]}")
-    common = Path(os.path.commonpath([str(path.parent) for path in target_paths]))
+    common = _transaction_root(target_paths)
     common.mkdir(parents=True, exist_ok=True)
+    for staged in staged_paths:
+        try:
+            staged.relative_to(common)
+        except ValueError as exc:
+            raise ValueError(
+                f"bundle staged file must stay inside transaction root: {staged}"
+            ) from exc
 
     with _bundle_transaction_lock(common):
         _recover_directory(common)
@@ -189,4 +239,8 @@ def promote_bundle(replacements: list[tuple[Path, Path]]) -> None:
         journal.unlink(missing_ok=True)
 
 
-__all__ = ["promote_bundle", "recover_bundle_transactions"]
+__all__ = [
+    "bundle_read_lock",
+    "promote_bundle",
+    "recover_bundle_transactions",
+]

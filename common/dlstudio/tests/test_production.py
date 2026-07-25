@@ -152,6 +152,35 @@ def test_product_colon_production_reference_loads(tmp_path, monkeypatch):
         os.chdir(start)
 
 
+def test_one_character_product_reference_is_not_parsed_as_windows_drive(
+    tmp_path,
+):
+    from dlstudio.production import (
+        is_filesystem_edit_ref,
+        resolve_production_reference,
+    )
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    product = workspace / "x"
+    production = _write_minimal_production(
+        product,
+        "2026_07_18_reel_01",
+    )
+    manifest = product / "product.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace(
+            'id = "not_a_trolley_problem"',
+            'id = "x"',
+        ),
+        encoding="utf-8",
+    )
+    reference = "x:2026_07_18_reel_01"
+
+    assert is_filesystem_edit_ref(reference)
+    assert resolve_production_reference(reference, workspace) == production.resolve()
+
+
 def test_production_output_paths_are_isolated(tmp_path):
     from dlstudio.production import load_production_manifest
 

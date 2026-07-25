@@ -156,17 +156,30 @@ def _find_product_root(start: Path) -> Path:
     raise ProductionError(f"no product.toml found above production {start}")
 
 
+def _canonical_production_reference(raw: str) -> tuple[str, str] | None:
+    if ":" not in raw:
+        return None
+    product_id, production_id = raw.split(":", 1)
+    if (
+        product_id.isidentifier()
+        and _PRODUCTION_ID_RE.fullmatch(production_id) is not None
+    ):
+        return product_id, production_id
+    return None
+
+
 def resolve_production_reference(ref: str | Path, workspace_root: Path | None = None) -> Path:
     """Resolve a path or ``product_id:production_id`` to a production root."""
     raw = str(ref)
-    if ":" not in raw or Path(raw).drive:
+    canonical = _canonical_production_reference(raw)
+    if canonical is None and (":" not in raw or Path(raw).drive):
         path = _production_manifest_path(ref)
         return path.parent
-    product_id, production_id = raw.split(":", 1)
-    if not product_id.isidentifier() or _PRODUCTION_ID_RE.fullmatch(production_id) is None:
+    if canonical is None:
         raise ProductionError(
             "production reference must use product_id:YYYY_MM_DD_<devlog|reel>_<NN>"
         )
+    product_id, production_id = canonical
     base = (workspace_root or Path.cwd()).resolve()
     product = load_product_manifest(base / product_id)
     candidates = [product.devlogs_dir / production_id, product.reels_dir / production_id]
@@ -258,6 +271,8 @@ def load_production_manifest(root_or_file: str | Path) -> ProductionManifest:
 
 def is_filesystem_edit_ref(ref: str) -> bool:
     """True when ``ref`` is intended as a production path, not a module."""
+    if _canonical_production_reference(ref) is not None:
+        return True
     value = Path(ref)
     product_ref = ":" in ref and not value.drive
     return product_ref or value.exists() or value.name == "production.toml" or any(

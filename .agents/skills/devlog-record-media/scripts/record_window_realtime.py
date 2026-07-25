@@ -448,6 +448,7 @@ def _hydrate_from_batch(args: argparse.Namespace) -> str | None:
 def _write_result(
     path: Path,
     *,
+    existing_path: Path | None = None,
     production_id: str,
     request_id: str,
     production_root: Path,
@@ -476,8 +477,9 @@ def _write_result(
         "captured_at": captured_at,
     }
     existing: dict = {}
-    if path.is_file():
-        existing = json.loads(path.read_text(encoding="utf-8"))
+    source = existing_path if existing_path is not None else path
+    if source.is_file():
+        existing = json.loads(source.read_text(encoding="utf-8"))
         if (
             not isinstance(existing, dict)
             or existing.get("version") != 2
@@ -1080,6 +1082,7 @@ def main() -> int:
         )
         _write_result(
             results_staging,
+            existing_path=results_path,
             production_id=production_id,
             request_id=args.request_id,
             production_root=production_root,
