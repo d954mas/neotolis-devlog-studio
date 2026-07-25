@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from fractions import Fraction
 from pathlib import Path
 
 from dlstudio.ir import Timeline
@@ -70,10 +71,50 @@ def _geometry_payload(timeline: Timeline) -> dict:
 
 
 def timeline_geometry_sha256(timeline: Timeline) -> str:
-    """Return a deterministic identity for the currently compiled geometry."""
+    """Return a profile-independent identity for the compiled transform.
 
+    Draft and delivery profiles commonly differ only by a uniform resolution
+    scale.  Their proof identity must stay equal while an aspect-ratio, source,
+    timing, fit, or anchor change must invalidate it.
+    """
+
+    width, height = timeline.design.resolution
+    canonical_aspect = Fraction(width, height).limit_denominator(32)
+    segments: list[dict] = []
+    for beat in timeline.beats:
+        for index, segment in enumerate(beat.segments):
+            geometry = segment.geometry
+            segments.append({
+                "beat_id": beat.id,
+                "segment_index": index,
+                "t0": segment.t0,
+                "t1": segment.t1,
+                "src": segment.src,
+                "asset_id": segment.asset_id,
+                "editorial_role": segment.editorial_role,
+                "geometry": (
+                    {
+                        "fit": geometry.fit,
+                        "anchor_x": geometry.anchor_x,
+                        "anchor_y": geometry.anchor_y,
+                        "source_width": geometry.source_width,
+                        "source_height": geometry.source_height,
+                    }
+                    if geometry is not None
+                    else None
+                ),
+            })
+    identity = {
+        "schema_version": 2,
+        "edit_name": timeline.edit_name,
+        "output_aspect": [
+            canonical_aspect.numerator,
+            canonical_aspect.denominator,
+        ],
+        "segments": segments,
+    }
     encoded = json.dumps(
-        _geometry_payload(timeline),
+        identity,
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),

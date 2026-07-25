@@ -1038,6 +1038,49 @@ def test_capture_ingest_v2_rejects_tampered_game_report_before_catalog(
     assert catalog_called is False
 
 
+def test_capture_ingest_v2_rejects_debug_proof_without_game_report(tmp_path):
+    production = _production(tmp_path)
+    result_path = _prepare_v2_gameplay_capture(production)
+    request_path = production / "data" / "plan" / "capture_requests.json"
+    requests = json.loads(request_path.read_text(encoding="utf-8"))
+    request = requests["requests"][0]
+    request["editorial_role"] = "debug_proof"
+    request["capture_method"] = "deterministic_devapi"
+    request_path.write_text(json.dumps(requests), encoding="utf-8")
+
+    from dlstudio.services.capture_batch import (
+        CaptureBatchError,
+        ingest_capture_results,
+        prepare_capture_batch,
+    )
+
+    prepare_capture_batch(production, request_path)
+    results = json.loads(result_path.read_text(encoding="utf-8"))
+    result = results["results"][0]
+    metadata_path = production / result["recorder_metadata_path"]
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["editorial_role"] = "debug_proof"
+    metadata["capture_method"] = "deterministic_devapi"
+    metadata.pop("game_report_path")
+    metadata.pop("game_report_sha256")
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    result["capture_method"] = "deterministic_devapi"
+    result["recorder_metadata_sha256"] = hashlib.sha256(
+        metadata_path.read_bytes()
+    ).hexdigest()
+    result.pop("game_report_path")
+    result.pop("game_report_sha256")
+    result_path.write_text(json.dumps(results), encoding="utf-8")
+
+    with pytest.raises(
+        CaptureBatchError,
+        match="debug_proof requires a hash-bound game report",
+    ):
+        ingest_capture_results(production, result_path)
+
+    assert not (production / "data" / "assets" / "registry.json").exists()
+
+
 def test_capture_ingest_v2_rejects_game_tick_rollback(tmp_path):
     production = _production(tmp_path)
     result_path = _prepare_v2_gameplay_capture(production)

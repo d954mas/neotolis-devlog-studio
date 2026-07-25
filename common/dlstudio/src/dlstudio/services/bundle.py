@@ -1,7 +1,7 @@
 """Crash-recoverable promotion for multi-file production artifacts."""
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 import json
 import os
 import threading
@@ -74,7 +74,12 @@ def _recover_journal(path: Path) -> None:
         or not isinstance(entries, list)
     ):
         raise RuntimeError(f"invalid bundle recovery entries: {path}")
-    root = path.parent.resolve()
+    root = _nearest_data_root(path.parent.resolve())
+    if root is None:
+        raise RuntimeError(
+            f"bundle recovery journal is outside a production data root: {path}"
+        )
+    root = root.resolve()
     nonce = path.name.removeprefix(_JOURNAL_PREFIX).removesuffix(".json")
 
     def confined(raw: object, label: str) -> Path:
@@ -132,7 +137,7 @@ def _transaction_root(paths: list[Path]) -> Path:
     }
     if len(data_roots) == 1:
         return next(iter(data_roots))
-    return Path(os.path.commonpath([str(path.parent) for path in paths])).resolve()
+    raise ValueError("bundle targets must share one production data root")
 
 
 @contextmanager
@@ -148,15 +153,16 @@ def bundle_read_lock(paths: list[str | Path]):
         for path in resolved
         if (root := _nearest_data_root(path)) is not None
     }
-    if len(data_roots) != 1:
+    if not data_roots:
         yield
         return
-    root = next(iter(data_roots))
-    if not root.exists():
-        yield
-        return
-    with _bundle_transaction_lock(root):
-        _recover_directory(root)
+    roots = sorted(data_roots, key=lambda path: str(path).casefold())
+    with ExitStack() as stack:
+        for root in roots:
+            if not root.exists():
+                continue
+            stack.enter_context(_bundle_transaction_lock(root))
+            _recover_directory(root)
         yield
 
 

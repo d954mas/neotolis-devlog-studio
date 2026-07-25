@@ -1335,10 +1335,12 @@ def test_cmd_speech_edit_applies_agent_plan_and_promotes_bundle(tmp_path, monkey
 def test_speech_edit_bundle_promotion_rolls_back_on_replace_failure(tmp_path, monkeypatch):
     from dlstudio.services import bundle as bundle_service
 
-    staged_audio = tmp_path / "staged.wav"
-    staged_words = tmp_path / "staged.json"
-    audio = tmp_path / "audio.wav"
-    words = tmp_path / "words.json"
+    data = tmp_path / "data"
+    data.mkdir()
+    staged_audio = data / "staged.wav"
+    staged_words = data / "staged.json"
+    audio = data / "audio.wav"
+    words = data / "words.json"
     staged_audio.write_bytes(b"new-audio")
     staged_words.write_bytes(b"new-words")
     audio.write_bytes(b"old-audio")

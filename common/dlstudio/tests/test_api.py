@@ -180,6 +180,14 @@ def _await_job(client: TestClient, job_id: str, *, timeout: float = 8.0) -> dict
     raise AssertionError(f"job {job_id} never finished: {data}")
 
 
+def _approve_script(client: TestClient) -> None:
+    response = client.post(
+        "/api/script/approve",
+        json={"approved_by": "test"},
+    )
+    assert response.status_code == 200
+
+
 # ─── /api/project, /api/ir, /api/check (compiled) ────────────────────────────
 
 @_needs_ffmpeg
@@ -378,8 +386,23 @@ def test_autopilot_content_action_records_request_without_mutating_manifest(ligh
 
 # ─── takes upload ────────────────────────────────────────────────────────────
 
+def test_takes_upload_requires_script_approval(light_client):
+    client, root, _ = light_client
+
+    response = client.post(
+        "/api/takes/b01",
+        files={"file": ("take.webm", b"AUDIO-BYTES", "audio/webm")},
+    )
+
+    assert response.status_code == 409
+    assert "approval is missing" in response.json()["detail"]
+    recordings = root / "data" / "recordings"
+    assert not (recordings.exists() and list(recordings.glob("b01_*")))
+
+
 def test_takes_upload_saves_file(light_client):
     client, root, _ = light_client
+    _approve_script(client)
     r = client.post(
         "/api/takes/b01",
         files={"file": ("take.webm", b"AUDIO-BYTES", "audio/webm")},
@@ -395,6 +418,7 @@ def test_takes_upload_saves_file(light_client):
 
 def test_takes_upload_persists_validated_recording_markers(light_client):
     client, root, _ = light_client
+    _approve_script(client)
     metadata = {
         "schema": "devlog.voice_take",
         "version": 1,
@@ -422,6 +446,7 @@ def test_takes_upload_does_not_publish_raw_without_sidecar_bundle(
     monkeypatch,
 ):
     client, root, _ = light_client
+    _approve_script(client)
     metadata = {
         "schema": "devlog.voice_take",
         "version": 1,
@@ -455,6 +480,7 @@ def test_takes_upload_does_not_publish_raw_without_sidecar_bundle(
 
 def test_takes_upload_rejects_unordered_recording_markers(light_client):
     client, _, _ = light_client
+    _approve_script(client)
     metadata = {
         "schema": "devlog.voice_take",
         "version": 1,
@@ -487,6 +513,7 @@ def test_takes_upload_rejects_bad_beat_id(light_client):
 
 def test_takes_upload_rejects_empty(light_client):
     client, root, _ = light_client
+    _approve_script(client)
     r = client.post(
         "/api/takes/b01",
         files={"file": ("empty.webm", b"", "audio/webm")},
@@ -499,6 +526,7 @@ def test_takes_upload_rejects_empty(light_client):
 
 def test_takes_upload_rejects_oversize(light_client, monkeypatch):
     client, root, _ = light_client
+    _approve_script(client)
     # shrink the cap so a tiny body trips it (streamed cap, not Content-Length)
     monkeypatch.setattr("dlstudio.api.app._MAX_UPLOAD_BYTES", 4)
     r = client.post(
@@ -583,8 +611,24 @@ class _FakeProcessResult:
         self.duration = 3.2
 
 
+def test_process_take_requires_script_approval(light_client):
+    client, root, _ = light_client
+    recording = root / "data" / "recordings" / "take.webm"
+    recording.parent.mkdir(parents=True, exist_ok=True)
+    recording.write_bytes(b"raw")
+
+    response = client.post("/api/actions/process-take", json={
+        "beat_id": "b01",
+        "recording_path": "data/recordings/take.webm",
+    })
+
+    assert response.status_code == 409
+    assert "approval is missing" in response.json()["detail"]
+
+
 def test_process_take_job_lifecycle(light_client, monkeypatch):
     client, root, _ = light_client
+    _approve_script(client)
     (root / "data" / "recordings").mkdir(parents=True, exist_ok=True)
     (root / "data" / "recordings" / "take.webm").write_bytes(b"raw")
 
@@ -639,6 +683,7 @@ def test_process_take_job_lifecycle(light_client, monkeypatch):
 
 def test_process_take_rejects_traversal_recording(light_client):
     client, _, _ = light_client
+    _approve_script(client)
     r = client.post("/api/actions/process-take", json={
         "beat_id": "b01", "recording_path": "../evil.webm",
     })
@@ -657,6 +702,7 @@ def test_process_take_unknown_beat_404(light_client):
 
 def test_process_take_job_reports_error(light_client, monkeypatch):
     client, root, _ = light_client
+    _approve_script(client)
     (root / "data" / "recordings").mkdir(parents=True, exist_ok=True)
     (root / "data" / "recordings" / "take.webm").write_bytes(b"raw")
 
@@ -678,6 +724,7 @@ def test_process_take_quality_rejection_persists_rejected_verdict(
     monkeypatch,
 ):
     client, root, _ = light_client
+    _approve_script(client)
     recording = root / "data" / "recordings" / "take.webm"
     recording.parent.mkdir(parents=True, exist_ok=True)
     recording.write_bytes(b"raw")
@@ -713,6 +760,7 @@ def test_process_take_failure_leaves_previous_take_intact(light_client, monkeypa
     (or a half-written wav). With temp+promote, any failure leaves the
     previous take byte-identical and no temp litter behind."""
     client, root, _ = light_client
+    _approve_script(client)
     (root / "data" / "recordings").mkdir(parents=True, exist_ok=True)
     (root / "data" / "recordings" / "take.webm").write_bytes(b"raw")
 
@@ -752,6 +800,7 @@ def test_parallel_process_take_jobs_same_beat_serialize(light_client, monkeypatc
     """0.7: two Process jobs of ONE beat must never run concurrently (they
     write the same declared wav/words paths)."""
     client, root, _ = light_client
+    _approve_script(client)
     (root / "data" / "recordings").mkdir(parents=True, exist_ok=True)
     (root / "data" / "recordings" / "take.webm").write_bytes(b"raw")
 

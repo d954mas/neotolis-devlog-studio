@@ -155,6 +155,35 @@ def test_recovery_rejects_journal_paths_outside_recovery_root(tmp_path):
     assert outside.read_text(encoding="utf-8") == "must survive"
 
 
+def test_recovery_rejects_journal_outside_production_data_root(tmp_path):
+    from dlstudio.services.bundle import recover_bundle_transactions
+
+    source = tmp_path / "edit" / "__init__.py"
+    source.parent.mkdir()
+    source.write_text("must survive", encoding="utf-8")
+    staged = source.with_name(".staged.py")
+    staged.write_text("forged", encoding="utf-8")
+    journal = tmp_path / ".dlstudio-bundle-forged.json"
+    journal.write_text(json.dumps({
+        "schema": "dlstudio.bundle_transaction",
+        "version": 1,
+        "state": "committed",
+        "promoted": 1,
+        "entries": [{
+            "staged": str(staged),
+            "target": str(source),
+            "backup": str(source.with_name(".__init__.py.backup-forged")),
+            "had_target": True,
+        }],
+    }), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="outside a production data root"):
+        recover_bundle_transactions(tmp_path)
+
+    assert source.read_text(encoding="utf-8") == "must survive"
+    assert staged.read_text(encoding="utf-8") == "forged"
+
+
 def test_bundle_reader_waits_until_multi_file_promotion_is_complete(
     tmp_path,
     monkeypatch,
@@ -209,3 +238,64 @@ def test_bundle_reader_waits_until_multi_file_promotion_is_complete(
     assert not writer.is_alive()
     assert not reader.is_alive()
     assert observed == [(b"new-audio", b"new-words")]
+
+
+def test_bundle_reader_locks_each_referenced_data_root(tmp_path, monkeypatch):
+    from dlstudio.services import bundle
+
+    first_data = tmp_path / "production" / "data"
+    second_data = tmp_path / "shared" / "data"
+    audio = first_data / "audio" / "take.wav"
+    words = first_data / "audio" / "take_words.json"
+    shared = second_data / "footage" / "scene.mp4"
+    audio.parent.mkdir(parents=True)
+    shared.parent.mkdir(parents=True)
+    audio.write_bytes(b"old-audio")
+    words.write_bytes(b"old-words")
+    shared.write_bytes(b"shared")
+    staged_audio = audio.with_name(".take.wav.staged")
+    staged_words = words.with_name(".take_words.json.staged")
+    staged_audio.write_bytes(b"new-audio")
+    staged_words.write_bytes(b"new-words")
+
+    first_promoted = threading.Event()
+    release_writer = threading.Event()
+    real_replace = bundle.os.replace
+
+    def pausing_replace(source, target):
+        real_replace(source, target)
+        if Path(source) == staged_audio:
+            first_promoted.set()
+            assert release_writer.wait(timeout=5)
+
+    monkeypatch.setattr(bundle.os, "replace", pausing_replace)
+    writer = threading.Thread(
+        target=bundle.promote_bundle,
+        args=([(staged_audio, audio), (staged_words, words)],),
+    )
+    writer.start()
+    assert first_promoted.wait(timeout=5)
+
+    observed: list[tuple[bytes, bytes, bytes]] = []
+    reader_entered = threading.Event()
+
+    def read_bundle():
+        with bundle.bundle_read_lock([audio, words, shared]):
+            reader_entered.set()
+            observed.append((
+                audio.read_bytes(),
+                words.read_bytes(),
+                shared.read_bytes(),
+            ))
+
+    reader = threading.Thread(target=read_bundle)
+    reader.start()
+    time.sleep(0.05)
+    assert not reader_entered.is_set()
+    release_writer.set()
+    writer.join(timeout=5)
+    reader.join(timeout=5)
+
+    assert not writer.is_alive()
+    assert not reader.is_alive()
+    assert observed == [(b"new-audio", b"new-words", b"shared")]

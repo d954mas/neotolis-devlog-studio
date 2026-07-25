@@ -104,6 +104,10 @@ class _IngestedCapture(_Model):
                 raise ValueError(
                     "debug_proof action requires semantic identity"
                 )
+            if not self.game_report_path or not self.game_report_sha256:
+                raise ValueError(
+                    "debug_proof requires a hash-bound game report"
+                )
             return self
         if self.editorial_role != "gameplay":
             return self
@@ -463,7 +467,7 @@ def _upsert_validated_capture(
             raise AssetRegistryError(f"capture proof is missing: {proof_path}")
         if _sha256(proof_path).casefold() != str(facts[hash_field]).casefold():
             raise AssetRegistryError(f"capture proof SHA mismatch: {path_field}")
-    if facts["editorial_role"] == "gameplay":
+    if facts["editorial_role"] in {"gameplay", "debug_proof"}:
         game_report_path = _artifact_path(root, str(facts["game_report_path"]))
         if not game_report_path.is_file():
             raise AssetRegistryError(
@@ -737,6 +741,18 @@ def _verify_registered_asset(root: Path, asset: RegisteredAsset) -> Path:
                 f"{asset.asset_id}"
             )
     if asset.editorial_role == "debug_proof":
+        if not asset.game_report_path or not asset.game_report_sha256:
+            raise AssetRegistryError(
+                f"asset lacks game capture report: {asset.asset_id}"
+            )
+        game_report_path = _artifact_path(root, asset.game_report_path)
+        if (
+            not game_report_path.is_file()
+            or _sha256(game_report_path) != asset.game_report_sha256
+        ):
+            raise AssetRegistryError(
+                f"asset game capture report is stale: {asset.asset_id}"
+            )
         debug_contract = {
             "capture_method": asset.capture_method == "deterministic_devapi",
             "state_id": bool(asset.state_id),

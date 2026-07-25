@@ -736,9 +736,11 @@ def _validate_v2_recorder_metadata(
             raise CaptureBatchError(
                 f"recorder executable SHA mismatch: {result.request_id}"
             )
+    if task.editorial_role in {"gameplay", "debug_proof"}:
         if not result.game_report_path or not result.game_report_sha256:
             raise CaptureBatchError(
-                f"gameplay requires a hash-bound game report: {result.request_id}"
+                f"{task.editorial_role} requires a hash-bound game report: "
+                f"{result.request_id}"
             )
         report_path = _target_path(production_root, result.game_report_path)
         if not report_path.is_file():

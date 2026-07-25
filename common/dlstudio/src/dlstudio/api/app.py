@@ -531,14 +531,13 @@ def create_app(edit_module: str) -> FastAPI:
         return digest, verified.ok
 
     def _reject_stale_script_approval(current_edit) -> None:
-        """Reject a once-approved script after its source has changed."""
+        """Require approval of the exact current script before recording."""
 
-        if _script_approval_path().is_file() and not _script_status(
-            current_edit
-        )[1]:
+        if not _script_status(current_edit)[1]:
+            state = "stale" if _script_approval_path().is_file() else "missing"
             raise HTTPException(
                 status_code=409,
-                detail="script approval is stale; approve the current script",
+                detail=f"script approval is {state}; approve the current script",
             )
 
     # ── GET /api/project ─────────────────────────────────────────────────────

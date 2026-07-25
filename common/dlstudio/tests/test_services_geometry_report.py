@@ -83,3 +83,22 @@ def test_geometry_report_persists_compact_resolved_transform(tmp_path):
     assert (projected.scaled_width, projected.scaled_height) == (200, 100)
     assert projected.crop_x == 75
     assert timeline_geometry_sha256(effective) != payload["timeline_sha256"]
+
+    same_aspect = timeline_for_design(
+        timeline,
+        timeline.design.model_copy(update={"resolution": (200, 200)}),
+    )
+    assert timeline_geometry_sha256(same_aspect) == payload["timeline_sha256"]
+
+    draft_vertical = timeline_for_design(
+        timeline,
+        timeline.design.model_copy(update={"resolution": (304, 540)}),
+    )
+    final_vertical = timeline_for_design(
+        timeline,
+        timeline.design.model_copy(update={"resolution": (1080, 1920)}),
+    )
+    assert (
+        timeline_geometry_sha256(draft_vertical)
+        == timeline_geometry_sha256(final_vertical)
+    )
