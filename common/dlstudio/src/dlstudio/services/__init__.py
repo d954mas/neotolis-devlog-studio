@@ -48,6 +48,7 @@ from .audio import (
     write_voice_take_verdict,
 )
 from .boundary_report import build_boundary_report, write_boundary_report
+from .bundle import promote_bundle
 from .geometry_report import build_geometry_report, write_geometry_report
 from .hyperframes import init_project, render_html
 from .publish import generate_youtube_package
@@ -78,6 +79,7 @@ __all__ = [
     "process_take",
     "recording_metadata_path",
     "write_voice_take_verdict",
+    "promote_bundle",
     "build_boundary_report",
     "write_boundary_report",
     "build_geometry_report",

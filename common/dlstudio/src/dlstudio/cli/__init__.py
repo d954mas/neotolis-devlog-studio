@@ -809,16 +809,42 @@ def cmd_audio(args: argparse.Namespace) -> int:
     verdict_out = (
         Path("data") / "review" / "voice_takes" / f"{recording.stem}.json"
     )
+    nonce = uuid.uuid4().hex[:8]
+    audio_out.parent.mkdir(parents=True, exist_ok=True)
+    words_out.parent.mkdir(parents=True, exist_ok=True)
+    verdict_out.parent.mkdir(parents=True, exist_ok=True)
+    tmp_audio = audio_out.with_name(
+        f".{audio_out.stem}.tmp-{nonce}{audio_out.suffix or '.wav'}"
+    )
+    tmp_words = words_out.with_name(
+        f".{words_out.stem}.tmp-{nonce}{words_out.suffix or '.json'}"
+    )
+    tmp_verdict = verdict_out.with_name(
+        f".{verdict_out.stem}.tmp-{nonce}{verdict_out.suffix or '.json'}"
+    )
     try:
-        result = services.process_take(recording, audio_out)
-    except services.VoiceTakeQualityError as exc:
-        rejected_out = verdict_out.with_name(f"{verdict_out.stem}.rejected.json")
-        services.write_voice_take_verdict(exc.verdict, rejected_out)
-        raise
-    services.transcribe(audio_out, words_out, language=args.language, model=args.model)
-    result_verdict = getattr(result, "verdict", None)
-    if result_verdict is not None:
-        services.write_voice_take_verdict(result_verdict, verdict_out)
+        try:
+            result = services.process_take(recording, tmp_audio)
+        except services.VoiceTakeQualityError as exc:
+            rejected_out = verdict_out.with_name(f"{verdict_out.stem}.rejected.json")
+            services.write_voice_take_verdict(exc.verdict, rejected_out)
+            raise
+        services.transcribe(
+            tmp_audio,
+            tmp_words,
+            language=args.language,
+            model=args.model,
+        )
+        result_verdict = getattr(result, "verdict", None)
+        replacements = [(tmp_audio, audio_out), (tmp_words, words_out)]
+        if result_verdict is not None:
+            services.write_voice_take_verdict(result_verdict, tmp_verdict)
+            replacements.append((tmp_verdict, verdict_out))
+        _promote_bundle(replacements)
+    finally:
+        tmp_audio.unlink(missing_ok=True)
+        tmp_words.unlink(missing_ok=True)
+        tmp_verdict.unlink(missing_ok=True)
     print(f"[dl2] audio: {recording} -> {audio_out}")
     print(f"[dl2]   measured input loudness: {result.input_i:.2f} LUFS")
     print(f"[dl2]   duration: {result.duration:.2f}s")
@@ -835,31 +861,11 @@ def _speech_edit_artifact_path(words_path: Path) -> Path:
 
 
 def _promote_bundle(replacements: list[tuple[Path, Path]]) -> None:
-    """Publish a staged bundle with best-effort rollback on replace failure."""
+    """Backward-compatible CLI seam for the shared transaction helper."""
 
-    nonce = uuid.uuid4().hex[:8]
-    backups: list[tuple[Path, Path]] = []
-    promoted: list[Path] = []
-    try:
-        for _staged, target in replacements:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            if target.exists():
-                backup = target.with_name(f".{target.name}.backup-{nonce}")
-                os.replace(target, backup)
-                backups.append((backup, target))
-        for staged, target in replacements:
-            os.replace(staged, target)
-            promoted.append(target)
-    except Exception:
-        for target in reversed(promoted):
-            target.unlink(missing_ok=True)
-        for backup, target in reversed(backups):
-            if backup.exists():
-                os.replace(backup, target)
-        raise
-    else:
-        for backup, _target in backups:
-            backup.unlink(missing_ok=True)
+    from dlstudio.services import promote_bundle
+
+    promote_bundle(replacements)
 
 
 def cmd_speech_edit(args: argparse.Namespace) -> int:

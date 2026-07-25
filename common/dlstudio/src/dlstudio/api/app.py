@@ -268,6 +268,7 @@ def _process_take_job(
             f".{audio_out.stem}.tmp-{nonce}{audio_out.suffix or '.wav'}")
         tmp_words = words_out.with_name(
             f".{words_out.stem}.tmp-{nonce}{words_out.suffix or '.json'}")
+        tmp_verdict: Path | None = None
         try:
             try:
                 result = services.process_take(recording, tmp_audio)
@@ -283,14 +284,20 @@ def _process_take_job(
             if model:
                 kwargs["model"] = model
             services.transcribe(tmp_audio, tmp_words, **kwargs)
-            os.replace(tmp_audio, audio_out)
-            os.replace(tmp_words, words_out)
             result_verdict = getattr(result, "verdict", None)
+            replacements = [(tmp_audio, audio_out), (tmp_words, words_out)]
             if result_verdict is not None:
-                services.write_voice_take_verdict(result_verdict, verdict_out)
+                tmp_verdict = verdict_out.with_name(
+                    f".{verdict_out.stem}.tmp-{nonce}{verdict_out.suffix}"
+                )
+                services.write_voice_take_verdict(result_verdict, tmp_verdict)
+                replacements.append((tmp_verdict, verdict_out))
+            services.promote_bundle(replacements)
         finally:
             tmp_audio.unlink(missing_ok=True)
             tmp_words.unlink(missing_ok=True)
+            if tmp_verdict is not None:
+                tmp_verdict.unlink(missing_ok=True)
     return {
         "audio": _rel(root, audio_out),
         "words": _rel(root, words_out),

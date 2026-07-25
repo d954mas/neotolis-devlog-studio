@@ -1209,20 +1209,62 @@ def test_cmd_audio_calls_services_with_right_args(tmp_path, monkeypatch):
 
     def fake_pt(recording, out_wav, **kw):
         calls["pt"] = (Path(recording), Path(out_wav))
+        Path(out_wav).write_bytes(b"processed")
         return _FakeAudioResult()
 
     def fake_tr(wav, out_json, **kw):
         calls["tr"] = (Path(wav), Path(out_json), kw)
+        Path(out_json).write_text('{"words":[]}', encoding="utf-8")
         return Path(out_json)
 
     monkeypatch.setattr(dl_services_mod, "process_take", fake_pt)
     monkeypatch.setattr(dl_services_mod, "transcribe", fake_tr)
 
     assert cli.main(["audio", dotted, "b01", "rec.webm"]) == 0
-    assert calls["pt"] == (Path("rec.webm"), Path("data/finalize/b01_vo.wav"))
-    assert calls["tr"][0] == Path("data/finalize/b01_vo.wav")
-    assert calls["tr"][1] == Path("data/finalize/b01_words.json")
+    assert calls["pt"][0] == Path("rec.webm")
+    assert calls["pt"][1].parent == Path("data/finalize")
+    assert calls["pt"][1].name.startswith(".b01_vo.tmp-")
+    assert calls["tr"][0] == calls["pt"][1]
+    assert calls["tr"][1].parent == Path("data/finalize")
+    assert calls["tr"][1].name.startswith(".b01_words.tmp-")
     assert calls["tr"][2] == {"language": "ru", "model": "medium"}
+    assert Path("data/finalize/b01_vo.wav").read_bytes() == b"processed"
+    assert json.loads(Path("data/finalize/b01_words.json").read_text(
+        encoding="utf-8"
+    )) == {"words": []}
+
+
+def test_cmd_audio_transcribe_failure_preserves_previous_bundle(
+    tmp_path,
+    monkeypatch,
+):
+    pkg = _unique_pkg("proj_audio_atomic")
+    dotted = _make_fake_project(tmp_path, pkg, edit_body=_BEAT_EDIT_BODY)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    project = tmp_path / pkg
+    (project / "rec.webm").write_bytes(b"raw-take")
+    audio = project / "data" / "finalize" / "b01_vo.wav"
+    words = project / "data" / "finalize" / "b01_words.json"
+    audio.parent.mkdir(parents=True)
+    audio.write_bytes(b"old-audio")
+    words.write_text('{"words":["old"]}', encoding="utf-8")
+
+    def fake_pt(_recording, out_wav, **_kw):
+        Path(out_wav).write_bytes(b"new-audio")
+        return _FakeAudioResult()
+
+    def failing_transcribe(_wav, out_json, **_kw):
+        Path(out_json).write_text('{"words":["partial"]}', encoding="utf-8")
+        raise RuntimeError("transcription failed")
+
+    monkeypatch.setattr(dl_services_mod, "process_take", fake_pt)
+    monkeypatch.setattr(dl_services_mod, "transcribe", failing_transcribe)
+
+    assert cli.main(["audio", dotted, "b01", "rec.webm"]) == 1
+    assert audio.read_bytes() == b"old-audio"
+    assert json.loads(words.read_text(encoding="utf-8")) == {"words": ["old"]}
+    assert not list(audio.parent.glob(".*.tmp-*"))
 
 
 def test_cmd_audio_unknown_beat_errors(tmp_path, monkeypatch):
@@ -1291,6 +1333,8 @@ def test_cmd_speech_edit_applies_agent_plan_and_promotes_bundle(tmp_path, monkey
 
 
 def test_speech_edit_bundle_promotion_rolls_back_on_replace_failure(tmp_path, monkeypatch):
+    from dlstudio.services import bundle as bundle_service
+
     staged_audio = tmp_path / "staged.wav"
     staged_words = tmp_path / "staged.json"
     audio = tmp_path / "audio.wav"
@@ -1299,14 +1343,14 @@ def test_speech_edit_bundle_promotion_rolls_back_on_replace_failure(tmp_path, mo
     staged_words.write_bytes(b"new-words")
     audio.write_bytes(b"old-audio")
     words.write_bytes(b"old-words")
-    real_replace = cli.os.replace
+    real_replace = bundle_service.os.replace
 
     def fail_second_promotion(src, dst):
         if Path(src) == staged_words and Path(dst) == words:
             raise OSError("simulated replace failure")
         return real_replace(src, dst)
 
-    monkeypatch.setattr(cli.os, "replace", fail_second_promotion)
+    monkeypatch.setattr(bundle_service.os, "replace", fail_second_promotion)
     with pytest.raises(OSError, match="simulated"):
         cli._promote_bundle([(staged_audio, audio), (staged_words, words)])
 
