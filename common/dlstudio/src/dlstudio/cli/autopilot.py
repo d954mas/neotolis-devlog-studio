@@ -7,6 +7,7 @@ not contain an AI runtime and storyboard delegates rendering to the existing
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -23,6 +24,14 @@ _PREFLIGHT = Path("data/review/preflight.json")
 _STORYBOARD_BOUNDARIES = Path("data/review/storyboard_boundaries.json")
 _RUN_STATE = Path("data/review/autopilot_run.json")
 _RUN_ID_ENV = "DLSTUDIO_RUN_ID"
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _load_target(edit_ref: str) -> tuple[Any, Path, str]:
@@ -651,11 +660,13 @@ def cmd_preflight(args: argparse.Namespace) -> int:
 
     artifact_value = args.artifact or getattr(edit, "output", None)
     artifact_path: Path | None = None
+    artifact_sha256: str | None = None
     if artifact_value:
         candidate = Path(artifact_value)
         artifact_path = candidate if candidate.is_absolute() else root / candidate
         artifact_path = artifact_path.resolve()
         if artifact_path.is_file():
+            artifact_sha256 = _sha256(artifact_path)
             render_report = analyze_rendered_video(
                 artifact_path,
                 shots=shots,
@@ -683,6 +694,7 @@ def cmd_preflight(args: argparse.Namespace) -> int:
             "shot_manifest": manifest_input,
             "asset_catalog": catalog_input,
             "render_artifact": str(artifact_path) if artifact_path is not None else None,
+            "render_artifact_sha256": artifact_sha256,
             **script_inputs,
         },
     }

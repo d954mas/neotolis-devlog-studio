@@ -30,6 +30,13 @@ class PublishEvidenceResult:
     review_verdict: str
 
 
+@dataclass(frozen=True)
+class ValidatedDeliverySources:
+    video_path: Path
+    metadata_path: Path
+    image_path: Path
+
+
 def _read_object(path: Path) -> dict:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -48,6 +55,71 @@ def _sha256(path: Path) -> str:
         for block in iter(lambda: stream.read(1 << 20), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _validate_evidence_file(
+    manifest: ProductionManifest,
+    *,
+    section: dict,
+    path_key: str,
+    actual_path: str | Path,
+    label: str,
+) -> Path:
+    expected = _production_data_path(manifest, section.get(path_key), label)
+    actual = Path(actual_path).resolve()
+    if actual != expected:
+        raise PublishEvidenceError(
+            f"{label} source does not match exact publish evidence: {actual}"
+        )
+    expected_hash = str(section.get("sha256", "")).casefold()
+    if not expected_hash or _sha256(actual) != expected_hash:
+        raise PublishEvidenceError(f"{label} SHA-256 is stale in publish evidence")
+    return actual
+
+
+def validate_delivery_sources(
+    manifest: ProductionManifest,
+    *,
+    video_path: str | Path,
+    metadata_path: str | Path,
+    image_path: str | Path,
+) -> ValidatedDeliverySources:
+    """Revalidate the exact evidence-bound files immediately before delivery."""
+
+    evidence = _read_object(manifest.publish_dir / "evidence.json")
+    if (
+        evidence.get("product_id") != manifest.product.id
+        or evidence.get("production_id") != manifest.id
+    ):
+        raise PublishEvidenceError("publish evidence identity does not match production")
+    video = evidence.get("video")
+    image = evidence.get("image")
+    metadata = evidence.get("metadata")
+    if not isinstance(video, dict) or not isinstance(image, dict) or not isinstance(metadata, dict):
+        raise PublishEvidenceError("publish evidence is incomplete")
+    return ValidatedDeliverySources(
+        video_path=_validate_evidence_file(
+            manifest,
+            section=video,
+            path_key="publish_path",
+            actual_path=video_path,
+            label="video",
+        ),
+        metadata_path=_validate_evidence_file(
+            manifest,
+            section=metadata,
+            path_key="path",
+            actual_path=metadata_path,
+            label="metadata",
+        ),
+        image_path=_validate_evidence_file(
+            manifest,
+            section=image,
+            path_key="path",
+            actual_path=image_path,
+            label="image",
+        ),
+    )
 
 
 def _production_data_path(manifest: ProductionManifest, raw: object, label: str) -> Path:
@@ -217,6 +289,8 @@ def refresh_publish_evidence(
     artifact_raw = inputs.get("render_artifact") if isinstance(inputs, dict) else None
     if _resolve_review_artifact(manifest, artifact_raw) != video:
         raise PublishEvidenceError("preflight is stale for the exact publish video")
+    if str(inputs.get("render_artifact_sha256", "")).casefold() != video_hash:
+        raise PublishEvidenceError("preflight SHA-256 is stale for publish video")
     if preflight.get("errors") != 0 or not preflight.get("ok"):
         raise PublishEvidenceError("preflight does not pass for the publish video")
 
@@ -279,7 +353,11 @@ def refresh_publish_evidence(
             "path": str(feedback_path), "verdict": verdict,
             "timestamp": review.get("timestamp"), "artifact_sha256": video_hash,
         },
-        "metadata": {"path": str(metadata), "validated": True},
+        "metadata": {
+            "path": str(metadata),
+            "sha256": _sha256(metadata),
+            "validated": True,
+        },
     }
     payload["evidence_version"] = 1
     payload["evidence_generated_at"] = generated_at
@@ -304,5 +382,7 @@ def refresh_publish_evidence(
 __all__ = [
     "PublishEvidenceError",
     "PublishEvidenceResult",
+    "ValidatedDeliverySources",
     "refresh_publish_evidence",
+    "validate_delivery_sources",
 ]

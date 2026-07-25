@@ -467,6 +467,7 @@ def test_preflight_combines_ir_and_shot_manifest_issues(tmp_path, monkeypatch):
         "script_approval": None,
         "creator_profile": None,
         "render_artifact": None,
+        "render_artifact_sha256": None,
     }
 
 
@@ -503,6 +504,7 @@ def test_preflight_without_optional_shot_files_reports_ir_only(tmp_path, monkeyp
         "script_approval": None,
         "creator_profile": None,
         "render_artifact": None,
+        "render_artifact_sha256": None,
     }
 
 

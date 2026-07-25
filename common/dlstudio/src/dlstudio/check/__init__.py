@@ -355,7 +355,17 @@ def _check_source_windows(
                     where=where,
                 ))
                 continue
-            source_end = segment.offset + max(0.0, segment.t1 - segment.t0)
+            outgoing_transition = 0.0
+            if index < len(beat.segments) - 1:
+                if segment.xfade is None:
+                    outgoing_transition = timeline.design.crossfade_dur
+                elif segment.xfade.kind != "cut":
+                    outgoing_transition = segment.xfade.dur
+            source_end = (
+                segment.offset
+                + max(0.0, segment.t1 - segment.t0)
+                + outgoing_transition
+            )
             allowed_end = duration - tail
             if segment.offset < head - _EPS:
                 out.append(CheckIssue(

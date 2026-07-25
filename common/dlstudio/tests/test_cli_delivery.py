@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
@@ -60,6 +61,7 @@ def _production(tmp_path: Path, *, kind: str = "reel") -> tuple[Path, str]:
 
 def _write_inputs(root: Path, *, kind: str = "reel") -> None:
     (root / "data/finalize/video.mp4").write_bytes(b"video")
+    (root / "data/publish/video.mp4").write_bytes(b"video")
     (root / "data/publish/metadata.md").write_text(
         "## Title\nA Reel\n\n"
         "## Description\nA description.\n\n"
@@ -69,6 +71,26 @@ def _write_inputs(root: Path, *, kind: str = "reel") -> None:
     )
     image = "cover.png" if kind == "reel" else "thumbnail.png"
     (root / "data/publish" / image).write_bytes(b"image")
+    video_path = (root / "data/publish/video.mp4").resolve()
+    metadata_path = (root / "data/publish/metadata.md").resolve()
+    image_path = (root / "data/publish" / image).resolve()
+    (root / "data/publish/evidence.json").write_text(json.dumps({
+        "version": 1,
+        "product_id": "fixture_product",
+        "production_id": root.name,
+        "video": {
+            "publish_path": str(video_path),
+            "sha256": hashlib.sha256(video_path.read_bytes()).hexdigest(),
+        },
+        "metadata": {
+            "path": str(metadata_path),
+            "sha256": hashlib.sha256(metadata_path.read_bytes()).hexdigest(),
+        },
+        "image": {
+            "path": str(image_path),
+            "sha256": hashlib.sha256(image_path.read_bytes()).hexdigest(),
+        },
+    }), encoding="utf-8")
 
 
 def test_deliver_uses_production_scoped_defaults_and_records_telemetry(
@@ -105,6 +127,25 @@ def test_deliver_uses_production_scoped_defaults_and_records_telemetry(
         "delivery/reels/2026_07_18_reel_01/cover.png",
         "delivery/reels/2026_07_18_reel_01/delivery_manifest.json",
     ]
+
+
+def test_deliver_rejects_publish_artifact_mutated_after_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    root, edit_ref = _production(tmp_path)
+    _write_inputs(root)
+    (root / "data/publish/video.mp4").write_bytes(b"mutated")
+    monkeypatch.chdir(root)
+    args = argparse.Namespace(
+        edit=edit_ref,
+        video=None,
+        metadata=None,
+        image=None,
+        overwrite=False,
+    )
+
+    with pytest.raises(CliError, match="video SHA-256 is stale"):
+        cli_delivery.cmd_deliver(args)
 
 
 def test_deliver_explicit_paths_must_stay_inside_production(

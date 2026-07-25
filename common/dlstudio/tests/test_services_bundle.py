@@ -5,6 +5,8 @@ from pathlib import Path
 import threading
 import time
 
+import pytest
+
 
 def test_promote_bundle_publishes_all_files_and_removes_journal(tmp_path):
     from dlstudio.services.bundle import promote_bundle
@@ -124,3 +126,30 @@ def test_parallel_promotions_do_not_recover_each_others_live_journal(
     assert target_a.read_bytes() == b"a"
     assert target_b.read_bytes() == b"b"
     assert not list(root.glob(".dlstudio-bundle-*.json"))
+
+
+def test_recovery_rejects_journal_paths_outside_recovery_root(tmp_path):
+    from dlstudio.services.bundle import recover_bundle_transactions
+
+    root = tmp_path / "data"
+    root.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("must survive", encoding="utf-8")
+    journal = root / ".dlstudio-bundle-escape.json"
+    journal.write_text(json.dumps({
+        "schema": "dlstudio.bundle_transaction",
+        "version": 1,
+        "state": "backed_up",
+        "promoted": 0,
+        "entries": [{
+            "staged": str(outside),
+            "target": str(root / "safe.txt"),
+            "backup": str(root / ".safe.txt.backup-escape"),
+            "had_target": False,
+        }],
+    }), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="escapes recovery root"):
+        recover_bundle_transactions(root)
+
+    assert outside.read_text(encoding="utf-8") == "must survive"

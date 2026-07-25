@@ -24,6 +24,10 @@ def cmd_deliver(args: argparse.Namespace) -> int:
     from dlstudio.cli.autopilot import _load_target
     from dlstudio.production import ProductionError, load_production_manifest
     from dlstudio.services.delivery import DeliveryError, build_delivery_bundle
+    from dlstudio.services.publish_evidence import (
+        PublishEvidenceError,
+        validate_delivery_sources,
+    )
     from dlstudio.services.telemetry import TelemetryError, record_telemetry_event
     from dlstudio.cli.telemetry import current_run_id
 
@@ -32,7 +36,7 @@ def cmd_deliver(args: argparse.Namespace) -> int:
         _edit, root, _canonical = _load_target(args.edit)
         manifest = load_production_manifest(root)
         video = _source_path(
-            root, manifest.data_dir, args.video, Path("data/finalize/video.mp4")
+            root, manifest.data_dir, args.video, Path("data/publish/video.mp4")
         )
         metadata = _source_path(
             root, manifest.data_dir, args.metadata, Path("data/publish/metadata.md")
@@ -44,11 +48,17 @@ def cmd_deliver(args: argparse.Namespace) -> int:
             args.image,
             Path("data/publish") / image_name,
         )
-        result = build_delivery_bundle(
+        sources = validate_delivery_sources(
             manifest,
             video_path=video,
             metadata_path=metadata,
             image_path=image,
+        )
+        result = build_delivery_bundle(
+            manifest,
+            video_path=sources.video_path,
+            metadata_path=sources.metadata_path,
+            image_path=sources.image_path,
             overwrite=args.overwrite,
         )
         wall_ms = max(0, (time.perf_counter_ns() - started) // 1_000_000)
@@ -69,7 +79,12 @@ def cmd_deliver(args: argparse.Namespace) -> int:
             ),
             run_id=current_run_id(),
         )
-    except (ProductionError, DeliveryError, TelemetryError) as exc:
+    except (
+        ProductionError,
+        DeliveryError,
+        PublishEvidenceError,
+        TelemetryError,
+    ) as exc:
         raise CliError(str(exc)) from exc
 
     print(f"[dl2] delivery -> {result.delivery_dir}")
@@ -122,7 +137,7 @@ def add_subparser(sub: argparse._SubParsersAction) -> None:
     )
     deliver.add_argument(
         "--video",
-        help="source under production data/ (default: data/finalize/video.mp4)",
+        help="source under production data/ (default: data/publish/video.mp4)",
     )
     deliver.add_argument(
         "--metadata",

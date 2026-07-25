@@ -68,15 +68,38 @@ def _recover_journal(path: Path) -> None:
     except (OSError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"invalid bundle recovery journal: {path}") from exc
     entries = payload.get("entries")
-    if not isinstance(entries, list):
+    if (
+        payload.get("schema") != "dlstudio.bundle_transaction"
+        or payload.get("version") != 1
+        or not isinstance(entries, list)
+    ):
         raise RuntimeError(f"invalid bundle recovery entries: {path}")
+    root = path.parent.resolve()
+    nonce = path.name.removeprefix(_JOURNAL_PREFIX).removesuffix(".json")
+
+    def confined(raw: object, label: str) -> Path:
+        candidate = Path(str(raw or ""))
+        if not candidate.is_absolute():
+            raise RuntimeError(f"bundle {label} path is not absolute: {path}")
+        resolved = candidate.resolve()
+        try:
+            resolved.relative_to(root)
+        except ValueError as exc:
+            raise RuntimeError(
+                f"bundle {label} path escapes recovery root: {path}"
+            ) from exc
+        return resolved
+
     committed = payload.get("state") == "committed"
     for entry in reversed(entries):
         if not isinstance(entry, dict):
             raise RuntimeError(f"invalid bundle recovery entry: {path}")
-        staged = Path(str(entry.get("staged") or ""))
-        target = Path(str(entry.get("target") or ""))
-        backup = Path(str(entry.get("backup") or ""))
+        staged = confined(entry.get("staged"), "staged")
+        target = confined(entry.get("target"), "target")
+        backup = confined(entry.get("backup"), "backup")
+        expected_backup = target.with_name(f".{target.name}.backup-{nonce}")
+        if backup != expected_backup:
+            raise RuntimeError(f"bundle backup path is invalid: {path}")
         had_target = entry.get("had_target") is True
         if not committed:
             if backup.is_file():

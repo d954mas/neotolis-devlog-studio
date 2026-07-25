@@ -23,7 +23,7 @@ from dlstudio.ir import (
     Timeline,
     WordSpan,
 )
-from dlstudio.model import Beat, Chunk, Edit, Scene
+from dlstudio.model import Beat, Chunk, Edit, Scene, Transition
 from dlstudio.model.content import Overlay
 
 
@@ -239,6 +239,21 @@ def test_vq_asset_id_passes_exact_approved_binding(tmp_path, monkeypatch):
         issue.code in {"VQ-ASSET-ID", "VQ-SOURCE-WINDOW"}
         for issue in rep.issues
     )
+
+    following = seg("still.png", t0=1, t1=2)
+    rep = run_checks(mk_timeline(
+        beats=[mk_beat(duration=2, segments=[shot, following])],
+        asset_policy="production",
+    ))
+    assert any(issue.code == "VQ-SOURCE-WINDOW" for issue in rep.errors)
+
+    shot.xfade = Transition(kind="cut", dur=0.3)
+    rep = run_checks(mk_timeline(
+        beats=[mk_beat(duration=2, segments=[shot, following])],
+        asset_policy="production",
+    ))
+    assert not any(issue.code == "VQ-SOURCE-WINDOW" for issue in rep.errors)
+    shot.xfade = None
 
     shot.fit = "cover"
     shot.geometry = IRSegmentGeometry.resolve(

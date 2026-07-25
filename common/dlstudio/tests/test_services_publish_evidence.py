@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from PIL import Image
+import pytest
 
 from dlstudio.production import ProductManifest, ProductionManifest
 
@@ -50,7 +51,10 @@ def test_refresh_publish_evidence_binds_preflight_and_review_to_exact_hash(
     manifest.review_dir.mkdir(parents=True)
     (manifest.review_dir / "preflight.json").write_text(json.dumps({
         "ok": True, "errors": 0, "warnings": 2,
-        "inputs": {"render_artifact": str(video)},
+        "inputs": {
+            "render_artifact": str(video),
+            "render_artifact_sha256": digest,
+        },
     }), encoding="utf-8")
     (manifest.review_dir / "feedback.json").write_text(json.dumps({
         "full": {"video": {"artifact_path": str(video), "artifact_sha256": digest,
@@ -75,3 +79,62 @@ def test_refresh_publish_evidence_binds_preflight_and_review_to_exact_hash(
         "sha256": digest,
         "size": len(b"exact-video"),
     }
+    evidence = json.loads(result.evidence_path.read_text(encoding="utf-8"))
+    assert evidence["metadata"]["sha256"] == hashlib.sha256(
+        (publish / "metadata.md").read_bytes()
+    ).hexdigest()
+
+
+def test_refresh_publish_evidence_rejects_video_mutated_after_preflight(
+    tmp_path, monkeypatch
+):
+    manifest = _manifest(tmp_path)
+    video = manifest.data_dir / "finalize" / "video.mp4"
+    video.parent.mkdir(parents=True)
+    video.write_bytes(b"before-preflight")
+    stale_digest = hashlib.sha256(video.read_bytes()).hexdigest()
+    video.write_bytes(b"after-preflight")
+    current_digest = hashlib.sha256(video.read_bytes()).hexdigest()
+    publish = manifest.publish_dir
+    publish.mkdir(parents=True)
+    Image.new("RGB", (1080, 1920), "red").save(publish / "cover.png")
+    (publish / "metadata.md").write_text(
+        "# Title\nGame\n# Description\nStory\n# Hashtags\n#gamedev\n",
+        encoding="utf-8",
+    )
+    (publish / "publish.json").write_text(json.dumps({
+        "version": 1,
+        "product_id": "game",
+        "production_id": manifest.id,
+        "video": {"path": "data/finalize/video.mp4"},
+        "cover": {"path": "data/publish/cover.png"},
+    }), encoding="utf-8")
+    manifest.review_dir.mkdir(parents=True)
+    (manifest.review_dir / "preflight.json").write_text(json.dumps({
+        "ok": True,
+        "errors": 0,
+        "warnings": 0,
+        "inputs": {
+            "render_artifact": str(video),
+            "render_artifact_sha256": stale_digest,
+        },
+    }), encoding="utf-8")
+    (manifest.review_dir / "feedback.json").write_text(json.dumps({
+        "full": {"video": {
+            "artifact_path": str(video),
+            "artifact_sha256": current_digest,
+            "verdict": "ship",
+        }}
+    }), encoding="utf-8")
+    from dlstudio.services import publish_evidence
+    monkeypatch.setattr(
+        publish_evidence,
+        "_probe_video",
+        lambda _path: (10.0, 1080, 1920),
+    )
+
+    with pytest.raises(
+        publish_evidence.PublishEvidenceError,
+        match="preflight SHA-256",
+    ):
+        publish_evidence.refresh_publish_evidence(manifest)
