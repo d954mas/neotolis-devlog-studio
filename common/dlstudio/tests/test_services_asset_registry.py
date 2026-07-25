@@ -12,6 +12,8 @@ def _facts(tmp_path: Path, *, content: bytes = b"take-one") -> dict:
     artifact.write_bytes(content)
     metadata = tmp_path / "data" / "footage" / "day5.mp4.capture.json"
     metadata.write_bytes(b'{"trusted":"recorder"}')
+    game_report = tmp_path / "data" / "footage" / "day5.mp4.game.json"
+    game_report.write_bytes(b'{"trusted":"game"}')
     batch = tmp_path / "data" / "plan" / "capture_batch.json"
     batch.parent.mkdir(parents=True, exist_ok=True)
     batch.write_bytes(b'{"version":2,"requests":[]}')
@@ -23,6 +25,8 @@ def _facts(tmp_path: Path, *, content: bytes = b"take-one") -> dict:
         "artifact_sha256": hashlib.sha256(content).hexdigest(),
         "metadata_path": "data/footage/day5.mp4.capture.json",
         "metadata_sha256": hashlib.sha256(metadata.read_bytes()).hexdigest(),
+        "game_report_path": "data/footage/day5.mp4.game.json",
+        "game_report_sha256": hashlib.sha256(game_report.read_bytes()).hexdigest(),
         "capture_batch_path": "data/plan/capture_batch.json",
         "capture_batch_sha256": hashlib.sha256(batch.read_bytes()).hexdigest(),
         "capture_results_path": "data/plan/capture_results.json",
@@ -45,6 +49,8 @@ def _facts(tmp_path: Path, *, content: bytes = b"take-one") -> dict:
         "head_handle_seconds": 5,
         "tail_handle_seconds": 5,
         "frame_audit_passed": True,
+        "game_elapsed_seconds": 31,
+        "measured_playback_rate": 1.0,
     }
 
 
@@ -223,6 +229,7 @@ def test_approval_rejects_stale_semantic_revision_even_when_media_sha_is_same(
         ("head_handle_seconds", 0, "head_handle_seconds"),
         ("tail_handle_seconds", 0, "tail_handle_seconds"),
         ("frame_audit_passed", False, "frame_audit"),
+        ("measured_playback_rate", 10.0, "real-time playback"),
     ],
 )
 def test_ingested_gameplay_rechecks_trusted_contract(

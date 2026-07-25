@@ -102,7 +102,8 @@ VideoShot(
 ### Запись gameplay без ручной склейки шагов
 
 Сначала опиши нужные состояния в `data/plan/capture_requests.json` версии 2.
-Для gameplay обязательны `state_id`, точный `build_id`, `action_id`,
+Для gameplay обязательны одинаковые `state_id` и `scene` (точный id
+game-owned capture scene), точный `build_id`, объявленный сценой `action_id`,
 `capture_method="realtime_window"`, скорость `1.0`, чистый UI и запас не
 меньше 5 секунд с обеих сторон. Затем веди одну сцену одной resumable-командой:
 
@@ -114,6 +115,14 @@ dl2 capture-flow not_a_trolley_problem:2026_07_18_devlog_01 day5_station \
 # после просмотра валидированного клипа — явный авторский checkpoint:
 dl2 capture-flow not_a_trolley_problem:2026_07_18_devlog_01 day5_station --approve
 ```
+
+Recorder создаёт `<clip>.game.json` из ответов
+`game.capture_scene.describe/status` и привязывает его SHA-256 к metadata и
+`capture_results.json`. Ingest блокирует запись, если сцена перезапустилась,
+действие не объявлено, нет semantic/clean-UI capability, отчёт изменился или
+длительность MP4 отличается от измеренного реального времени более чем на 3%
+(минимальный допуск 0.5 секунды). Одного поля `simulation_rate=1.0` от
+рекордера больше недостаточно.
 
 Последний вызов создаёт
 `data/plan/capture_snippets/day5_station.py`: готовый `VideoShot` с точными

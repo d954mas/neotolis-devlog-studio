@@ -97,6 +97,12 @@ class CaptureRequestSpecV2(_Model):
             raise ValueError("gameplay requires build_id")
         if not self.action_id:
             raise ValueError("gameplay requires action_id")
+        if not self.scene:
+            raise ValueError("gameplay requires a game-owned capture scene")
+        if self.state_id != self.scene:
+            raise ValueError(
+                "gameplay state_id must equal the game-owned capture scene id"
+            )
         if re.fullmatch(r"exe-sha256:[0-9a-fA-F]{64}", self.build_id) is None:
             raise ValueError("gameplay build_id requires exe-sha256:<64 hex>")
         if self.head_handle_seconds < 5:
@@ -156,6 +162,11 @@ class CaptureResultSpecV2(_Model):
         default=None,
         pattern=r"^[0-9a-fA-F]{64}$",
     )
+    game_report_path: str | None = None
+    game_report_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-fA-F]{64}$",
+    )
     captured_at: str = ""
     note: str = ""
 
@@ -184,6 +195,95 @@ class CaptureResultsV2(_Model):
     version: Literal[2] = 2
     production_id: str
     results: list[CaptureResultSpecV2]
+
+
+class CaptureSceneStatus(_Model):
+    active_scene: str = Field(alias="activeScene")
+    api_version: int = Field(alias="apiVersion", ge=1)
+    contract_version: int = Field(alias="contractVersion", ge=1)
+    game_id: str = Field(alias="gameId", min_length=1)
+    generation: int = Field(ge=1)
+    ready: bool
+    semantic_hash: str = Field(alias="semanticHash", pattern=r"^[0-9a-fA-F]{8}$")
+    tick: int = Field(ge=0)
+
+
+class CaptureSceneAction(_Model):
+    arguments: list = Field(default_factory=list)
+    description: str
+    id: str = Field(min_length=1)
+
+
+class CaptureSceneCapabilities(_Model):
+    hides_game_ui: bool = Field(alias="hidesGameUi")
+    semantic_hash: bool = Field(alias="semanticHash")
+
+
+class CaptureSceneDescriptorBody(_Model):
+    actions: list[CaptureSceneAction]
+    capabilities: CaptureSceneCapabilities
+    contract_version: int = Field(alias="contractVersion", ge=1)
+    id: str = Field(min_length=1)
+    parameters: list
+    title: str
+
+
+class CaptureSceneDescriptor(_Model):
+    api_version: int = Field(alias="apiVersion", ge=1)
+    game_id: str = Field(alias="gameId", min_length=1)
+    scene: CaptureSceneDescriptorBody
+
+
+class GameCaptureReport(_Model):
+    """Raw game responses plus monotonic timing measured by the capture tool."""
+
+    report_schema: Literal["devlog.game_capture_report"] = Field(alias="schema")
+    version: Literal[1] = 1
+    status_endpoint: Literal["game.capture_scene.status"]
+    describe_endpoint: Literal["game.capture_scene.describe"]
+    action_endpoint: Literal["game.capture_scene.trigger_action"]
+    scene_id: str = Field(min_length=1)
+    action_id: str = Field(min_length=1)
+    build_id: str = Field(pattern=r"^exe-sha256:[0-9a-fA-F]{64}$")
+    monotonic_started_seconds: float = Field(ge=0)
+    monotonic_ended_seconds: float = Field(gt=0)
+    descriptor: CaptureSceneDescriptor
+    before: CaptureSceneStatus
+    action_result: CaptureSceneStatus
+    after: CaptureSceneStatus
+
+    @model_validator(mode="after")
+    def validate_game_evidence(self) -> "GameCaptureReport":
+        if self.monotonic_ended_seconds <= self.monotonic_started_seconds:
+            raise ValueError("game capture report has a non-positive elapsed time")
+        descriptor = self.descriptor
+        if descriptor.scene.id != self.scene_id:
+            raise ValueError("game capture descriptor scene mismatch")
+        if descriptor.scene.capabilities.hides_game_ui is not True:
+            raise ValueError("game capture scene does not hide game UI")
+        if descriptor.scene.capabilities.semantic_hash is not True:
+            raise ValueError("game capture scene lacks semantic hash support")
+        if self.action_id not in {action.id for action in descriptor.scene.actions}:
+            raise ValueError("game capture action is absent from the game descriptor")
+        statuses = (self.before, self.action_result, self.after)
+        for status in statuses:
+            if status.active_scene != self.scene_id:
+                raise ValueError("game capture status scene mismatch")
+            if status.game_id != descriptor.game_id:
+                raise ValueError("game capture status game mismatch")
+            if status.api_version != descriptor.api_version:
+                raise ValueError("game capture API version mismatch")
+            if status.contract_version != descriptor.scene.contract_version:
+                raise ValueError("game capture contract version mismatch")
+            if status.ready is not True:
+                raise ValueError("game capture scene was not ready")
+        if len({status.generation for status in statuses}) != 1:
+            raise ValueError("game capture scene restarted during recording")
+        if self.action_result.tick < self.before.tick:
+            raise ValueError("game capture action response predates recording")
+        if self.after.tick <= self.before.tick:
+            raise ValueError("game capture scene did not advance during recording")
+        return self
 
 
 @dataclass(frozen=True)
@@ -319,26 +419,88 @@ def _validate_v2_recorder_metadata(
             raise CaptureBatchError(
                 f"recorder executable SHA mismatch: {result.request_id}"
             )
+        if not result.game_report_path or not result.game_report_sha256:
+            raise CaptureBatchError(
+                f"gameplay requires a hash-bound game report: {result.request_id}"
+            )
+        report_path = _target_path(production_root, result.game_report_path)
+        if not report_path.is_file():
+            raise CaptureBatchError(
+                f"game capture report is missing: {result.request_id}"
+            )
+        if _sha256(report_path).casefold() != result.game_report_sha256.casefold():
+            raise CaptureBatchError(
+                f"game capture report hash mismatch: {result.request_id}"
+            )
+        try:
+            report = GameCaptureReport.model_validate(_read_json(report_path))
+        except ValidationError as exc:
+            raise CaptureBatchError(
+                f"invalid game capture report: {result.request_id}: {exc}"
+            ) from exc
+        if report.scene_id != task.scene or report.scene_id != task.state_id:
+            raise CaptureBatchError(
+                f"game-reported scene mismatch: {result.request_id}"
+            )
+        if report.action_id != task.action_id:
+            raise CaptureBatchError(
+                f"game-reported action mismatch: {result.request_id}"
+            )
+        if report.build_id.casefold() != task.build_id.casefold():
+            raise CaptureBatchError(
+                f"game-reported build mismatch: {result.request_id}"
+            )
+        if metadata.get("game_report_path") != result.game_report_path:
+            raise CaptureBatchError(
+                f"recorder game report path mismatch: {result.request_id}"
+            )
+        if str(metadata.get("game_report_sha256") or "").casefold() != (
+            result.game_report_sha256.casefold()
+        ):
+            raise CaptureBatchError(
+                f"recorder game report hash mismatch: {result.request_id}"
+            )
+        game_elapsed_seconds = (
+            report.monotonic_ended_seconds - report.monotonic_started_seconds
+        )
+    else:
+        report_path = None
+        game_elapsed_seconds = None
     return {
         "request_id": result.request_id,
         "artifact_path": task.target,
         "artifact_sha256": (result.sha256 or "").lower(),
         "metadata_path": metadata_path.relative_to(production_root).as_posix(),
         "metadata_sha256": (result.recorder_metadata_sha256 or "").lower(),
+        "game_report_path": (
+            report_path.relative_to(production_root).as_posix()
+            if report_path is not None
+            else None
+        ),
+        "game_report_sha256": (
+            (result.game_report_sha256 or "").lower()
+            if report_path is not None
+            else None
+        ),
         "editorial_role": task.editorial_role,
         "capture_method": task.capture_method,
         "state_id": task.state_id,
         "build_id": task.build_id,
         "action_id": task.action_id,
         "client_rect": metadata.get("client_rect"),
-        "simulation_rate": metadata.get("simulation_rate"),
+        "simulation_rate": (
+            1.0 if task.editorial_role == "gameplay" else metadata.get("simulation_rate")
+        ),
         "continuous": metadata.get("continuous"),
-        "clean_ui": metadata.get("clean_ui"),
+        "clean_ui": (
+            True if task.editorial_role == "gameplay" else metadata.get("clean_ui")
+        ),
         "client_area": metadata.get("client_area"),
         "cursor_visible": metadata.get("cursor_visible"),
         "head_handle_seconds": metadata.get("head_handle_seconds"),
         "tail_handle_seconds": metadata.get("tail_handle_seconds"),
         "content_seconds": metadata.get("content_seconds"),
+        "game_elapsed_seconds": game_elapsed_seconds,
     }
 
 
@@ -530,6 +692,23 @@ def ingest_capture_results(
                 "actual_duration": asset.duration,
                 "actual_orientation": asset.orientation,
             })
+            if task.editorial_role == "gameplay":
+                game_elapsed = facts.get("game_elapsed_seconds")
+                media_duration = asset.duration or 0.0
+                if not isinstance(game_elapsed, (int, float)) or game_elapsed <= 0:
+                    raise CaptureBatchError(
+                        f"game capture elapsed time is missing: {request_id}"
+                    )
+                tolerance = max(0.5, media_duration * 0.03)
+                if abs(float(game_elapsed) - media_duration) > tolerance:
+                    raise CaptureBatchError(
+                        f"gameplay media duration differs from real-time capture "
+                        f"for {request_id}: media={media_duration:.3f}s, "
+                        f"capture={float(game_elapsed):.3f}s"
+                    )
+                facts["measured_playback_rate"] = (
+                    float(game_elapsed) / media_duration
+                )
             content_start = task.head_handle_seconds
             content_end = content_start + task.content_seconds
             frame_report = analyze_rendered_video(

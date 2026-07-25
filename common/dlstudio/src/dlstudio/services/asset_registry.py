@@ -27,6 +27,11 @@ class _IngestedCapture(_Model):
     artifact_sha256: str = Field(pattern=r"^[0-9a-fA-F]{64}$")
     metadata_path: str = Field(min_length=1)
     metadata_sha256: str = Field(pattern=r"^[0-9a-fA-F]{64}$")
+    game_report_path: str | None = None
+    game_report_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-fA-F]{64}$",
+    )
     capture_batch_path: str = Field(min_length=1)
     capture_batch_sha256: str = Field(pattern=r"^[0-9a-fA-F]{64}$")
     capture_results_path: str = Field(min_length=1)
@@ -52,6 +57,8 @@ class _IngestedCapture(_Model):
     tail_handle_seconds: float | None = Field(default=None, ge=0)
     frame_audit_passed: bool | None = None
     frame_audit: dict | None = None
+    game_elapsed_seconds: float | None = Field(default=None, gt=0)
+    measured_playback_rate: float | None = Field(default=None, gt=0)
 
     @model_validator(mode="after")
     def validate_gameplay_contract(self) -> "_IngestedCapture":
@@ -81,6 +88,12 @@ class _IngestedCapture(_Model):
             raise ValueError("gameplay requires tail_handle_seconds >= 5")
         if self.frame_audit_passed is not True:
             raise ValueError("gameplay requires frame_audit_passed=true")
+        if not self.game_report_path or not self.game_report_sha256:
+            raise ValueError("gameplay requires a hash-bound game report")
+        if self.measured_playback_rate is None or not (
+            0.97 <= self.measured_playback_rate <= 1.03
+        ):
+            raise ValueError("gameplay requires measured real-time playback")
         return self
 
 
@@ -105,6 +118,8 @@ class RegisteredAsset(_Model):
     action_id: str | None = None
     metadata_path: str | None = None
     metadata_sha256: str | None = None
+    game_report_path: str | None = None
+    game_report_sha256: str | None = None
     capture_batch_path: str | None = None
     capture_batch_sha256: str | None = None
     capture_results_path: str | None = None
@@ -125,6 +140,8 @@ class RegisteredAsset(_Model):
     tail_handle_seconds: float | None = None
     frame_audit_passed: bool | None = None
     frame_audit: dict | None = None
+    game_elapsed_seconds: float | None = None
+    measured_playback_rate: float | None = None
     validated_at: str
     approved_sha256: str | None = None
     approved_validation_sha256: str | None = None
@@ -180,6 +197,8 @@ def _validation_sha256(facts: dict, artifact_sha256: str) -> str:
         "action_id": facts.get("action_id"),
         "metadata_path": facts["metadata_path"],
         "metadata_sha256": facts["metadata_sha256"],
+        "game_report_path": facts.get("game_report_path"),
+        "game_report_sha256": facts.get("game_report_sha256"),
         "capture_batch_path": facts["capture_batch_path"],
         "capture_batch_sha256": facts["capture_batch_sha256"],
         "capture_results_path": facts["capture_results_path"],
@@ -200,6 +219,8 @@ def _validation_sha256(facts: dict, artifact_sha256: str) -> str:
         "tail_handle_seconds": facts.get("tail_handle_seconds"),
         "frame_audit_passed": facts.get("frame_audit_passed"),
         "frame_audit": facts.get("frame_audit"),
+        "game_elapsed_seconds": facts.get("game_elapsed_seconds"),
+        "measured_playback_rate": facts.get("measured_playback_rate"),
     }
     payload = json.dumps(
         proof,
@@ -269,6 +290,16 @@ def _upsert_validated_capture(
             raise AssetRegistryError(f"capture proof is missing: {proof_path}")
         if _sha256(proof_path).casefold() != str(facts[hash_field]).casefold():
             raise AssetRegistryError(f"capture proof SHA mismatch: {path_field}")
+    if facts["editorial_role"] == "gameplay":
+        game_report_path = _artifact_path(root, str(facts["game_report_path"]))
+        if not game_report_path.is_file():
+            raise AssetRegistryError(
+                f"game capture report is missing: {game_report_path}"
+            )
+        if _sha256(game_report_path).casefold() != str(
+            facts["game_report_sha256"]
+        ).casefold():
+            raise AssetRegistryError("game capture report SHA mismatch")
 
     validation_sha = _validation_sha256(facts, actual_sha)
     asset_id = f"capture:{facts['request_id']}"
@@ -295,6 +326,16 @@ def _upsert_validated_capture(
         action_id=facts.get("action_id"),
         metadata_path=str(facts["metadata_path"]).replace("\\", "/"),
         metadata_sha256=str(facts["metadata_sha256"]).lower(),
+        game_report_path=(
+            str(facts["game_report_path"]).replace("\\", "/")
+            if facts.get("game_report_path")
+            else None
+        ),
+        game_report_sha256=(
+            str(facts["game_report_sha256"]).lower()
+            if facts.get("game_report_sha256")
+            else None
+        ),
         capture_batch_path=str(facts["capture_batch_path"]).replace("\\", "/"),
         capture_batch_sha256=str(facts["capture_batch_sha256"]).lower(),
         capture_results_path=str(facts["capture_results_path"]).replace("\\", "/"),
@@ -315,6 +356,8 @@ def _upsert_validated_capture(
         tail_handle_seconds=facts.get("tail_handle_seconds"),
         frame_audit_passed=facts.get("frame_audit_passed"),
         frame_audit=facts.get("frame_audit"),
+        game_elapsed_seconds=facts.get("game_elapsed_seconds"),
+        measured_playback_rate=facts.get("measured_playback_rate"),
         validated_at=_now(),
         approved_sha256=existing.approved_sha256 if same_revision else None,
         approved_validation_sha256=(
@@ -373,6 +416,18 @@ def approve_asset(
                 f"asset capture ingest proof is stale: {asset_id}"
             )
     if asset.editorial_role == "gameplay":
+        if not asset.game_report_path or not asset.game_report_sha256:
+            raise AssetRegistryError(
+                f"asset lacks game capture report: {asset_id}"
+            )
+        game_report_path = _artifact_path(root, asset.game_report_path)
+        if (
+            not game_report_path.is_file()
+            or _sha256(game_report_path) != asset.game_report_sha256
+        ):
+            raise AssetRegistryError(
+                f"asset game capture report is stale: {asset_id}"
+            )
         gameplay_contract = {
             "capture_method": asset.capture_method == "realtime_window",
             "build_id": re.fullmatch(
@@ -386,6 +441,13 @@ def approve_asset(
             "head_handle_seconds": (asset.head_handle_seconds or 0.0) >= 5.0,
             "tail_handle_seconds": (asset.tail_handle_seconds or 0.0) >= 5.0,
             "frame_audit": asset.frame_audit_passed is True,
+            "game_report": bool(
+                asset.game_report_path and asset.game_report_sha256
+            ),
+            "playback_rate": (
+                asset.measured_playback_rate is not None
+                and 0.97 <= asset.measured_playback_rate <= 1.03
+            ),
         }
         failed = [name for name, passed in gameplay_contract.items() if not passed]
         if failed:

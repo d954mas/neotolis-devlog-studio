@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from fractions import Fraction
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -40,6 +41,14 @@ def _load_json(path: Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"JSON root must be an object: {path}")
     return value
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _result_for(path: Path, request_id: str) -> dict[str, Any]:
@@ -293,12 +302,147 @@ def main() -> int:
                       "recorded build matches the request",
                       f"recorded build {actual_build!r} != {build_id!r}")
 
+        game_report: dict[str, Any] = {}
+        game_elapsed = 0.0
+        if role == "gameplay":
+            scene_id = contract.get("scene")
+            action_id = contract.get("action_id")
+            audit.require(
+                isinstance(scene_id, str) and scene_id == state_id,
+                "CAPTURE-GAME-SCENE",
+                "state identity is the exact game-owned capture scene",
+                "gameplay requires scene == state_id",
+            )
+            report_raw = (
+                (result or {}).get("game_report_path")
+                or sidecar.get("game_report_path")
+            )
+            report_path = (
+                Path(report_raw)
+                if isinstance(report_raw, str) and report_raw
+                else Path()
+            )
+            if report_path and not report_path.is_absolute():
+                report_path = (args.production_root.resolve() / report_path).resolve()
+            report_exists = bool(report_raw) and report_path.is_file()
+            audit.require(
+                report_exists,
+                "CAPTURE-GAME-REPORT",
+                "hash-bound game capture report exists",
+                "gameplay requires a game capture report",
+            )
+            if report_exists:
+                expected_report_sha = (
+                    (result or {}).get("game_report_sha256")
+                    or sidecar.get("game_report_sha256")
+                )
+                actual_report_sha = _sha256(report_path)
+                audit.require(
+                    actual_report_sha == expected_report_sha,
+                    "CAPTURE-GAME-REPORT-HASH",
+                    "game capture report hash matches",
+                    "game capture report hash mismatch",
+                )
+                game_report = _load_json(report_path)
+                descriptor = game_report.get("descriptor")
+                scene = descriptor.get("scene") if isinstance(descriptor, dict) else None
+                capabilities = (
+                    scene.get("capabilities") if isinstance(scene, dict) else None
+                )
+                actions = scene.get("actions") if isinstance(scene, dict) else None
+                statuses = [
+                    game_report.get("before"),
+                    game_report.get("action_result"),
+                    game_report.get("after"),
+                ]
+                audit.require(
+                    game_report.get("schema") == "devlog.game_capture_report"
+                    and game_report.get("version") == 1,
+                    "CAPTURE-GAME-REPORT-SCHEMA",
+                    "game capture report schema is valid",
+                    "invalid game capture report schema",
+                )
+                audit.require(
+                    game_report.get("scene_id") == scene_id
+                    and isinstance(scene, dict)
+                    and scene.get("id") == scene_id,
+                    "CAPTURE-GAME-STATE",
+                    "game descriptor proves the requested scene",
+                    "game descriptor scene mismatch",
+                )
+                audit.require(
+                    game_report.get("action_id") == action_id
+                    and action_id in {
+                        item.get("id")
+                        for item in actions or []
+                        if isinstance(item, dict)
+                    },
+                    "CAPTURE-GAME-ACTION",
+                    "game descriptor proves the requested action",
+                    "game action is not declared by the scene",
+                )
+                audit.require(
+                    game_report.get("build_id") == build_id,
+                    "CAPTURE-GAME-BUILD",
+                    "game report is bound to the requested executable",
+                    "game report build mismatch",
+                )
+                audit.require(
+                    isinstance(capabilities, dict)
+                    and capabilities.get("hidesGameUi") is True
+                    and capabilities.get("semanticHash") is True,
+                    "CAPTURE-GAME-CLEAN-UI",
+                    "game scene owns clean UI and semantic identity",
+                    "game scene lacks clean-UI/semantic capabilities",
+                )
+                status_ok = all(
+                    isinstance(status, dict)
+                    and status.get("activeScene") == scene_id
+                    and status.get("ready") is True
+                    and isinstance(status.get("semanticHash"), str)
+                    for status in statuses
+                )
+                generations = {
+                    status.get("generation")
+                    for status in statuses
+                    if isinstance(status, dict)
+                }
+                before_tick = (
+                    statuses[0].get("tick", -1)
+                    if isinstance(statuses[0], dict)
+                    else -1
+                )
+                after_tick = (
+                    statuses[2].get("tick", -1)
+                    if isinstance(statuses[2], dict)
+                    else -1
+                )
+                audit.require(
+                    status_ok and len(generations) == 1 and after_tick > before_tick,
+                    "CAPTURE-GAME-CONTINUITY",
+                    "game status stayed ready in one advancing scene generation",
+                    "game scene restarted, stalled, or changed during recording",
+                )
+                game_elapsed = float(
+                    game_report.get("monotonic_ended_seconds", 0)
+                ) - float(game_report.get("monotonic_started_seconds", 0))
+
         ffprobe = shutil.which(args.ffprobe)
         if ffprobe is None:
             raise ValueError(f"ffprobe not found: {args.ffprobe}")
         probe = _probe(artifact, ffprobe)
         audit.facts["probe"] = probe
         width, height = probe["width"], probe["height"]
+        if role == "gameplay":
+            tolerance = max(0.5, probe["duration"] * 0.03)
+            audit.require(
+                game_elapsed > 0
+                and abs(game_elapsed - probe["duration"]) <= tolerance,
+                "CAPTURE-REALTIME-DURATION",
+                "encoded duration matches the measured real-time capture",
+                f"encoded {probe['duration']:.3f}s != measured "
+                f"{game_elapsed:.3f}s (tolerance {tolerance:.3f}s)",
+            )
         orientation = "landscape" if width > height else "vertical" if height > width else "square"
         audit.require(orientation == contract.get("orientation"), "CAPTURE-ORIENTATION",
                       f"orientation is {orientation}",

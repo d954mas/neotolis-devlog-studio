@@ -27,6 +27,7 @@ The contract must name:
 
 - editorial role and required capture method;
 - exact `state_id` and build identity;
+- exact game-owned `scene` (equal to `state_id`) and declared `action_id`;
 - orientation, minimum native resolution, FPS, and simulation rate;
 - content duration plus at least 5 seconds of head and tail handles;
 - continuous-take and clean-UI requirements;
@@ -50,16 +51,22 @@ machine-distinguishable.
 On Windows, use the bundled client-area recorder:
 
 ```powershell
-python .agents/skills/devlog-record-media/scripts/record_window_realtime.py --pid <game-pid> --output <capture.mp4> --state-id <state-id> --build-id "exe-sha256:<running-exe-sha256>" --content-seconds <seconds> --head-handle 5 --tail-handle 5 --min-width 1920 --min-height 1080 --fps 60
+python .agents/skills/devlog-record-media/scripts/record_window_realtime.py --pid <game-pid> --batch <production-root>/data/plan/capture_batch.json --request-id <request-id>
 ```
 
 It records immediately, hides the mouse cursor, resolves the client rectangle
 and executable from the PID, verifies the executable SHA against `build_id`,
-and writes `<capture>.capture.json`. Compute the expected build id from the
+checks the game-owned capture-scene descriptor/status, automatically triggers
+the declared action after the head handle, and writes both
+`<capture>.capture.json` and `<capture>.game.json`. The latter preserves raw
+`describe`, before/action/after status, one scene generation, semantic hashes,
+and monotonic wall duration. Compute the expected build id from the
 exact executable before recording; a branch name or caller-supplied prose is
 not build proof. If the client area is smaller than the requested resolution
 or is outside the visible desktop, stop and fix the launch mode; do not
-upscale afterward.
+upscale afterward. Batch mode reads all identity/geometry/duration values from
+Studio's prepared request and writes/merges
+`data/plan/capture_results.json`; do not retype those values manually.
 
 ## Validate Gameplay Before Ingest
 
@@ -68,10 +75,12 @@ python .agents/skills/devlog-record-media/scripts/validate_gameplay_capture.py -
 ```
 
 For a newly recorded file with its recorder sidecar, `--result` is optional.
-The validator checks structured method/role compatibility, state/build
-presence, native resolution, orientation, FPS, duration, edit handles,
-continuous frame motion, client-area metadata, no upscale, and centered
-crop/focus math.
+The validator checks structured method/role compatibility, game-reported
+scene/action/build identity, one advancing scene generation, native resolution,
+orientation, FPS, duration, edit handles, encoded duration against measured
+real time, continuous frame motion, client-area metadata, no upscale, and
+centered crop/focus math. Recorder assertions alone never prove game state,
+clean UI, or 1x playback.
 
 Any error blocks catalog ingest and `beats.py`. Warnings require an explicit
 decision in the capture result. Only after the script passes, inspect a compact

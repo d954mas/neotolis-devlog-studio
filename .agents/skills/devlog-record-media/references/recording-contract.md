@@ -11,6 +11,8 @@ Use one JSON contract per gameplay take.
   "editorial_role": "gameplay",
   "capture_method": "realtime_window",
   "state_id": "day5_station_new_visual",
+  "scene": "day5_station_new_visual",
+  "action_id": "station_queue_and_tram_pass",
   "build_id": "exe-sha256:<running-executable-sha256>",
   "orientation": "landscape",
   "min_width": 1920,
@@ -75,5 +77,11 @@ The real-time recorder writes `<artifact>.capture.json` with:
 - `client_area=true` and `cursor_visible=false`.
 
 A production capture result should additionally repeat `capture_method`,
-`state_id`, and `build_id`. Missing structured identity is a blocking error;
-free-form notes are not authoritative.
+`state_id`, and `build_id`, and name `game_report_path` plus its
+`game_report_sha256`. The game report must contain the raw
+`game.capture_scene.describe`, before/action/after statuses, exact executable
+build id, and monotonic start/end measurements. Studio rejects scene restarts,
+missing semantic hashes, undeclared actions, hidden-UI failures, stale report
+hashes, and encoded durations that differ from measured real time. Missing
+structured identity is a blocking error; free-form notes and recorder-only
+`simulation_rate=1.0` assertions are not authoritative.

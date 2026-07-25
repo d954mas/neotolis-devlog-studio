@@ -97,6 +97,8 @@ def _approved_source(video: Path) -> tuple[Path, str, Path, object]:
     source_hash = _sha256(source)
     metadata = source.with_suffix(".mp4.capture.json")
     metadata.write_bytes(b"metadata")
+    game_report = source.with_suffix(".mp4.game.json")
+    game_report.write_bytes(b"game-report")
     batch = video / "data" / "plan" / "capture_batch.json"
     batch.parent.mkdir(parents=True)
     batch.write_bytes(b"batch")
@@ -108,6 +110,8 @@ def _approved_source(video: Path) -> tuple[Path, str, Path, object]:
         "artifact_sha256": source_hash,
         "metadata_path": "data/footage/source.mp4.capture.json",
         "metadata_sha256": _sha256(metadata),
+        "game_report_path": "data/footage/source.mp4.game.json",
+        "game_report_sha256": _sha256(game_report),
         "capture_batch_path": "data/plan/capture_batch.json",
         "capture_batch_sha256": _sha256(batch),
         "capture_results_path": "data/plan/capture_results.json",
@@ -130,6 +134,8 @@ def _approved_source(video: Path) -> tuple[Path, str, Path, object]:
         "head_handle_seconds": 5,
         "tail_handle_seconds": 5,
         "frame_audit_passed": True,
+        "game_elapsed_seconds": 15,
+        "measured_playback_rate": 1.0,
     }
     registry = _register_ingested_captures(video, [facts])
     current = registry.assets[0]
@@ -706,6 +712,7 @@ def test_render_proof_rejects_reapproved_metadata_revision_with_same_media(
     video = tmp_path / "video"
     source, asset_id, geometry, old_record = _approved_source(video)
     metadata = video / "data" / "footage" / "source.mp4.capture.json"
+    game_report = video / "data" / "footage" / "source.mp4.game.json"
     batch = video / "data" / "plan" / "capture_batch.json"
     results = video / "data" / "plan" / "capture_results.json"
     registry = _register_ingested_captures(video, [{
@@ -714,6 +721,8 @@ def test_render_proof_rejects_reapproved_metadata_revision_with_same_media(
         "artifact_sha256": _sha256(source),
         "metadata_path": "data/footage/source.mp4.capture.json",
         "metadata_sha256": _sha256(metadata),
+        "game_report_path": "data/footage/source.mp4.game.json",
+        "game_report_sha256": _sha256(game_report),
         "capture_batch_path": "data/plan/capture_batch.json",
         "capture_batch_sha256": _sha256(batch),
         "capture_results_path": "data/plan/capture_results.json",
@@ -736,6 +745,8 @@ def test_render_proof_rejects_reapproved_metadata_revision_with_same_media(
         "head_handle_seconds": 5,
         "tail_handle_seconds": 5,
         "frame_audit_passed": True,
+        "game_elapsed_seconds": 15,
+        "measured_playback_rate": 1.0,
     }])
     current = registry.assets[0]
     approve_asset(

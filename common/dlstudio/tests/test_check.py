@@ -124,6 +124,8 @@ def test_vq_asset_id_passes_exact_approved_binding(tmp_path, monkeypatch):
     digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
     metadata = tmp_path / "data" / "footage" / "day5.mp4.capture.json"
     metadata.write_bytes(b"metadata")
+    game_report = tmp_path / "data" / "footage" / "day5.mp4.game.json"
+    game_report.write_bytes(b"game-report")
     batch = tmp_path / "data" / "plan" / "capture_batch.json"
     batch.parent.mkdir(parents=True)
     batch.write_bytes(b"batch")
@@ -140,6 +142,8 @@ def test_vq_asset_id_passes_exact_approved_binding(tmp_path, monkeypatch):
         "artifact_sha256": digest,
         "metadata_path": "data/footage/day5.mp4.capture.json",
         "metadata_sha256": hashlib.sha256(metadata.read_bytes()).hexdigest(),
+        "game_report_path": "data/footage/day5.mp4.game.json",
+        "game_report_sha256": hashlib.sha256(game_report.read_bytes()).hexdigest(),
         "capture_batch_path": "data/plan/capture_batch.json",
         "capture_batch_sha256": hashlib.sha256(batch.read_bytes()).hexdigest(),
         "capture_results_path": "data/plan/capture_results.json",
@@ -159,6 +163,8 @@ def test_vq_asset_id_passes_exact_approved_binding(tmp_path, monkeypatch):
         "head_handle_seconds": 5,
         "tail_handle_seconds": 5,
         "frame_audit_passed": True,
+        "game_elapsed_seconds": 11,
+        "measured_playback_rate": 1.0,
     }])
     current = registry.assets[0]
     approve_asset(

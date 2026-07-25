@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import hashlib
 import json
 from pathlib import Path
@@ -7,6 +8,22 @@ import shutil
 import subprocess
 
 import pytest
+
+
+def _record_script_module():
+    path = (
+        Path(__file__).resolve().parents[3]
+        / ".agents"
+        / "skills"
+        / "devlog-record-media"
+        / "scripts"
+        / "record_window_realtime.py"
+    )
+    spec = importlib.util.spec_from_file_location("record_window_realtime", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _production(tmp_path: Path) -> Path:
@@ -118,6 +135,7 @@ def _gameplay_request_v2(**overrides) -> dict:
         "editorial_role": "gameplay",
         "capture_method": "realtime_window",
         "state_id": "day5.station.new_visual",
+        "scene": "day5.station.new_visual",
         "build_id": "exe-sha256:" + "a" * 64,
         "orientation": "landscape",
         "min_width": 1920,
@@ -154,6 +172,71 @@ def test_prepare_capture_batch_v2_accepts_strict_realtime_gameplay(tmp_path):
     assert batch.requests[0].head_handle_seconds == 5
 
 
+def test_realtime_recorder_hydrates_exact_task_and_writes_ingest_result(tmp_path):
+    production = _production(tmp_path)
+    request = _gameplay_request_v2(
+        target="data/footage/day5.mp4",
+        min_width=192,
+        min_height=108,
+        min_fps=30,
+        content_seconds=1,
+    )
+    request["target_absolute"] = str(production / request["target"])
+    batch_path = production / "data" / "plan" / "capture_batch.json"
+    batch_path.parent.mkdir(parents=True, exist_ok=True)
+    batch_path.write_text(json.dumps({
+        "version": 2,
+        "product_id": "not_a_trolley_problem",
+        "production_id": "2026_07_18_reel_01",
+        "game_root": str(production.parent.parent),
+        "production_root": str(production),
+        "requested_at": "2026-07-24T00:00:00Z",
+        "requests": [request],
+    }), encoding="utf-8")
+    recorder = _record_script_module()
+    args = recorder._parser().parse_args([
+        "--pid", "123",
+        "--batch", str(batch_path),
+        "--request-id", request["id"],
+    ])
+
+    production_id = recorder._hydrate_from_batch(args)
+
+    assert production_id == "2026_07_18_reel_01"
+    assert args.output == Path(request["target_absolute"])
+    assert args.state_id == request["scene"]
+    assert args.action_id == request["action_id"]
+    assert args.results == production / "data" / "plan" / "capture_results.json"
+
+    output = Path(request["target_absolute"])
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(b"video")
+    metadata = output.with_suffix(".mp4.capture.json")
+    metadata.write_bytes(b"metadata")
+    game_report = output.with_suffix(".mp4.game.json")
+    game_report.write_bytes(b"game")
+    recorder._write_result(
+        args.results,
+        production_id=production_id,
+        request_id=request["id"],
+        production_root=production,
+        output=output,
+        artifact_sha=hashlib.sha256(output.read_bytes()).hexdigest(),
+        metadata_path=metadata,
+        metadata_sha=hashlib.sha256(metadata.read_bytes()).hexdigest(),
+        game_report_path=game_report,
+        game_report_sha=hashlib.sha256(game_report.read_bytes()).hexdigest(),
+        state_id=args.state_id,
+        build_id=args.build_id,
+        captured_at="2026-07-24T00:00:11Z",
+    )
+
+    results = json.loads(args.results.read_text(encoding="utf-8"))
+    saved = results["results"][0]
+    assert saved["path"] == "data/footage/day5.mp4"
+    assert saved["game_report_path"] == "data/footage/day5.mp4.game.json"
+
+
 def test_prepare_capture_batch_v2_rejects_frame_stepped_gameplay(tmp_path):
     production = _production(tmp_path)
     requests = production / "data" / "plan" / "capture_requests.json"
@@ -175,6 +258,7 @@ def test_prepare_capture_batch_v2_rejects_frame_stepped_gameplay(tmp_path):
     ("field", "value", "message"),
     [
         ("state_id", "", "state_id"),
+        ("scene", None, "game-owned capture scene"),
         ("build_id", "", "build_id"),
         ("action_id", "", "action_id"),
         ("head_handle_seconds", 4.9, "head_handle_seconds"),
@@ -204,7 +288,12 @@ def test_prepare_capture_batch_v2_rejects_unsafe_gameplay_contract(
         prepare_capture_batch(production, requests)
 
 
-def _prepare_v2_gameplay_capture(production: Path, *, actual_state: str | None = None):
+def _prepare_v2_gameplay_capture(
+    production: Path,
+    *,
+    actual_state: str | None = None,
+    game_elapsed_seconds: float = 11.0,
+):
     requests = production / "data" / "plan" / "capture_requests.json"
     requests.parent.mkdir(parents=True, exist_ok=True)
     request = _gameplay_request_v2(
@@ -249,6 +338,72 @@ def _prepare_v2_gameplay_capture(production: Path, *, actual_state: str | None =
         "started_at": "2026-07-24T00:00:00Z",
         "ended_at": "2026-07-24T00:00:11Z",
     }
+    report = {
+        "schema": "devlog.game_capture_report",
+        "version": 1,
+        "status_endpoint": "game.capture_scene.status",
+        "describe_endpoint": "game.capture_scene.describe",
+        "action_endpoint": "game.capture_scene.trigger_action",
+        "scene_id": actual_state or request["state_id"],
+        "action_id": request["action_id"],
+        "build_id": request["build_id"],
+        "monotonic_started_seconds": 100.0,
+        "monotonic_ended_seconds": 100.0 + game_elapsed_seconds,
+        "descriptor": {
+            "apiVersion": 1,
+            "gameId": "game-not-a-trolley-problem",
+            "scene": {
+                "actions": [{
+                    "arguments": [],
+                    "description": "Run the requested gameplay action.",
+                    "id": request["action_id"],
+                }],
+                "capabilities": {
+                    "hidesGameUi": True,
+                    "semanticHash": True,
+                },
+                "contractVersion": 1,
+                "id": actual_state or request["state_id"],
+                "parameters": [],
+                "title": "Day 5 station",
+            },
+        },
+        "before": {
+            "activeScene": actual_state or request["state_id"],
+            "apiVersion": 1,
+            "contractVersion": 1,
+            "gameId": "game-not-a-trolley-problem",
+            "generation": 7,
+            "ready": True,
+            "semanticHash": "00000001",
+            "tick": 10,
+        },
+        "action_result": {
+            "activeScene": actual_state or request["state_id"],
+            "apiVersion": 1,
+            "contractVersion": 1,
+            "gameId": "game-not-a-trolley-problem",
+            "generation": 7,
+            "ready": True,
+            "semanticHash": "00000002",
+            "tick": 11,
+        },
+        "after": {
+            "activeScene": actual_state or request["state_id"],
+            "apiVersion": 1,
+            "contractVersion": 1,
+            "gameId": "game-not-a-trolley-problem",
+            "generation": 7,
+            "ready": True,
+            "semanticHash": "00000003",
+            "tick": 670,
+        },
+    }
+    report_path = captured.with_suffix(captured.suffix + ".game.json")
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    report_sha = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    metadata["game_report_path"] = report_path.relative_to(production).as_posix()
+    metadata["game_report_sha256"] = report_sha
     metadata_path = captured.with_suffix(captured.suffix + ".capture.json")
     metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
     metadata_sha = hashlib.sha256(metadata_path.read_bytes()).hexdigest()
@@ -266,6 +421,8 @@ def _prepare_v2_gameplay_capture(production: Path, *, actual_state: str | None =
             "build_id": request["build_id"],
             "recorder_metadata_path": metadata_path.relative_to(production).as_posix(),
             "recorder_metadata_sha256": metadata_sha,
+            "game_report_path": report_path.relative_to(production).as_posix(),
+            "game_report_sha256": report_sha,
         }],
     }), encoding="utf-8")
     return result_path
@@ -322,9 +479,11 @@ def test_capture_ingest_v2_validates_hash_bound_recorder_metadata(
     assert saved["validated"]["day5_station"]["capture_method"] == "realtime_window"
     assert saved["validated"]["day5_station"]["actual_fps"] == 30
     assert saved["validated"]["day5_station"]["actual_duration"] == 11
+    assert saved["validated"]["day5_station"]["measured_playback_rate"] == 1.0
     registry = json.loads(receipt.registry_path.read_text(encoding="utf-8"))
     assert registry["assets"][0]["asset_id"] == "capture:day5_station"
     assert registry["assets"][0]["status"] == "validated"
+    assert registry["assets"][0]["game_report_sha256"]
 
 
 def test_capture_ingest_v2_blocks_stepped_cadence_before_registry(
@@ -355,6 +514,60 @@ def test_capture_ingest_v2_blocks_stepped_cadence_before_registry(
         ingest_capture_results(production, result_path)
 
     assert not (production / "data" / "assets" / "registry.json").exists()
+
+
+def test_capture_ingest_v2_blocks_retimed_gameplay_before_registry(
+    tmp_path,
+    monkeypatch,
+):
+    production = _production(tmp_path)
+    result_path = _prepare_v2_gameplay_capture(
+        production,
+        game_elapsed_seconds=110.0,
+    )
+    monkeypatch.setattr(
+        "dlstudio.services.capture_batch.build_asset_catalog",
+        lambda root: _fake_gameplay_catalog(production),
+    )
+
+    from dlstudio.services.capture_batch import CaptureBatchError, ingest_capture_results
+
+    with pytest.raises(
+        CaptureBatchError,
+        match="media duration differs from real-time capture",
+    ):
+        ingest_capture_results(production, result_path)
+
+    assert not (production / "data" / "assets" / "registry.json").exists()
+
+
+def test_capture_ingest_v2_rejects_tampered_game_report_before_catalog(
+    tmp_path,
+    monkeypatch,
+):
+    production = _production(tmp_path)
+    result_path = _prepare_v2_gameplay_capture(production)
+    results = json.loads(result_path.read_text(encoding="utf-8"))
+    report_path = production / results["results"][0]["game_report_path"]
+    report_path.write_text('{"tampered":true}', encoding="utf-8")
+    catalog_called = False
+
+    def unexpected_catalog(root):
+        nonlocal catalog_called
+        catalog_called = True
+        return _fake_gameplay_catalog(production)
+
+    monkeypatch.setattr(
+        "dlstudio.services.capture_batch.build_asset_catalog",
+        unexpected_catalog,
+    )
+
+    from dlstudio.services.capture_batch import CaptureBatchError, ingest_capture_results
+
+    with pytest.raises(CaptureBatchError, match="game capture report hash mismatch"):
+        ingest_capture_results(production, result_path)
+
+    assert catalog_called is False
 
 
 def test_capture_ingest_v2_rejects_sidecar_state_mismatch_before_catalog(
