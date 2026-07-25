@@ -86,3 +86,4 @@ class Edit(_Model):
     order: list[str]
     output: str
     mix: Mix = Field(default_factory=Mix)
+    asset_policy: Literal["compatibility", "production"] = "compatibility"

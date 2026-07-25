@@ -35,6 +35,7 @@ class _IngestedCapture(_Model):
     capture_method: str
     state_id: str
     build_id: str
+    action_id: str | None = None
     actual_width: int | None = Field(default=None, gt=0)
     actual_height: int | None = Field(default=None, gt=0)
     actual_fps: float | None = Field(default=None, gt=0)
@@ -62,6 +63,8 @@ class _IngestedCapture(_Model):
             raise ValueError("gameplay build_id requires exe-sha256:<64 hex>")
         if not self.state_id:
             raise ValueError("gameplay requires state_id")
+        if not self.action_id:
+            raise ValueError("gameplay requires action_id")
         if self.simulation_rate != 1.0:
             raise ValueError("gameplay requires simulation_rate=1.0")
         if self.continuous is not True:
@@ -99,6 +102,7 @@ class RegisteredAsset(_Model):
     capture_method: str
     state_id: str
     build_id: str
+    action_id: str | None = None
     metadata_path: str | None = None
     metadata_sha256: str | None = None
     capture_batch_path: str | None = None
@@ -173,6 +177,7 @@ def _validation_sha256(facts: dict, artifact_sha256: str) -> str:
         "capture_method": facts["capture_method"],
         "state_id": facts["state_id"],
         "build_id": facts["build_id"],
+        "action_id": facts.get("action_id"),
         "metadata_path": facts["metadata_path"],
         "metadata_sha256": facts["metadata_sha256"],
         "capture_batch_path": facts["capture_batch_path"],
@@ -287,6 +292,7 @@ def _upsert_validated_capture(
         capture_method=str(facts["capture_method"]),
         state_id=str(facts["state_id"]),
         build_id=str(facts["build_id"]),
+        action_id=facts.get("action_id"),
         metadata_path=str(facts["metadata_path"]).replace("\\", "/"),
         metadata_sha256=str(facts["metadata_sha256"]).lower(),
         capture_batch_path=str(facts["capture_batch_path"]).replace("\\", "/"),

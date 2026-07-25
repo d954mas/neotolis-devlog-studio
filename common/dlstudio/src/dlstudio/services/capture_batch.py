@@ -95,6 +95,8 @@ class CaptureRequestSpecV2(_Model):
             raise ValueError("gameplay requires state_id")
         if not self.build_id:
             raise ValueError("gameplay requires build_id")
+        if not self.action_id:
+            raise ValueError("gameplay requires action_id")
         if re.fullmatch(r"exe-sha256:[0-9a-fA-F]{64}", self.build_id) is None:
             raise ValueError("gameplay build_id requires exe-sha256:<64 hex>")
         if self.head_handle_seconds < 5:
@@ -274,6 +276,7 @@ def _validate_v2_recorder_metadata(
         "editorial_role": task.editorial_role,
         "state_id": task.state_id,
         "build_id": task.build_id,
+        "action_id": task.action_id,
         "simulation_rate": task.simulation_rate,
         "continuous": task.continuous,
         "clean_ui": task.clean_ui,
@@ -326,6 +329,7 @@ def _validate_v2_recorder_metadata(
         "capture_method": task.capture_method,
         "state_id": task.state_id,
         "build_id": task.build_id,
+        "action_id": task.action_id,
         "client_rect": metadata.get("client_rect"),
         "simulation_rate": metadata.get("simulation_rate"),
         "continuous": metadata.get("continuous"),

@@ -92,6 +92,7 @@ def build_timeline(
         mix=mix,
         assets=assets,
         output=edit.output,
+        asset_policy=edit.asset_policy,
         warnings=warnings,
         diagnostics=diagnostics,
     )

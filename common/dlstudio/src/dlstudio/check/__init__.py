@@ -35,10 +35,17 @@ _MAX_DIM = 4096          # x264 practical safety ceiling per axis
 _MAX_UPSCALE = 2.2       # full-bleed upscale factor cap (the 3840x6826 OOM class)
 
 
-def run_checks(timeline: Timeline) -> CheckReport:
+def run_checks(
+    timeline: Timeline,
+    *,
+    strict_assets: bool | None = None,
+) -> CheckReport:
+    if strict_assets is None:
+        strict_assets = timeline.asset_policy == "production"
     issues: list[CheckIssue] = []
     issues += _check_assets(timeline)
-    issues += _check_asset_identities(timeline)
+    issues += _check_asset_identities(timeline, strict=strict_assets)
+    issues += _check_source_windows(timeline, strict=strict_assets)
     issues += _check_words(timeline)
     issues += _check_resolution(timeline)
     issues += _check_geometry(timeline)
@@ -79,7 +86,11 @@ def _check_assets(timeline: Timeline) -> list[CheckIssue]:
 
 # ─── VQ-ASSET-ID ────────────────────────────────────────────────────────────
 
-def _check_asset_identities(timeline: Timeline) -> list[CheckIssue]:
+def _check_asset_identities(
+    timeline: Timeline,
+    *,
+    strict: bool,
+) -> list[CheckIssue]:
     from dlstudio.services.asset_registry import (
         AssetRegistryError,
         load_asset_registry,
@@ -93,6 +104,36 @@ def _check_asset_identities(timeline: Timeline) -> list[CheckIssue]:
     for beat in timeline.beats:
         for index, segment in enumerate(beat.segments):
             where = f"{beat.id}:seg{index}"
+            if strict and segment.kind == "video" and not segment.editorial_role:
+                out.append(CheckIssue(
+                    severity="error",
+                    code="VQ-ASSET-CLASS",
+                    message=(
+                        "production video requires editorial_role "
+                        "(gameplay/debug_proof/presentation/reference)"
+                    ),
+                    where=where,
+                ))
+            if strict and segment.editorial_role == "gameplay":
+                missing_expectations = [
+                    name
+                    for name, value in (
+                        ("expected_state_id", segment.expected_state_id),
+                        ("expected_build_id", segment.expected_build_id),
+                        ("expected_action_id", segment.expected_action_id),
+                    )
+                    if not value
+                ]
+                if missing_expectations:
+                    out.append(CheckIssue(
+                        severity="error",
+                        code="VQ-ASSET-EXPECTATION",
+                        message=(
+                            "production gameplay requires "
+                            + ", ".join(missing_expectations)
+                        ),
+                        where=where,
+                    ))
             if segment.editorial_role == "gameplay" and not segment.asset_id:
                 out.append(CheckIssue(
                     severity="error",
@@ -112,6 +153,22 @@ def _check_asset_identities(timeline: Timeline) -> list[CheckIssue]:
                     where=where,
                 ))
                 continue
+            expected_identity = (
+                ("state_id", segment.expected_state_id, record.state_id),
+                ("build_id", segment.expected_build_id, record.build_id),
+                ("action_id", segment.expected_action_id, record.action_id),
+            )
+            for field, expected, actual in expected_identity:
+                if expected is not None and expected != actual:
+                    out.append(CheckIssue(
+                        severity="error",
+                        code="VQ-ASSET-EXPECTATION",
+                        message=(
+                            f"{field} mismatch for {segment.asset_id}: "
+                            f"expected {expected}, registry has {actual}"
+                        ),
+                        where=where,
+                    ))
             if (
                 segment.editorial_role is not None
                 and record.editorial_role != segment.editorial_role
@@ -147,6 +204,75 @@ def _check_asset_identities(timeline: Timeline) -> list[CheckIssue]:
                     message=(
                         f"asset_id {segment.asset_id} resolves to "
                         f"{record.artifact_path}, not {segment.src}"
+                    ),
+                    where=where,
+                ))
+    return out
+
+
+def _check_source_windows(
+    timeline: Timeline,
+    *,
+    strict: bool,
+) -> list[CheckIssue]:
+    """Prevent the loop/freeze/restart class before FFmpeg sees the graph."""
+    if not strict:
+        return []
+
+    from dlstudio.services.asset_registry import load_asset_registry
+
+    registry = load_asset_registry(Path.cwd().resolve())
+    by_id = {asset.asset_id: asset for asset in registry.assets}
+    out: list[CheckIssue] = []
+    for beat in timeline.beats:
+        for index, segment in enumerate(beat.segments):
+            if segment.editorial_role != "gameplay":
+                continue
+            where = f"{beat.id}:seg{index}"
+            if segment.loop:
+                out.append(CheckIssue(
+                    severity="error",
+                    code="VQ-GAMEPLAY-LOOP",
+                    message="production gameplay cannot loop or restart at EOF",
+                    where=where,
+                ))
+            record = by_id.get(segment.asset_id or "")
+            if record is None:
+                continue
+            head = record.head_handle_seconds or 0.0
+            tail = record.tail_handle_seconds or 0.0
+            duration = record.duration
+            if duration is None:
+                probe = timeline.assets.get(segment.src)
+                duration = probe.duration if probe is not None else None
+            if duration is None:
+                out.append(CheckIssue(
+                    severity="error",
+                    code="VQ-SOURCE-WINDOW",
+                    message="approved gameplay has no proven source duration",
+                    where=where,
+                ))
+                continue
+            source_end = segment.offset + max(0.0, segment.t1 - segment.t0)
+            allowed_end = duration - tail
+            if segment.offset < head - _EPS:
+                out.append(CheckIssue(
+                    severity="error",
+                    code="VQ-SOURCE-WINDOW",
+                    message=(
+                        f"gameplay offset {segment.offset:.3f}s consumes "
+                        f"{head:.3f}s reserved head handle"
+                    ),
+                    where=where,
+                ))
+            if source_end > allowed_end + _EPS:
+                out.append(CheckIssue(
+                    severity="error",
+                    code="VQ-SOURCE-WINDOW",
+                    message=(
+                        f"gameplay source window ends at {source_end:.3f}s, "
+                        f"past the safe end {allowed_end:.3f}s "
+                        f"(tail handle {tail:.3f}s)"
                     ),
                     where=where,
                 ))

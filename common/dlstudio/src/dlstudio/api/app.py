@@ -342,12 +342,16 @@ def _render_beat_job(
             )
 
         design = _resize_design(timeline.design, width)
+        quality = quality or "standard"
         try:
-            gate_pre_render_checks(timeline, design)   # defect 0.4: no gate, no render
+            gate_pre_render_checks(
+                timeline,
+                design,
+                strict_assets=quality in {"upload", "master"},
+            )   # defect 0.4: no gate, no render
         except CliError as e:
             raise ValueError(str(e)) from e
         width_px = design.resolution[0]
-        quality = quality or "standard"
 
         out_dir = root / "data" / "finalize"
         out_dir.mkdir(parents=True, exist_ok=True)

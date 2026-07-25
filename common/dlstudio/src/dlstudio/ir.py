@@ -210,6 +210,9 @@ class IRSegment(_Model):
         "presentation",
         "reference",
     ] | None = None
+    expected_state_id: str | None = None
+    expected_build_id: str | None = None
+    expected_action_id: str | None = None
     offset: float
     t0: float
     t1: float
@@ -315,6 +318,7 @@ class Timeline(_Model):
     mix: IRMix
     assets: dict[str, AssetProbe]            # path -> probe facts
     output: str
+    asset_policy: Literal["compatibility", "production"] = "compatibility"
     warnings: list[str] = Field(default_factory=list)
     # Structured compile-time diagnostics. Preferred over string-tagged
     # warnings: compile appends CheckIssue objects here and check merges

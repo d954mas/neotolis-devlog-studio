@@ -31,6 +31,7 @@ def _facts(tmp_path: Path, *, content: bytes = b"take-one") -> dict:
         "capture_method": "realtime_window",
         "state_id": "day5.station.new_visual",
         "build_id": "exe-sha256:" + "a" * 64,
+        "action_id": "station_queue_and_tram_pass",
         "actual_width": 1920,
         "actual_height": 1080,
         "actual_fps": 60,
@@ -213,6 +214,7 @@ def test_approval_rejects_stale_semantic_revision_even_when_media_sha_is_same(
     [
         ("capture_method", "deterministic_devapi", "realtime_window"),
         ("build_id", "legacy-source:unknown", "exe-sha256"),
+        ("action_id", "", "action_id"),
         ("simulation_rate", 10.0, "simulation_rate"),
         ("continuous", False, "continuous"),
         ("clean_ui", False, "clean_ui"),

@@ -144,6 +144,9 @@ def _clamp_idx(idx: int, n: int) -> int:
 def _bg_from_scene(scene: Scene) -> _Bg:
     return _Bg(kind=scene.kind, src=scene.src,
                asset_id=scene.asset_id, editorial_role=scene.editorial_role,
+               expected_state_id=scene.expected_state_id,
+               expected_build_id=scene.expected_build_id,
+               expected_action_id=scene.expected_action_id,
                offset=scene.offset,
                ken_burns=scene.ken_burns, loop=scene.loop, fit=scene.fit,
                anchor_x=scene.anchor_x, anchor_y=scene.anchor_y)
@@ -303,6 +306,9 @@ def build_segments(
         segments.append(IRSegment(
             kind=bg.kind, src=bg.src,
             asset_id=bg.asset_id, editorial_role=bg.editorial_role,
+            expected_state_id=bg.expected_state_id,
+            expected_build_id=bg.expected_build_id,
+            expected_action_id=bg.expected_action_id,
             offset=_round(offset),
             t0=seg_t0, t1=seg_t1,
             ken_burns=bg.ken_burns, loop=bg.loop, fit=bg.fit,

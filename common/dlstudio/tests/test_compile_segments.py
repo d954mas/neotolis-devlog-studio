@@ -129,6 +129,9 @@ def test_videoshot_preserves_asset_identity_and_editorial_role_in_ir():
             src="data/footage/day5.mp4",
             asset_id="capture:day5_station",
             editorial_role="gameplay",
+            expected_state_id="day5.station.new_visual",
+            expected_build_id="exe-sha256:" + "a" * 64,
+            expected_action_id="station_queue_and_tram_pass",
         ),
     )]
 
@@ -143,6 +146,9 @@ def test_videoshot_preserves_asset_identity_and_editorial_role_in_ir():
 
     assert segs[0].asset_id == "capture:day5_station"
     assert segs[0].editorial_role == "gameplay"
+    assert segs[0].expected_state_id == "day5.station.new_visual"
+    assert segs[0].expected_build_id == "exe-sha256:" + "a" * 64
+    assert segs[0].expected_action_id == "station_queue_and_tram_pass"
 
 
 def test_videoshot_resolves_centered_cover_geometry_into_ir():

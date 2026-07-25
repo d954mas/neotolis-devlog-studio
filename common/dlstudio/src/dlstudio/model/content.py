@@ -153,6 +153,9 @@ class VideoShot(_Model):
         "presentation",
         "reference",
     ] | None = None
+    expected_state_id: str | None = None
+    expected_build_id: str | None = None
+    expected_action_id: str | None = None
     offset: float = 0.0
     fit: Literal["cover", "contain"] = "cover"
     anchor_x: float = Field(default=0.5, ge=0.0, le=1.0)
@@ -180,6 +183,9 @@ class Scene(_Model):
         "presentation",
         "reference",
     ] | None = None
+    expected_state_id: str | None = None
+    expected_build_id: str | None = None
+    expected_action_id: str | None = None
     offset: float = 0.0
     ken_burns: bool = False
     loop: bool = False

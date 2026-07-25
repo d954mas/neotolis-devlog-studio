@@ -290,7 +290,12 @@ def _add_render_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--no-cache", action="store_true", help="bypass the render cache")
 
 
-def gate_pre_render_checks(timeline, design: Design) -> None:
+def gate_pre_render_checks(
+    timeline,
+    design: Design,
+    *,
+    strict_assets: bool = False,
+) -> None:
     """Defect 0.4: the mechanical gate every render path MUST pass first —
     `resolve profile -> compile -> run checks -> render -> verify output`.
 
@@ -302,7 +307,10 @@ def gate_pre_render_checks(timeline, design: Design) -> None:
     from dlstudio import check as dl_check
 
     effective = timeline.model_copy(update={"design": design})
-    report = dl_check.run_checks(effective)
+    report = dl_check.run_checks(
+        effective,
+        strict_assets=strict_assets or timeline.asset_policy == "production",
+    )
     for issue in report.issues:
         print(f"[dl2] [{issue.severity.upper()}] {issue.code} {issue.where}: {issue.message}")
     errors = report.errors
@@ -550,6 +558,7 @@ def _iterate_render(
     no_cache: bool,
     stale: bool,
     jobs: int | None,
+    strict_assets: bool = False,
 ) -> int:
     """Shared render+assemble machinery behind `iter`/`render`/`final`.
 
@@ -562,7 +571,7 @@ def _iterate_render(
     from dlstudio import render as dl_render
 
     design = _resize_design(timeline.design, width_spec)
-    gate_pre_render_checks(timeline, design)
+    gate_pre_render_checks(timeline, design, strict_assets=strict_assets)
     width_px = design.resolution[0]
 
     all_beats = list(timeline.beats)
@@ -662,6 +671,7 @@ def cmd_final(args: argparse.Namespace) -> int:
         edit, timeline,
         width_spec=width_spec, quality=quality,
         gpu=args.gpu, no_cache=args.no_cache, stale=args.stale, jobs=args.jobs,
+        strict_assets=True,
     )
     if result == 0:
         from dlstudio.cli.telemetry import record_automatic_stage

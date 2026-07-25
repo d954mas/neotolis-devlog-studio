@@ -41,6 +41,9 @@ class BgSpec:
     src: str
     asset_id: str | None
     editorial_role: str | None
+    expected_state_id: str | None
+    expected_build_id: str | None
+    expected_action_id: str | None
     offset: float
     ken_burns: bool
     loop: bool
@@ -85,7 +88,11 @@ register_content(ImageShot, ContentRole(
     referenced_paths=lambda c: [(c.src, "image")],
     background=lambda c: BgSpec(kind="image", src=c.src,
                                 asset_id=c.asset_id,
-                                editorial_role=c.editorial_role, offset=0.0,
+                                editorial_role=c.editorial_role,
+                                expected_state_id=None,
+                                expected_build_id=None,
+                                expected_action_id=None,
+                                offset=0.0,
                                 ken_burns=c.ken_burns, loop=False, fit=c.fit,
                                 anchor_x=c.anchor_x, anchor_y=c.anchor_y),
 ))
@@ -95,7 +102,11 @@ register_content(VideoShot, ContentRole(
     referenced_paths=lambda c: [(c.src, "video")],
     background=lambda c: BgSpec(kind="video", src=c.src,
                                 asset_id=c.asset_id,
-                                editorial_role=c.editorial_role, offset=c.offset,
+                                editorial_role=c.editorial_role,
+                                expected_state_id=c.expected_state_id,
+                                expected_build_id=c.expected_build_id,
+                                expected_action_id=c.expected_action_id,
+                                offset=c.offset,
                                 ken_burns=False, loop=False, fit=c.fit,
                                 anchor_x=c.anchor_x, anchor_y=c.anchor_y),
 ))

@@ -19,5 +19,6 @@ EDIT = Edit(
     beats=BEATS,
     order=ORDER,
     mix=MIX,
+    asset_policy="production",
     output="data/finalize/final.mp4",     # финальный MP4 (`dl2 final`)
 )

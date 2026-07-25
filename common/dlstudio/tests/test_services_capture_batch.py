@@ -176,6 +176,7 @@ def test_prepare_capture_batch_v2_rejects_frame_stepped_gameplay(tmp_path):
     [
         ("state_id", "", "state_id"),
         ("build_id", "", "build_id"),
+        ("action_id", "", "action_id"),
         ("head_handle_seconds", 4.9, "head_handle_seconds"),
         ("tail_handle_seconds", 0, "tail_handle_seconds"),
         ("simulation_rate", 2.0, "simulation_rate"),
@@ -230,6 +231,7 @@ def _prepare_v2_gameplay_capture(production: Path, *, actual_state: str | None =
         "editorial_role": "gameplay",
         "state_id": actual_state or request["state_id"],
         "build_id": request["build_id"],
+        "action_id": request["action_id"],
         "executable_path": "C:/game/game.exe",
         "executable_sha256": "a" * 64,
         "artifact": str(captured),

@@ -38,12 +38,13 @@ def mk_beat(*, beat_id="b1", duration=4.0, segments=None, overlays=None):
 
 
 def mk_timeline(*, beats=None, assets=None, warnings=None, diagnostics=None,
-                resolution=(1080, 1920)):
+                resolution=(1080, 1920), asset_policy="compatibility"):
     beats = beats or [mk_beat()]
     return Timeline(
         edit_name="e", design=mk_design(resolution=resolution), beats=beats,
         placements=[BeatPlacement(beat_id=b.id, t0=0.0) for b in beats],
         mix=IRMix(), assets=assets or {}, output="out.mp4",
+        asset_policy=asset_policy,
         warnings=warnings or [], diagnostics=diagnostics or [],
     )
 
@@ -57,16 +58,25 @@ def seg(
     asset_id=None,
     editorial_role=None,
     transition_intent=None,
+    offset=0.0,
+    loop=False,
+    expected_state_id=None,
+    expected_build_id=None,
+    expected_action_id=None,
 ):
     return IRSegment(
         kind=kind,
         src=src,
-        offset=0.0,
+        offset=offset,
         t0=t0,
         t1=t1,
         asset_id=asset_id,
         editorial_role=editorial_role,
         transition_intent=transition_intent,
+        loop=loop,
+        expected_state_id=expected_state_id,
+        expected_build_id=expected_build_id,
+        expected_action_id=expected_action_id,
     )
 
 
@@ -136,6 +146,8 @@ def test_vq_asset_id_passes_exact_approved_binding(tmp_path, monkeypatch):
         "capture_method": "realtime_window",
         "state_id": "day5.station.new_visual",
         "build_id": "exe-sha256:" + "a" * 64,
+        "action_id": "station_queue_and_tram_pass",
+        "actual_duration": 11,
         "simulation_rate": 1.0,
         "continuous": True,
         "clean_ui": True,
@@ -161,11 +173,59 @@ def test_vq_asset_id_passes_exact_approved_binding(tmp_path, monkeypatch):
         kind="video",
         asset_id="capture:day5_station",
         editorial_role="gameplay",
+        t1=1,
+        offset=5,
+        expected_state_id="day5.station.new_visual",
+        expected_build_id="exe-sha256:" + "a" * 64,
+        expected_action_id="station_queue_and_tram_pass",
     )
 
-    rep = run_checks(mk_timeline(beats=[mk_beat(segments=[shot])]))
+    rep = run_checks(mk_timeline(
+        beats=[mk_beat(duration=1, segments=[shot])],
+        asset_policy="production",
+    ))
 
-    assert not any(issue.code == "VQ-ASSET-ID" for issue in rep.issues)
+    assert not any(
+        issue.code in {"VQ-ASSET-ID", "VQ-SOURCE-WINDOW"}
+        for issue in rep.issues
+    )
+
+    shot.offset = 0
+    rep = run_checks(mk_timeline(
+        beats=[mk_beat(duration=1, segments=[shot])],
+        asset_policy="production",
+    ))
+    assert any(issue.code == "VQ-SOURCE-WINDOW" for issue in rep.errors)
+
+
+def test_production_policy_rejects_unclassified_video():
+    shot = seg("data/infographics/chart.mp4", kind="video")
+
+    report = run_checks(mk_timeline(
+        beats=[mk_beat(segments=[shot])],
+        asset_policy="production",
+    ))
+
+    assert any(issue.code == "VQ-ASSET-CLASS" for issue in report.errors)
+
+
+def test_production_policy_rejects_gameplay_loop_and_missing_expectations():
+    shot = seg(
+        "data/footage/day5.mp4",
+        kind="video",
+        asset_id="capture:day5",
+        editorial_role="gameplay",
+        loop=True,
+    )
+
+    report = run_checks(mk_timeline(
+        beats=[mk_beat(segments=[shot])],
+        asset_policy="production",
+    ))
+
+    codes = {issue.code for issue in report.errors}
+    assert "VQ-GAMEPLAY-LOOP" in codes
+    assert "VQ-ASSET-EXPECTATION" in codes
 
 
 def test_vq_asset_present_but_unreadable_errors():
