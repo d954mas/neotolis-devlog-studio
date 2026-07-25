@@ -75,7 +75,8 @@ class IROverlayItem(_Model):
     bg) changes, even though the Chunk itself travels to the rasterizer
     out-of-band via the chunk resolver. `asset_paths` lists file paths the
     raster pass reads (e.g. Plate.bg_image) so the cache can include their
-    identity (size+mtime)."""
+    content identity. `public_text` carries only viewer-visible copy for
+    deterministic release-copy checks."""
 
     chunk_index: int
     z: int
@@ -85,6 +86,7 @@ class IROverlayItem(_Model):
     transition_in: Transition | None = None
     content_hash: str | None = None
     asset_paths: list[str] = Field(default_factory=list)
+    public_text: list[str] = Field(default_factory=list)
 
 
 class IRSegmentGeometry(_Model):

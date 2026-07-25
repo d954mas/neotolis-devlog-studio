@@ -53,3 +53,15 @@ def test_editorial_preflight_accepts_complete_story_and_explicit_label_allowlist
     report = run_editorial_preflight(tmp_path, require_story_contract=True)
 
     assert report.ok
+
+
+def test_public_copy_rejects_false_future_steam_claim(tmp_path):
+    from dlstudio.services.editorial_preflight import public_copy_issues
+
+    issues = public_copy_issues(
+        tmp_path,
+        [("b07:cta", "Следующая остановка — Steam")],
+    )
+
+    assert len(issues) == 1
+    assert issues[0].code == "VQ-PUBLIC-CLAIM"

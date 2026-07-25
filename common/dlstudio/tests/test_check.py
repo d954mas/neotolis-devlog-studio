@@ -273,6 +273,20 @@ def test_production_policy_rejects_gameplay_loop_and_missing_expectations():
     assert "VQ-ASSET-EXPECTATION" in codes
 
 
+def test_production_policy_checks_exact_overlay_public_copy():
+    overlay = ov(0, 0, 0.0, 4.0)
+    overlay.public_text = ["VERSION 12", "Следующая остановка — Steam"]
+
+    report = run_checks(mk_timeline(
+        beats=[mk_beat(overlays=[overlay])],
+        asset_policy="production",
+    ))
+
+    codes = {issue.code for issue in report.errors}
+    assert "VQ-EDITORIAL-LABEL" in codes
+    assert "VQ-PUBLIC-CLAIM" in codes
+
+
 def test_vq_asset_present_but_unreadable_errors():
     assets = {"corrupt.mp4": probe("corrupt.mp4", "video", readable=False)}
     rep = run_checks(mk_timeline(assets=assets))

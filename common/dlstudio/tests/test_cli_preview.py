@@ -1,6 +1,7 @@
 """`dl2 preview` — the one-command draft path (cli/preview.py wiring)."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 def test_parse_preview_defaults():
@@ -89,3 +90,7 @@ def test_cmd_preview_runs_stale_draft_then_review_artifacts(tmp_path, monkeypatc
     assert calls["frames"][2] == 8
     assert Path("data/review/geometry_report.json").exists()
     assert Path("data/review/boundary_report.json").exists()
+    geometry = json.loads(
+        Path("data/review/geometry_report.json").read_text(encoding="utf-8")
+    )
+    assert geometry["output_resolution"] == [960, 540]

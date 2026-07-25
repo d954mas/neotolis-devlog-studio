@@ -8,7 +8,7 @@ v2 requirements (fixes v1's known risks):
 - Engine hash AUTO-DERIVED from the dlstudio package source tree (glob
   all *.py under dlstudio/) — no manual _ENGINE_FILES list to forget.
 - Key inputs: IRBeat (model_dump_json), Design, RenderOpts-equivalent
-  flags, and identity (size + mtime) of every referenced asset path.
+  flags, and SHA-256 content identity of every referenced asset path.
 - Levels: beat MP4 now; chunk-PNG level may be added later.
 """
 from __future__ import annotations
@@ -39,7 +39,8 @@ CACHE_DIR_ENV_VAR = "DLSTUDIO_CACHE_DIR"
 #   1: bare <key>.mp4 (video only; the VO stem desync class of 0.2)
 #   2: <key>.mp4 + <key>.wav pair (MP4 + VO stem published/restored
 #      together), design font files included in the identity hash (0.10)
-ENTRY_FORMAT_VERSION = 2
+#   3: referenced files use byte-content SHA-256, not mutable size+mtime facts.
+ENTRY_FORMAT_VERSION = 3
 
 _ENGINE_HASH_CACHE: str | None = None
 
@@ -79,16 +80,19 @@ def _reset_engine_hash_cache() -> None:
 
 
 def _asset_identity(path: str) -> str:
-    """(size, mtime_ns) fingerprint for one referenced asset path.
+    """Byte-content SHA-256 fingerprint for one referenced asset path.
 
     Missing files hash as the literal string "missing" so a file appearing
     or disappearing is itself a cache key dimension, not silently ignored.
     """
     try:
-        st = os.stat(path)
+        digest = hashlib.sha256()
+        with Path(path).open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
     except OSError:
         return "missing"
-    return f"{st.st_size}:{st.st_mtime_ns}"
+    return f"sha256:{digest.hexdigest()}"
 
 
 def _walk_asset_paths(beat: IRBeat) -> list[str]:
@@ -99,7 +103,7 @@ def _walk_asset_paths(beat: IRBeat) -> list[str]:
     e.g. a Plate's bg_image). The overlay PNG itself is produced at render time
     by render.raster and is not a persisted path, but the SOURCE files the
     rasterizer reads are — so a bg_image edited on disk (same path, new bytes)
-    changes the beat's cache key via its identity (size+mtime). The overlay's
+    changes the beat's cache key via its byte-content SHA-256. The overlay's
     non-file content (text/style/decorations) is tracked separately by
     `IROverlayItem.content_hash`, which rides inside `beat.model_dump_json()`.
     """
@@ -126,7 +130,7 @@ def beat_key(beat: IRBeat, design: Design, *, quality: str, width: int | None, g
     Hashes, in order: the entry-format version, the auto-derived engine
     hash, the IRBeat itself (`model_dump_json`), the Design
     (`model_dump_json`), the render flags that affect output
-    (quality/width/gpu), and the identity (size + mtime_ns, or "missing")
+    (quality/width/gpu), and the identity (SHA-256, or "missing")
     of every asset path the beat references plus every design font file.
     """
     h = hashlib.sha1()

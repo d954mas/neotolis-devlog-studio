@@ -49,7 +49,11 @@ from .audio import (
 )
 from .boundary_report import build_boundary_report, write_boundary_report
 from .bundle import promote_bundle
-from .geometry_report import build_geometry_report, write_geometry_report
+from .geometry_report import (
+    build_geometry_report,
+    timeline_for_design,
+    write_geometry_report,
+)
 from .hyperframes import init_project, render_html, validate_hyperframes_render_manifest
 from .publish import generate_youtube_package
 from .review import extract_keyframes, make_contact_sheet
@@ -83,6 +87,7 @@ __all__ = [
     "build_boundary_report",
     "write_boundary_report",
     "build_geometry_report",
+    "timeline_for_design",
     "write_geometry_report",
     "init_project",
     "render_html",

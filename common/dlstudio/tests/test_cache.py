@@ -102,6 +102,23 @@ def test_beat_key_changes_with_asset_mtime(tmp_path):
     assert k1 != k2
 
 
+def test_beat_key_uses_bytes_when_size_and_mtime_are_unchanged(tmp_path):
+    audio = tmp_path / "b01.wav"
+    _write(audio, b"same-size-A")
+    original = audio.stat()
+    beat = make_ir_beat(audio=str(audio))
+    design = make_design()
+    k1 = cache.beat_key(beat, design, quality="draft", width=None, gpu=False)
+
+    audio.write_bytes(b"same-size-B")
+    os.utime(audio, ns=(original.st_atime_ns, original.st_mtime_ns))
+    assert audio.stat().st_size == original.st_size
+    assert audio.stat().st_mtime_ns == original.st_mtime_ns
+
+    k2 = cache.beat_key(beat, design, quality="draft", width=None, gpu=False)
+    assert k1 != k2
+
+
 def test_beat_key_missing_asset_differs_from_present(tmp_path):
     missing_path = str(tmp_path / "does_not_exist.wav")
     beat_missing = make_ir_beat(audio=missing_path)
@@ -121,7 +138,7 @@ def test_asset_identity_missing_vs_present(tmp_path):
     _write(present, b"data")
     ident = cache._asset_identity(str(present))
     assert ident != "missing"
-    assert ":" in ident
+    assert ident.startswith("sha256:")
 
 
 def test_walk_asset_paths_covers_audio_words_segments_sfx():

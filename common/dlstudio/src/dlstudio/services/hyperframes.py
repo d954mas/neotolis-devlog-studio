@@ -124,6 +124,18 @@ def _validate_visual_block_values(
             f"visual-block template {template!r} is missing required variables: "
             + ", ".join(missing)
         )
+    from .editorial_preflight import public_copy_issues
+
+    public_issues = public_copy_issues(
+        production_root or project,
+        [
+            (f"{variables_path.name}:{key}", value)
+            for key, value in values.items()
+            if isinstance(value, str) and key not in _IMAGE_VARIABLES
+        ],
+    )
+    if public_issues:
+        raise RuntimeError(public_issues[0].message)
 
     for key in _IMAGE_VARIABLES.intersection(values):
         raw = values[key]

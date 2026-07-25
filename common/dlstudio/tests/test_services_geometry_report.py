@@ -11,7 +11,7 @@ from dlstudio.ir import (
     IRSegmentGeometry,
     Timeline,
 )
-from dlstudio.services.geometry_report import write_geometry_report
+from dlstudio.services.geometry_report import timeline_for_design, write_geometry_report
 
 
 def test_geometry_report_persists_compact_resolved_transform(tmp_path):
@@ -66,3 +66,14 @@ def test_geometry_report_persists_compact_resolved_transform(tmp_path):
     assert payload["summary"] == {"total": 1, "resolved": 1, "unresolved": 0}
     assert payload["segments"][0]["asset_id"] == "capture:day4"
     assert payload["segments"][0]["geometry"]["crop_x"] == 50
+
+    effective = timeline_for_design(
+        timeline,
+        timeline.design.model_copy(update={"resolution": (50, 100)}),
+    )
+    projected = effective.beats[0].segments[0].geometry
+    assert effective.design.resolution == (50, 100)
+    assert projected is not None
+    assert (projected.output_width, projected.output_height) == (50, 100)
+    assert (projected.scaled_width, projected.scaled_height) == (200, 100)
+    assert projected.crop_x == 75

@@ -306,7 +306,9 @@ def gate_pre_render_checks(
     are printed and never block. Shared with the Studio API render job."""
     from dlstudio import check as dl_check
 
-    effective = timeline.model_copy(update={"design": design})
+    from dlstudio.services.geometry_report import timeline_for_design
+
+    effective = timeline_for_design(timeline, design)
     report = dl_check.run_checks(
         effective,
         strict_assets=strict_assets or timeline.asset_policy == "production",

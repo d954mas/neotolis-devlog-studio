@@ -44,6 +44,7 @@ from dlstudio.ir import (
     WordSpan,
 )
 from dlstudio.model import Beat, Chunk, Edit
+from dlstudio.model.content import CaptionPill, Label, Overlay, Plate
 
 from .probe import Kind, build_registry
 from .roles import content_role
@@ -201,11 +202,23 @@ def _build_overlays(
             for a in ch.anims
         ]
         content_hash = hashlib.sha1(ch.model_dump_json().encode("utf-8")).hexdigest()[:16]
+        public_text: list[str] = []
+        if isinstance(ch.content, (Plate, Overlay)):
+            public_text.append(ch.content.text)
+            subtitle = getattr(ch.content, "subtitle", None)
+            if subtitle:
+                public_text.append(subtitle)
+        public_text.extend(
+            decoration.text
+            for decoration in ch.decorations
+            if isinstance(decoration, (Label, CaptionPill))
+        )
         overlays.append(IROverlayItem(
             chunk_index=ci, z=z, t0=t0, t1=t1,
             anims=anims, transition_in=ch.transition,
             content_hash=content_hash,
             asset_paths=role.raster_asset_paths(ch.content),
+            public_text=public_text,
         ))
         z += 1
     return overlays

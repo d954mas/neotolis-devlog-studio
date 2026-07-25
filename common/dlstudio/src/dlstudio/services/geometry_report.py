@@ -6,6 +6,26 @@ import os
 from pathlib import Path
 
 from dlstudio.ir import Timeline
+from dlstudio.model import Design
+
+
+def timeline_for_design(timeline: Timeline, design: Design) -> Timeline:
+    """Project every resolved segment transform onto the effective output size."""
+    width, height = design.resolution
+    beats = []
+    for beat in timeline.beats:
+        segments = [
+            segment.model_copy(update={
+                "geometry": (
+                    segment.geometry.for_output(width, height)
+                    if segment.geometry is not None
+                    else None
+                )
+            })
+            for segment in beat.segments
+        ]
+        beats.append(beat.model_copy(update={"segments": segments}))
+    return timeline.model_copy(update={"design": design, "beats": beats})
 
 
 def build_geometry_report(timeline: Timeline) -> dict:
@@ -66,4 +86,4 @@ def write_geometry_report(
     return destination
 
 
-__all__ = ["build_geometry_report", "write_geometry_report"]
+__all__ = ["build_geometry_report", "timeline_for_design", "write_geometry_report"]

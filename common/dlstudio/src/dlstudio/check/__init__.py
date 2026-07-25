@@ -50,6 +50,7 @@ def run_checks(
     issues += _check_resolution(timeline)
     issues += _check_geometry(timeline)
     issues += _check_boundaries(timeline)
+    issues += _check_public_copy(timeline, strict=strict_assets)
     issues += _promote_warnings(timeline)
 
     # dedupe exact repeats (defensive: gates are independent and could
@@ -62,6 +63,25 @@ def run_checks(
             seen.add(key)
             unique.append(it)
     return CheckReport(issues=unique)
+
+
+def _check_public_copy(timeline: Timeline, *, strict: bool) -> list[CheckIssue]:
+    if not strict:
+        return []
+    from dlstudio.services.editorial_preflight import public_copy_issues
+
+    texts: list[tuple[str, str]] = []
+    for beat in timeline.beats:
+        for index, overlay in enumerate(beat.overlays):
+            texts.extend(
+                (f"{beat.id}:overlay{index}", text)
+                for text in overlay.public_text
+            )
+        texts.extend(
+            (f"{beat.id}:caption", caption.text)
+            for caption in beat.captions
+        )
+    return public_copy_issues(Path.cwd(), texts)
 
 
 # ─── VQ-ASSET ───────────────────────────────────────────────────────────────

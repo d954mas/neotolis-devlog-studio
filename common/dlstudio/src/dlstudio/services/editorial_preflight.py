@@ -10,13 +10,17 @@ import json
 import re
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from dlstudio.ir import CheckIssue, CheckReport
 
 
 _EDITORIAL_LABEL = re.compile(
     r"\b(?:REEL|PART|VERSION|CUT|РИЛС|ЧАСТЬ|ВЕРСИЯ)\s*(?:#|№)?\s*\d+\b",
+    re.IGNORECASE,
+)
+_FALSE_STEAM_CLAIM = re.compile(
+    r"(?:next\s+stop|следующая\s+остановка)\s*(?:—|-|:)?\s*steam",
     re.IGNORECASE,
 )
 _STORY_FIELDS = ("premise", "causal_turn", "payoff")
@@ -84,6 +88,54 @@ def viewer_html_paths(root: str | Path) -> tuple[Path, ...]:
     return tuple(sorted(path for path in paths if path.is_file()))
 
 
+def _allowed_editorial_labels(root: Path) -> set[str]:
+    contract_path = root / "data" / "plan" / "story_contract.json"
+    try:
+        payload = json.loads(contract_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return set()
+    values = payload.get("allow_editorial_labels") if isinstance(payload, dict) else None
+    if not isinstance(values, list):
+        return set()
+    return {
+        value.strip().casefold()
+        for value in values
+        if isinstance(value, str) and value.strip()
+    }
+
+
+def public_copy_issues(
+    root: str | Path,
+    texts: Iterable[tuple[str, str]],
+) -> list[CheckIssue]:
+    """Check exact viewer-visible strings, independent of visual inspection."""
+    base = Path(root).resolve()
+    allow = _allowed_editorial_labels(base)
+    issues: list[CheckIssue] = []
+    for where, text in texts:
+        for match in _EDITORIAL_LABEL.finditer(text):
+            label = match.group(0).strip()
+            if label.casefold() in allow:
+                continue
+            issues.append(CheckIssue(
+                severity="error",
+                code="VQ-EDITORIAL-LABEL",
+                message=f"internal production label is viewer-visible: {label!r}",
+                where=where,
+            ))
+        if _FALSE_STEAM_CLAIM.search(text):
+            issues.append(CheckIssue(
+                severity="error",
+                code="VQ-PUBLIC-CLAIM",
+                message=(
+                    "viewer-visible copy says Steam is a future stop; "
+                    "use the canonical wishlist CTA"
+                ),
+                where=where,
+            ))
+    return issues
+
+
 def run_editorial_preflight(
     root: str | Path,
     *,
@@ -128,11 +180,6 @@ def run_editorial_preflight(
                 where="data/plan/story_contract.json",
             ))
 
-    allow = {
-        str(value).strip().casefold()
-        for value in contract.get("allow_editorial_labels", [])
-        if isinstance(value, str) and value.strip()
-    }
     for html_path in viewer_html_paths(base):
         try:
             visible = _visible_html_text(html_path)
@@ -143,17 +190,17 @@ def run_editorial_preflight(
                 where=html_path.relative_to(base).as_posix(),
             ))
             continue
-        for match in _EDITORIAL_LABEL.finditer(visible):
-            label = match.group(0).strip()
-            if label.casefold() in allow:
-                continue
-            issues.append(CheckIssue(
-                severity="error", code="VQ-EDITORIAL-LABEL",
-                message=f"internal production label is viewer-visible: {label!r}",
-                where=html_path.relative_to(base).as_posix(),
-            ))
+        issues.extend(public_copy_issues(
+            base,
+            [(html_path.relative_to(base).as_posix(), visible)],
+        ))
 
     return CheckReport(issues=issues)
 
 
-__all__ = ["run_editorial_preflight", "viewer_html_paths", "visible_html_text"]
+__all__ = [
+    "public_copy_issues",
+    "run_editorial_preflight",
+    "viewer_html_paths",
+    "visible_html_text",
+]

@@ -483,6 +483,27 @@ def test_render_visual_block_rejects_bad_cta_semantics(tmp_path, monkeypatch):
     assert "cmd" not in captured
 
 
+def test_render_visual_block_rejects_internal_label_in_release_variables(
+    tmp_path,
+    monkeypatch,
+):
+    captured: dict = {}
+    _mock_toolchain(monkeypatch, captured)
+    project = hf.init_project(tmp_path / "steps", template="explain-steps")
+    values = tmp_path / "steps.json"
+    values.write_text(json.dumps({
+        "title": "VERSION 12",
+        "step_1": "ONE",
+        "step_2": "TWO",
+        "step_3": "THREE",
+        "step_4": "FOUR",
+    }), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="internal production label"):
+        hf.render_html(project, tmp_path / "out.mp4", variables_file=values)
+    assert "cmd" not in captured
+
+
 def test_render_focus_requires_explicit_coordinates(tmp_path, monkeypatch):
     captured: dict = {}
     _mock_toolchain(monkeypatch, captured)
