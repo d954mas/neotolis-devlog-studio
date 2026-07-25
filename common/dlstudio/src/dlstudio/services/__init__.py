@@ -52,6 +52,7 @@ from .bundle import promote_bundle, recover_bundle_transactions
 from .geometry_report import (
     build_geometry_report,
     timeline_for_design,
+    timeline_geometry_sha256,
     write_geometry_report,
 )
 from .hyperframes import init_project, render_html, validate_hyperframes_render_manifest
@@ -89,6 +90,7 @@ __all__ = [
     "write_boundary_report",
     "build_geometry_report",
     "timeline_for_design",
+    "timeline_geometry_sha256",
     "write_geometry_report",
     "init_project",
     "render_html",

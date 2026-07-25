@@ -120,6 +120,32 @@ class CaptureRequestSpecV2(_Model):
 
     @model_validator(mode="after")
     def validate_gameplay_contract(self) -> "CaptureRequestSpecV2":
+        if self.editorial_role == "debug_proof":
+            if self.source != "gameplay":
+                raise ValueError("debug_proof requires source=gameplay")
+            if self.capture_method != "deterministic_devapi":
+                raise ValueError(
+                    "debug_proof requires capture_method=deterministic_devapi"
+                )
+            if (
+                not self.state_id
+                or not self.scene
+                or self.state_id != self.scene
+                or re.fullmatch(
+                    r"exe-sha256:[0-9a-fA-F]{64}",
+                    self.build_id or "",
+                ) is None
+                or self.seed is None
+                or not self.expected_initial_semantic_hash
+            ):
+                raise ValueError(
+                    "debug_proof requires a game-owned scene/build/seed identity"
+                )
+            if self.action_id and not self.expected_action_semantic_hash:
+                raise ValueError(
+                    "debug_proof action requires expected semantic identity"
+                )
+            return self
         if self.editorial_role != "gameplay":
             return self
         if self.source != "gameplay":

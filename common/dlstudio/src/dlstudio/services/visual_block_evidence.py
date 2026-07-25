@@ -115,6 +115,7 @@ def _geometry_record(
     *,
     asset_id: str,
     artifact_path: str,
+    expected_timeline_sha256: str | None,
 ) -> dict[str, object]:
     reference = evidence.get("geometry_report")
     if not isinstance(reference, dict):
@@ -131,6 +132,14 @@ def _geometry_record(
     if not isinstance(selector, dict):
         raise RuntimeError("geometry_report requires a beat_id/segment_index record selector.")
     report = _json_object(report_path, label="geometry report")
+    if (
+        expected_timeline_sha256 is not None
+        and str(report.get("timeline_sha256", "")).casefold()
+        != expected_timeline_sha256.casefold()
+    ):
+        raise RuntimeError(
+            "geometry report is stale for the currently compiled timeline."
+        )
     segments = report.get("segments")
     if not isinstance(segments, list):
         raise RuntimeError("geometry report has no segments list.")
@@ -281,6 +290,7 @@ def validate_visual_evidence(
     template: str | None,
     values: dict[str, object] | None,
     evidence_path: Path | None,
+    expected_timeline_sha256: str | None = None,
 ) -> None:
     """Validate approved source, A3 geometry, and reproducible image recipes."""
     if template not in PROOF_TEMPLATES:
@@ -304,6 +314,7 @@ def validate_visual_evidence(
         evidence,
         asset_id=record.asset_id,
         artifact_path=record.artifact_path,
+        expected_timeline_sha256=expected_timeline_sha256,
     )
 
     assert values is not None

@@ -163,6 +163,7 @@ def _approved_source(video: Path) -> tuple[Path, str, Path, object]:
     geometry.parent.mkdir(parents=True)
     geometry.write_text(json.dumps({
         "schema_version": 1,
+        "timeline_sha256": "a" * 64,
         "output_resolution": [1920, 1080],
         "segments": [{
             "beat_id": "day4",
@@ -779,6 +780,42 @@ def test_render_before_after_accepts_hash_registered_controlled_pair(tmp_path, m
         production_root=video,
     )
     assert "cmd" in captured
+    resolved_values = json.loads(values.read_text(encoding="utf-8"))
+    vbe.validate_visual_evidence(
+        project,
+        production_root=video,
+        template="before-after",
+        values=resolved_values,
+        evidence_path=evidence,
+        expected_timeline_sha256="a" * 64,
+    )
+    with pytest.raises(RuntimeError, match="currently compiled timeline"):
+        vbe.validate_visual_evidence(
+            project,
+            production_root=video,
+            template="before-after",
+            values=resolved_values,
+            evidence_path=evidence,
+            expected_timeline_sha256="b" * 64,
+        )
+
+
+def test_canonical_hyperframes_project_rejects_output_outside_infographics(
+    tmp_path,
+    monkeypatch,
+):
+    captured: dict = {}
+    _mock_toolchain(monkeypatch, captured)
+    project = hf.init_project(
+        tmp_path / "data" / "hyperframes" / "motion",
+    )
+
+    with pytest.raises(RuntimeError, match="data/infographics"):
+        hf.render_html(
+            project,
+            tmp_path / "data" / "footage" / "motion.mp4",
+        )
+    assert "cmd" not in captured
 
 
 def test_render_proof_rejects_reapproved_metadata_revision_with_same_media(
@@ -878,7 +915,7 @@ def test_render_proof_rejects_reapproved_metadata_revision_with_same_media(
     with pytest.raises(RuntimeError, match="exact approved registry revision"):
         hf.render_html(
             project,
-            video / "out.mp4",
+            video / "data" / "infographics" / "out.mp4",
             variables_file=values,
             evidence_file=evidence,
             production_root=video,
@@ -998,7 +1035,7 @@ def test_render_before_after_rejects_stale_evidence_hash(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="exact approved registry revision"):
         hf.render_html(
             project,
-            video / "compare.mp4",
+            video / "data" / "infographics" / "compare.mp4",
             variables_file=values,
             evidence_file=evidence,
         )

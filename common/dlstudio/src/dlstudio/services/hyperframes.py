@@ -322,6 +322,7 @@ def validate_hyperframes_render_manifest(
     production_root: str | Path,
     *,
     require_final: bool = False,
+    expected_timeline_sha256: str | None = None,
 ) -> None:
     """Revalidate a generated video and every release input at final-check time."""
     root = Path(production_root).resolve()
@@ -394,6 +395,7 @@ def validate_hyperframes_render_manifest(
         template=template if isinstance(template, str) else None,
         values=values,
         evidence_path=evidence,
+        expected_timeline_sha256=expected_timeline_sha256,
     )
 
 
@@ -501,6 +503,23 @@ def render_html(
         project,
         Path(production_root) if production_root is not None else None,
     )
+    if resolved_production_root is not None:
+        canonical_projects = resolved_production_root / "data" / "hyperframes"
+        try:
+            project.relative_to(canonical_projects.resolve())
+        except ValueError:
+            pass
+        else:
+            canonical_outputs = (
+                resolved_production_root / "data" / "infographics"
+            ).resolve()
+            try:
+                out.relative_to(canonical_outputs)
+            except ValueError as exc:
+                raise RuntimeError(
+                    "production HyperFrames output must stay under "
+                    "data/infographics/."
+                ) from exc
     values = _validate_visual_block_values(
         project,
         variables,

@@ -83,6 +83,28 @@ class _IngestedCapture(_Model):
 
     @model_validator(mode="after")
     def validate_gameplay_contract(self) -> "_IngestedCapture":
+        if self.editorial_role == "debug_proof":
+            if self.capture_method != "deterministic_devapi":
+                raise ValueError(
+                    "debug_proof requires capture_method=deterministic_devapi"
+                )
+            if (
+                not self.state_id
+                or re.fullmatch(
+                    r"exe-sha256:[0-9a-fA-F]{64}",
+                    self.build_id,
+                ) is None
+                or self.seed is None
+                or not self.initial_semantic_hash
+            ):
+                raise ValueError(
+                    "debug_proof requires game-owned state/build/seed identity"
+                )
+            if self.action_id and not self.action_semantic_hash:
+                raise ValueError(
+                    "debug_proof action requires semantic identity"
+                )
+            return self
         if self.editorial_role != "gameplay":
             return self
         if self.capture_method != "realtime_window":
@@ -545,9 +567,10 @@ def register_file_asset(
 
     if re.fullmatch(r"[A-Za-z0-9_.:-]{1,160}", asset_id) is None:
         raise AssetRegistryError("file asset id contains unsafe characters")
-    if editorial_role not in {"reference", "presentation", "debug_proof"}:
+    if editorial_role not in {"reference", "presentation"}:
         raise AssetRegistryError(
-            "file assets require reference/presentation/debug_proof role"
+            "file assets require reference/presentation role; debug_proof "
+            "must use deterministic capture ingest"
         )
     if source_type not in {"stock", "purchased", "licensed", "owned", "reference"}:
         raise AssetRegistryError("unsupported file asset source_type")
@@ -556,7 +579,11 @@ def register_file_asset(
     if not artifact.is_file():
         raise AssetRegistryError(f"file asset is missing: {artifact}")
     normalized_artifact = artifact.relative_to(root).as_posix()
-    if normalized_artifact.startswith("data/infographics/"):
+    render_manifest = artifact.with_suffix(artifact.suffix + ".render.json")
+    if (
+        normalized_artifact.startswith("data/infographics/")
+        or render_manifest.is_file()
+    ):
         raise AssetRegistryError(
             "HyperFrames outputs cannot use generic asset registration; "
             "wire the render_manifest so final-quality evidence is enforced"
@@ -664,8 +691,12 @@ def _verify_registered_asset(root: Path, asset: RegisteredAsset) -> Path:
                     f"asset capture ingest proof is stale: {asset.asset_id}"
                 )
     else:
-        if asset.artifact_path.replace("\\", "/").startswith(
-            "data/infographics/"
+        render_manifest = artifact.with_suffix(artifact.suffix + ".render.json")
+        if (
+            asset.artifact_path.replace("\\", "/").startswith(
+                "data/infographics/"
+            )
+            or render_manifest.is_file()
         ):
             raise AssetRegistryError(
                 "HyperFrames outputs require a final-quality render_manifest; "
@@ -699,6 +730,33 @@ def _verify_registered_asset(root: Path, asset: RegisteredAsset) -> Path:
         ):
             raise AssetRegistryError(
                 f"file asset provenance identity mismatch: {asset.asset_id}"
+            )
+        if asset.editorial_role == "debug_proof":
+            raise AssetRegistryError(
+                "debug_proof requires deterministic capture ingest: "
+                f"{asset.asset_id}"
+            )
+    if asset.editorial_role == "debug_proof":
+        debug_contract = {
+            "capture_method": asset.capture_method == "deterministic_devapi",
+            "state_id": bool(asset.state_id),
+            "build_id": re.fullmatch(
+                r"exe-sha256:[0-9a-fA-F]{64}",
+                asset.build_id,
+            ) is not None,
+            "seeded_state": (
+                asset.seed is not None
+                and bool(asset.initial_semantic_hash)
+            ),
+            "action_state": (
+                not asset.action_id or bool(asset.action_semantic_hash)
+            ),
+        }
+        failed = [name for name, passed in debug_contract.items() if not passed]
+        if failed:
+            raise AssetRegistryError(
+                f"debug_proof asset fails trusted contract "
+                f"({', '.join(failed)}): {asset.asset_id}"
             )
     if asset.editorial_role == "gameplay":
         if not asset.game_report_path or not asset.game_report_sha256:

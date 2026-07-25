@@ -1,6 +1,7 @@
 """Compact machine-readable source geometry evidence for review."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -28,7 +29,7 @@ def timeline_for_design(timeline: Timeline, design: Design) -> Timeline:
     return timeline.model_copy(update={"design": design, "beats": beats})
 
 
-def build_geometry_report(timeline: Timeline) -> dict:
+def _geometry_payload(timeline: Timeline) -> dict:
     segments: list[dict] = []
     for beat in timeline.beats:
         for index, segment in enumerate(beat.segments):
@@ -68,6 +69,24 @@ def build_geometry_report(timeline: Timeline) -> dict:
     }
 
 
+def timeline_geometry_sha256(timeline: Timeline) -> str:
+    """Return a deterministic identity for the currently compiled geometry."""
+
+    encoded = json.dumps(
+        _geometry_payload(timeline),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def build_geometry_report(timeline: Timeline) -> dict:
+    payload = _geometry_payload(timeline)
+    payload["timeline_sha256"] = timeline_geometry_sha256(timeline)
+    return payload
+
+
 def write_geometry_report(
     timeline: Timeline,
     path: str | Path = "data/review/geometry_report.json",
@@ -86,4 +105,9 @@ def write_geometry_report(
     return destination
 
 
-__all__ = ["build_geometry_report", "timeline_for_design", "write_geometry_report"]
+__all__ = [
+    "build_geometry_report",
+    "timeline_for_design",
+    "timeline_geometry_sha256",
+    "write_geometry_report",
+]

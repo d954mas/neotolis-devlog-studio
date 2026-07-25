@@ -346,7 +346,8 @@ def test_production_generated_video_revalidates_render_manifest(monkeypatch):
         "data/infographics/chart.mp4",
         "data/infographics/chart.mp4.render.json",
     )
-    assert calls[0][3] == {"require_final": True}
+    assert calls[0][3]["require_final"] is True
+    assert len(calls[0][3]["expected_timeline_sha256"]) == 64
 
 
 def test_production_policy_rejects_gameplay_loop_and_missing_expectations():

@@ -511,6 +511,52 @@ def test_prepare_capture_batch_v2_rejects_frame_stepped_gameplay(tmp_path):
         prepare_capture_batch(production, requests)
 
 
+def test_prepare_capture_batch_v2_accepts_deterministic_debug_proof(tmp_path):
+    production = _production(tmp_path)
+    requests = production / "data" / "plan" / "capture_requests.json"
+    requests.parent.mkdir(parents=True)
+    request = _gameplay_request_v2(
+        id="debug_scene",
+        target="data/debug/debug_scene.mp4",
+        editorial_role="debug_proof",
+        capture_method="deterministic_devapi",
+    )
+    requests.write_text(json.dumps({
+        "version": 2,
+        "requests": [request],
+    }), encoding="utf-8")
+
+    from dlstudio.services.capture_batch import prepare_capture_batch
+
+    batch = prepare_capture_batch(production, requests)
+    assert batch.requests[0].editorial_role == "debug_proof"
+    assert batch.requests[0].capture_method == "deterministic_devapi"
+
+
+def test_prepare_capture_batch_v2_rejects_untrusted_debug_proof(tmp_path):
+    production = _production(tmp_path)
+    requests = production / "data" / "plan" / "capture_requests.json"
+    requests.parent.mkdir(parents=True)
+    request = _gameplay_request_v2(
+        id="debug_scene",
+        target="data/debug/debug_scene.mp4",
+        editorial_role="debug_proof",
+        capture_method="screen_recording",
+    )
+    requests.write_text(json.dumps({
+        "version": 2,
+        "requests": [request],
+    }), encoding="utf-8")
+
+    from dlstudio.services.capture_batch import (
+        CaptureBatchError,
+        prepare_capture_batch,
+    )
+
+    with pytest.raises(CaptureBatchError, match="deterministic_devapi"):
+        prepare_capture_batch(production, requests)
+
+
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [

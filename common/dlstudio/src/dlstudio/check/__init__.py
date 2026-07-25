@@ -121,6 +121,7 @@ def _check_asset_identities(
         resolve_approved_asset,
     )
     from dlstudio.services.hyperframes import validate_hyperframes_render_manifest
+    from dlstudio.services.geometry_report import timeline_geometry_sha256
 
     out: list[CheckIssue] = []
     root = Path.cwd().resolve()
@@ -203,6 +204,7 @@ def _check_asset_identities(
                         segment.render_manifest,
                         root,
                         require_final=strict,
+                        expected_timeline_sha256=timeline_geometry_sha256(timeline),
                     )
                 except RuntimeError as exc:
                     out.append(CheckIssue(

@@ -149,6 +149,56 @@ def test_generic_registration_rejects_hyperframes_output(tmp_path):
         )
 
 
+def test_generic_registration_rejects_debug_proof_role(tmp_path, monkeypatch):
+    from dlstudio.services.asset_registry import (
+        AssetRegistryError,
+        register_file_asset,
+    )
+
+    artifact = tmp_path / "data" / "footage" / "debug.mp4"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_bytes(b"frame-stepped-debug")
+    monkeypatch.setattr(
+        "dlstudio.services.asset_registry._validate_video_artifact",
+        lambda path: None,
+    )
+
+    with pytest.raises(AssetRegistryError, match="deterministic capture ingest"):
+        register_file_asset(
+            tmp_path,
+            asset_id="debug:scene",
+            artifact_path="data/footage/debug.mp4",
+            editorial_role="debug_proof",
+            source_type="owned",
+        )
+
+
+def test_generic_registration_rejects_relocated_hyperframes_output(
+    tmp_path,
+):
+    from dlstudio.services.asset_registry import (
+        AssetRegistryError,
+        register_file_asset,
+    )
+
+    artifact = tmp_path / "data" / "footage" / "motion.mp4"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_bytes(b"hyperframes-output")
+    artifact.with_suffix(".mp4.render.json").write_text(
+        '{"schema":"devlog.hyperframes_render/v2"}',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(AssetRegistryError, match="render_manifest"):
+        register_file_asset(
+            tmp_path,
+            asset_id="owned:relocated-motion",
+            artifact_path="data/footage/motion.mp4",
+            editorial_role="presentation",
+            source_type="owned",
+        )
+
+
 def test_existing_generic_approval_cannot_resolve_hyperframes_output(
     tmp_path,
     monkeypatch,
@@ -207,6 +257,48 @@ def test_existing_generic_approval_cannot_resolve_hyperframes_output(
     row["validation_sha256"] = validation_sha
     row["approved_validation_sha256"] = validation_sha
     registry_path.write_text(json.dumps(registry), encoding="utf-8")
+
+    with pytest.raises(AssetRegistryError, match="render_manifest"):
+        resolve_approved_asset(tmp_path, current.asset_id)
+
+
+def test_existing_generic_approval_rejects_adjacent_hyperframes_manifest(
+    tmp_path,
+    monkeypatch,
+):
+    from dlstudio.services.asset_registry import (
+        AssetRegistryError,
+        approve_asset,
+        register_file_asset,
+        resolve_approved_asset,
+    )
+
+    artifact = tmp_path / "data" / "footage" / "motion.mp4"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_bytes(b"motion")
+    monkeypatch.setattr(
+        "dlstudio.services.asset_registry._validate_video_artifact",
+        lambda path: None,
+    )
+    current = register_file_asset(
+        tmp_path,
+        asset_id="owned:motion",
+        artifact_path="data/footage/motion.mp4",
+        editorial_role="presentation",
+        source_type="owned",
+    ).assets[0]
+    approve_asset(
+        tmp_path,
+        current.asset_id,
+        expected_sha256=current.artifact_sha256,
+        expected_revision=current.revision,
+        expected_validation_sha256=current.validation_sha256,
+        approved_by="author",
+    )
+    artifact.with_suffix(".mp4.render.json").write_text(
+        '{"schema":"devlog.hyperframes_render/v2"}',
+        encoding="utf-8",
+    )
 
     with pytest.raises(AssetRegistryError, match="render_manifest"):
         resolve_approved_asset(tmp_path, current.asset_id)
