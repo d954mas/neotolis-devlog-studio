@@ -40,6 +40,7 @@ class BgSpec:
     kind: str          # "image" | "video"
     src: str
     asset_id: str | None
+    render_manifest: str | None
     editorial_role: str | None
     expected_state_id: str | None
     expected_build_id: str | None
@@ -88,6 +89,7 @@ register_content(ImageShot, ContentRole(
     referenced_paths=lambda c: [(c.src, "image")],
     background=lambda c: BgSpec(kind="image", src=c.src,
                                 asset_id=c.asset_id,
+                                render_manifest=None,
                                 editorial_role=c.editorial_role,
                                 expected_state_id=None,
                                 expected_build_id=None,
@@ -102,6 +104,7 @@ register_content(VideoShot, ContentRole(
     referenced_paths=lambda c: [(c.src, "video")],
     background=lambda c: BgSpec(kind="video", src=c.src,
                                 asset_id=c.asset_id,
+                                render_manifest=c.render_manifest,
                                 editorial_role=c.editorial_role,
                                 expected_state_id=c.expected_state_id,
                                 expected_build_id=c.expected_build_id,

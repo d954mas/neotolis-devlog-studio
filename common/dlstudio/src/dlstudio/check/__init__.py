@@ -96,6 +96,7 @@ def _check_asset_identities(
         load_asset_registry,
         resolve_approved_asset,
     )
+    from dlstudio.services.hyperframes import validate_hyperframes_render_manifest
 
     out: list[CheckIssue] = []
     root = Path.cwd().resolve()
@@ -114,6 +115,28 @@ def _check_asset_identities(
                     ),
                     where=where,
                 ))
+            if strict and segment.kind == "video":
+                if segment.asset_id and segment.render_manifest:
+                    out.append(CheckIssue(
+                        severity="error",
+                        code="VQ-ASSET-ID",
+                        message=(
+                            "production video must use exactly one identity source: "
+                            "asset_id or render_manifest"
+                        ),
+                        where=where,
+                    ))
+                    continue
+                if not segment.asset_id and not segment.render_manifest:
+                    out.append(CheckIssue(
+                        severity="error",
+                        code="VQ-ASSET-ID",
+                        message=(
+                            "production video requires an approved asset_id or "
+                            "a hash-bound render_manifest"
+                        ),
+                        where=where,
+                    ))
             if strict and segment.editorial_role == "gameplay":
                 missing_expectations = [
                     name
@@ -134,6 +157,14 @@ def _check_asset_identities(
                         ),
                         where=where,
                     ))
+                if segment.render_manifest:
+                    out.append(CheckIssue(
+                        severity="error",
+                        code="VQ-ASSET-ID",
+                        message="gameplay must use approved capture asset_id, not render_manifest",
+                        where=where,
+                    ))
+                    continue
             if segment.editorial_role == "gameplay" and not segment.asset_id:
                 out.append(CheckIssue(
                     severity="error",
@@ -141,6 +172,21 @@ def _check_asset_identities(
                     message="declared gameplay requires an approved asset_id",
                     where=where,
                 ))
+                continue
+            if segment.render_manifest:
+                try:
+                    validate_hyperframes_render_manifest(
+                        segment.src,
+                        segment.render_manifest,
+                        root,
+                    )
+                except RuntimeError as exc:
+                    out.append(CheckIssue(
+                        severity="error",
+                        code="VQ-ASSET-ID",
+                        message=str(exc),
+                        where=where,
+                    ))
                 continue
             if not segment.asset_id:
                 continue

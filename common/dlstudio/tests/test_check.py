@@ -56,6 +56,7 @@ def seg(
     t1=4.0,
     *,
     asset_id=None,
+    render_manifest=None,
     editorial_role=None,
     transition_intent=None,
     offset=0.0,
@@ -71,6 +72,7 @@ def seg(
         t0=t0,
         t1=t1,
         asset_id=asset_id,
+        render_manifest=render_manifest,
         editorial_role=editorial_role,
         transition_intent=transition_intent,
         loop=loop,
@@ -207,6 +209,49 @@ def test_production_policy_rejects_unclassified_video():
     ))
 
     assert any(issue.code == "VQ-ASSET-CLASS" for issue in report.errors)
+
+
+def test_production_generated_video_requires_hash_bound_render_manifest():
+    shot = seg(
+        "data/infographics/chart.mp4",
+        kind="video",
+        editorial_role="presentation",
+    )
+
+    report = run_checks(mk_timeline(
+        beats=[mk_beat(segments=[shot])],
+        asset_policy="production",
+    ))
+
+    assert any(
+        issue.code == "VQ-ASSET-ID" and "render_manifest" in issue.message
+        for issue in report.errors
+    )
+
+
+def test_production_generated_video_revalidates_render_manifest(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "dlstudio.services.hyperframes.validate_hyperframes_render_manifest",
+        lambda artifact, manifest, root: calls.append((artifact, manifest, root)),
+    )
+    shot = seg(
+        "data/infographics/chart.mp4",
+        kind="video",
+        render_manifest="data/infographics/chart.mp4.render.json",
+        editorial_role="presentation",
+    )
+
+    report = run_checks(mk_timeline(
+        beats=[mk_beat(segments=[shot])],
+        asset_policy="production",
+    ))
+
+    assert not any(issue.code == "VQ-ASSET-ID" for issue in report.errors)
+    assert calls and calls[0][:2] == (
+        "data/infographics/chart.mp4",
+        "data/infographics/chart.mp4.render.json",
+    )
 
 
 def test_production_policy_rejects_gameplay_loop_and_missing_expectations():

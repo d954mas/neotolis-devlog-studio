@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 
 
-PROOF_TEMPLATES = {"day-card", "before-after", "focus-callout", "cta-endcard"}
+PROOF_TEMPLATES = {"before-after", "focus-callout"}
 
 
 def _sha256(path: Path) -> str:
@@ -102,20 +102,9 @@ def _approved_source(root: Path, source: object) -> tuple[object, Path]:
         raise RuntimeError(
             "visual-block source does not match the exact approved registry revision."
         )
-
-    catalog_path = root / "data" / "assets" / "catalog.json"
-    catalog = _json_object(catalog_path, label="asset catalog")
-    entries = catalog.get("assets")
-    real_product = isinstance(entries, list) and any(
-        isinstance(item, dict)
-        and item.get("path") == raw_path
-        and str(item.get("sha256", "")).casefold() == str(expected_hash).casefold()
-        and item.get("source_role") == "real_product"
-        for item in entries
-    )
-    if not real_product:
+    if record.editorial_role != "gameplay" or record.capture_method != "realtime_window":
         raise RuntimeError(
-            "approved visual-block source lacks a matching real_product catalog role."
+            "proof visual-block source must be approved real-time gameplay."
         )
     return record, approved_path
 
@@ -322,10 +311,8 @@ def validate_visual_evidence(
     if not isinstance(assets, dict):
         raise RuntimeError("visual-block evidence requires an assets object.")
     asset_keys = {
-        "day-card": ("background_image",),
         "before-after": ("before_image", "after_image"),
         "focus-callout": ("image",),
-        "cta-endcard": ("background_image",),
     }[template]
     timestamps: list[float] = []
     recipes: list[dict[str, object]] = []

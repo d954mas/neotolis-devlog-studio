@@ -42,6 +42,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
+from dlstudio.production import ProductionError, load_production_manifest
+
 from .visual_blocks import ORIENTATIONS, VISUAL_BLOCK_TEMPLATES, render_visual_block_html
 from .visual_block_evidence import validate_visual_evidence
 
@@ -91,6 +93,8 @@ def _json_object(path: Path, *, label: str) -> dict[str, object]:
 def _validate_visual_block_values(
     project: Path,
     variables_path: Path | None,
+    *,
+    production_root: Path | None = None,
 ) -> dict[str, object] | None:
     """Fail closed for built-in production blocks before invoking npx."""
     meta_path = project / "meta.json"
@@ -168,7 +172,45 @@ def _validate_visual_block_values(
             or parsed.fragment
         ):
             raise RuntimeError("CTA steam_url must be a canonical Steam app URL.")
+        if production_root is not None:
+            try:
+                production = load_production_manifest(production_root)
+            except ProductionError as exc:
+                raise RuntimeError(f"CTA cannot load canonical product metadata: {exc}") from exc
+            canonical_steam = production.product.sources.get("steam")
+            if canonical_steam is None:
+                raise RuntimeError(
+                    "CTA requires canonical [sources].steam in product.toml."
+                )
+            if title != production.product.title:
+                raise RuntimeError(
+                    "CTA game_title does not match canonical product.toml title."
+                )
+            if url.rstrip("/") != canonical_steam.rstrip("/"):
+                raise RuntimeError(
+                    "CTA steam_url does not match canonical product.toml [sources].steam."
+                )
     return values
+
+
+def _find_production_root(project: Path, explicit: Path | None) -> Path | None:
+    if explicit is not None:
+        return explicit.resolve()
+    for candidate in (project, *project.parents):
+        if (candidate / "production.toml").is_file():
+            try:
+                return load_production_manifest(candidate).root
+            except ProductionError as exc:
+                raise RuntimeError(f"invalid production root: {exc}") from exc
+    return None
+
+
+def _relative_bound(root: Path, path: Path, *, label: str) -> str:
+    resolved = path.resolve()
+    try:
+        return resolved.relative_to(root.resolve()).as_posix()
+    except ValueError as exc:
+        raise RuntimeError(f"{label} must stay inside the production root: {resolved}") from exc
 
 
 def _write_render_manifest(
@@ -178,6 +220,7 @@ def _write_render_manifest(
     quality: str,
     variables: Path | None,
     evidence: Path | None,
+    production_root: Path | None,
 ) -> Path | None:
     if not out.is_file():
         return None
@@ -187,24 +230,35 @@ def _write_render_manifest(
         if meta_path.is_file()
         else {}
     )
+    root = production_root or Path(
+        os.path.commonpath(
+            [str(path.resolve()) for path in (project, out.parent)]
+        )
+    )
     payload: dict[str, object] = {
-        "schema": "devlog.hyperframes_render/v1",
+        "schema": "devlog.hyperframes_render/v2",
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "artifact": out.name,
-        "artifact_sha256": _sha256(out),
-        "entry_sha256": _sha256(project / ENTRY_FILE),
+        "artifact": {
+            "path": _relative_bound(root, out, label="HyperFrames artifact"),
+            "sha256": _sha256(out),
+        },
+        "project": {
+            "path": _relative_bound(root, project, label="HyperFrames project"),
+            "entry_sha256": _sha256(project / ENTRY_FILE),
+            "meta_sha256": _sha256(meta_path) if meta_path.is_file() else None,
+        },
         "quality": quality,
         "template": meta.get("template"),
         "orientation": meta.get("orientation"),
     }
     if variables is not None:
         payload["variables"] = {
-            "name": variables.name,
+            "path": _relative_bound(root, variables, label="HyperFrames variables"),
             "sha256": _sha256(variables),
         }
     if evidence is not None:
         payload["evidence"] = {
-            "name": evidence.name,
+            "path": _relative_bound(root, evidence, label="HyperFrames evidence"),
             "sha256": _sha256(evidence),
         }
     manifest = out.with_suffix(out.suffix + ".render.json")
@@ -213,6 +267,106 @@ def _write_render_manifest(
         encoding="utf-8",
     )
     return manifest
+
+
+def _manifest_file(
+    root: Path,
+    value: object,
+    *,
+    label: str,
+    required: bool = True,
+) -> Path | None:
+    if value is None and not required:
+        return None
+    if not isinstance(value, dict):
+        raise RuntimeError(f"{label} record is missing from render manifest.")
+    raw_path = value.get("path")
+    expected_hash = value.get("sha256")
+    if not isinstance(raw_path, str) or not raw_path or not isinstance(expected_hash, str):
+        raise RuntimeError(f"{label} record requires path and sha256.")
+    path = (root / raw_path).resolve()
+    try:
+        path.relative_to(root)
+    except ValueError as exc:
+        raise RuntimeError(f"{label} path escapes the production root.") from exc
+    if not path.is_file() or _sha256(path) != expected_hash.casefold():
+        raise RuntimeError(f"{label} file is missing or stale: {raw_path}")
+    return path
+
+
+def validate_hyperframes_render_manifest(
+    artifact: str | Path,
+    manifest_path: str | Path,
+    production_root: str | Path,
+) -> None:
+    """Revalidate a generated video and every release input at final-check time."""
+    root = Path(production_root).resolve()
+    manifest_file = Path(manifest_path)
+    if not manifest_file.is_absolute():
+        manifest_file = root / manifest_file
+    manifest_file = manifest_file.resolve()
+    try:
+        manifest_file.relative_to(root)
+    except ValueError as exc:
+        raise RuntimeError("HyperFrames render manifest escapes the production root.") from exc
+    manifest = _json_object(manifest_file, label="HyperFrames render manifest")
+    if manifest.get("schema") != "devlog.hyperframes_render/v2":
+        raise RuntimeError("HyperFrames render manifest has an unsupported schema.")
+
+    artifact_path = _manifest_file(root, manifest.get("artifact"), label="artifact")
+    expected_artifact = Path(artifact)
+    if not expected_artifact.is_absolute():
+        expected_artifact = root / expected_artifact
+    if artifact_path != expected_artifact.resolve():
+        raise RuntimeError("HyperFrames render manifest points to a different artifact.")
+
+    project_record = manifest.get("project")
+    if not isinstance(project_record, dict) or not isinstance(project_record.get("path"), str):
+        raise RuntimeError("HyperFrames render manifest requires a project record.")
+    project = (root / str(project_record["path"])).resolve()
+    try:
+        project.relative_to(root)
+    except ValueError as exc:
+        raise RuntimeError("HyperFrames project escapes the production root.") from exc
+    entry = project / ENTRY_FILE
+    meta_path = project / "meta.json"
+    if (
+        not entry.is_file()
+        or _sha256(entry) != str(project_record.get("entry_sha256", "")).casefold()
+        or not meta_path.is_file()
+        or _sha256(meta_path) != str(project_record.get("meta_sha256", "")).casefold()
+    ):
+        raise RuntimeError("HyperFrames project source changed after render.")
+
+    variables = _manifest_file(
+        root,
+        manifest.get("variables"),
+        label="variables",
+        required=False,
+    )
+    evidence = _manifest_file(
+        root,
+        manifest.get("evidence"),
+        label="evidence",
+        required=False,
+    )
+    values = _validate_visual_block_values(
+        project,
+        variables,
+        production_root=root,
+    )
+    meta = _json_object(meta_path, label="HyperFrames project metadata")
+    template = meta.get("template")
+    orientation = meta.get("orientation")
+    if manifest.get("template") != template or manifest.get("orientation") != orientation:
+        raise RuntimeError("HyperFrames project metadata no longer matches render manifest.")
+    validate_visual_evidence(
+        project,
+        production_root=root,
+        template=template if isinstance(template, str) else None,
+        values=values,
+        evidence_path=evidence,
+    )
 
 
 def init_project(
@@ -315,7 +469,15 @@ def render_html(
         variables = Path(variables_file).resolve()
         if not variables.is_file():
             raise RuntimeError(f"HyperFrames variables file not found: {variables}")
-    values = _validate_visual_block_values(project, variables)
+    resolved_production_root = _find_production_root(
+        project,
+        Path(production_root) if production_root is not None else None,
+    )
+    values = _validate_visual_block_values(
+        project,
+        variables,
+        production_root=resolved_production_root,
+    )
     meta_path = project / "meta.json"
     meta = (
         _json_object(meta_path, label="HyperFrames project metadata")
@@ -329,7 +491,7 @@ def render_html(
             raise RuntimeError(f"visual-block evidence file not found: {evidence}")
     validate_visual_evidence(
         project,
-        production_root=Path(production_root) if production_root is not None else None,
+        production_root=resolved_production_root,
         template=meta.get("template") if isinstance(meta.get("template"), str) else None,
         values=values,
         evidence_path=evidence,
@@ -371,6 +533,7 @@ def render_html(
         quality=quality,
         variables=variables,
         evidence=evidence,
+        production_root=resolved_production_root,
     )
     return out
 

@@ -31,6 +31,46 @@ def _completed(rc: int = 0, stdout: str = "", stderr: str = ""):
     return subprocess.CompletedProcess(args=[], returncode=rc, stdout=stdout, stderr=stderr)
 
 
+def _production(tmp_path: Path) -> Path:
+    production_id = "2026_07_25_devlog_01"
+    (tmp_path / "product.toml").write_text(
+        "\n".join([
+            'id = "test_game"',
+            'title = "TEST GAME"',
+            "version = 1",
+            'game_root = "game-root"',
+            "",
+            "[sources]",
+            'steam = "https://store.steampowered.com/app/123/Test_Game/"',
+            "",
+            "[paths]",
+            'devlogs = "devlogs"',
+            'reels = "reels"',
+            'shared = "shared"',
+            'delivery = "delivery"',
+        ]),
+        encoding="utf-8",
+    )
+    production = tmp_path / "devlogs" / production_id
+    edit = production / "edit"
+    edit.mkdir(parents=True)
+    (edit / "__init__.py").write_text("", encoding="utf-8")
+    (production / "production.toml").write_text(
+        "\n".join([
+            f'id = "{production_id}"',
+            'kind = "devlog"',
+            'date = "2026-07-25"',
+            'orientation = "landscape"',
+            "version = 1",
+            'edit_path = "edit"',
+            'data_root = "data"',
+            f'delivery_root = "../../delivery/devlogs/{production_id}"',
+        ]),
+        encoding="utf-8",
+    )
+    return production
+
+
 def _mock_toolchain(monkeypatch, captured: dict, *, rc: int = 0, stderr: str = ""):
     """Fake both `shutil.which` (npx present) and `subprocess.run` (records
     argv + kwargs, returns a canned CompletedProcess)."""
@@ -356,11 +396,48 @@ def test_successful_render_writes_hash_bound_manifest(tmp_path, monkeypatch):
     manifest = json.loads(
         (tmp_path / "out.mp4.render.json").read_text(encoding="utf-8")
     )
-    assert manifest["schema"] == "devlog.hyperframes_render/v1"
+    assert manifest["schema"] == "devlog.hyperframes_render/v2"
     assert manifest["template"] == "explain-steps"
-    assert manifest["artifact_sha256"] == _sha256(out)
-    assert manifest["entry_sha256"] == _sha256(project / "index.html")
+    assert manifest["artifact"]["path"] == "out.mp4"
+    assert manifest["artifact"]["sha256"] == _sha256(out)
+    assert manifest["project"]["path"] == "steps"
+    assert manifest["project"]["entry_sha256"] == _sha256(project / "index.html")
     assert manifest["variables"]["sha256"] == _sha256(values)
+
+    hf.validate_hyperframes_render_manifest(
+        out,
+        tmp_path / "out.mp4.render.json",
+        tmp_path,
+    )
+
+
+def test_render_manifest_revalidation_rejects_tampered_artifact(tmp_path, monkeypatch):
+    monkeypatch.setattr(hf.shutil, "which", lambda name: FAKE_NPX)
+
+    def fake_run(cmd, **kwargs):
+        Path(cmd[cmd.index("--output") + 1]).write_bytes(b"rendered-mp4")
+        return _completed()
+
+    monkeypatch.setattr(hf.subprocess, "run", fake_run)
+    project = hf.init_project(tmp_path / "steps", template="explain-steps")
+    values = tmp_path / "steps.json"
+    values.write_text(json.dumps({
+        "title": "HOW IT WORKS",
+        "step_1": "ONE",
+        "step_2": "TWO",
+        "step_3": "THREE",
+        "step_4": "FOUR",
+    }), encoding="utf-8")
+    out = tmp_path / "out.mp4"
+    hf.render_html(project, out, variables_file=values)
+    out.write_bytes(b"tampered")
+
+    with pytest.raises(RuntimeError, match="artifact file is missing or stale"):
+        hf.validate_hyperframes_render_manifest(
+            out,
+            tmp_path / "out.mp4.render.json",
+            tmp_path,
+        )
 
 
 def test_render_visual_block_requires_release_values_before_npx(tmp_path, monkeypatch):
@@ -463,6 +540,36 @@ def test_render_cta_rejects_steam_substring_on_foreign_host(tmp_path, monkeypatc
 
     with pytest.raises(RuntimeError, match="canonical Steam app URL"):
         hf.render_html(project, tmp_path / "out.mp4", variables_file=values)
+    assert "cmd" not in captured
+
+
+def test_render_cta_requires_canonical_product_title_and_steam_url(tmp_path, monkeypatch):
+    captured: dict = {}
+    _mock_toolchain(monkeypatch, captured)
+    production = _production(tmp_path)
+    project = hf.init_project(
+        production / "data" / "hyperframes" / "cta",
+        template="cta-endcard",
+    )
+    background = project / "assets" / "game.png"
+    background.write_bytes(b"game")
+    values = production / "data" / "cta.json"
+    values.write_text(json.dumps({
+        "game_title": "WRONG GAME",
+        "eyebrow": "PAGE IS LIVE",
+        "cta": "ADD TO WISHLIST",
+        "steam_url": "https://store.steampowered.com/app/123/Test_Game/",
+        "episode": "DEVLOG 1",
+        "background_image": "assets/game.png",
+    }), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="canonical product.toml title"):
+        hf.render_html(
+            project,
+            production / "data" / "infographics" / "cta.mp4",
+            variables_file=values,
+            production_root=production,
+        )
     assert "cmd" not in captured
 
 

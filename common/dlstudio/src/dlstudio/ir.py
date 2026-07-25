@@ -204,6 +204,7 @@ class IRSegment(_Model):
     kind: Literal["image", "video"]
     src: str
     asset_id: str | None = None
+    render_manifest: str | None = None
     editorial_role: Literal[
         "gameplay",
         "debug_proof",
