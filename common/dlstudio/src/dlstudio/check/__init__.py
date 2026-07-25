@@ -41,6 +41,10 @@ def run_checks(
     strict_assets: bool | None = None,
 ) -> CheckReport:
     if strict_assets is None:
+        # Direct callers retain the IR policy contract. Render entry points
+        # always pass an explicit value so draft/preview can inspect a
+        # production-authored edit without turning delivery rules into a
+        # draft blocker.
         strict_assets = timeline.asset_policy == "production"
     issues: list[CheckIssue] = []
     issues += _check_assets(timeline)
@@ -163,7 +167,6 @@ def _check_asset_identities(
                     for name, value in (
                         ("expected_state_id", segment.expected_state_id),
                         ("expected_build_id", segment.expected_build_id),
-                        ("expected_action_id", segment.expected_action_id),
                     )
                     if not value
                 ]
@@ -185,7 +188,7 @@ def _check_asset_identities(
                         where=where,
                     ))
                     continue
-            if segment.editorial_role == "gameplay" and not segment.asset_id:
+            if strict and segment.editorial_role == "gameplay" and not segment.asset_id:
                 out.append(CheckIssue(
                     severity="error",
                     code="VQ-ASSET-ID",
@@ -199,6 +202,7 @@ def _check_asset_identities(
                         segment.src,
                         segment.render_manifest,
                         root,
+                        require_final=strict,
                     )
                 except RuntimeError as exc:
                     out.append(CheckIssue(
@@ -207,6 +211,11 @@ def _check_asset_identities(
                         message=str(exc),
                         where=where,
                     ))
+                continue
+            if not strict:
+                # Draft/preview is allowed to use provisional or not-yet
+                # approved footage. Delivery re-runs this gate with strict
+                # identity and current-proof validation.
                 continue
             if not segment.asset_id:
                 continue
@@ -249,6 +258,33 @@ def _check_asset_identities(
                     where=where,
                 ))
                 continue
+            if record.editorial_role == "gameplay":
+                presentation = record.presentation or {}
+                expected_fit = presentation.get("fit")
+                output_width = presentation.get("output_width")
+                output_height = presentation.get("output_height")
+                geometry = segment.geometry
+                presentation_mismatch = (
+                    expected_fit not in {"cover", "contain"}
+                    or segment.fit != expected_fit
+                    or geometry is None
+                    or geometry.fit != expected_fit
+                    or geometry.anchor_x != 0.5
+                    or geometry.anchor_y != 0.5
+                    or geometry.output_width != output_width
+                    or geometry.output_height != output_height
+                )
+                if presentation_mismatch:
+                    out.append(CheckIssue(
+                        severity="error",
+                        code="VQ-ASSET-PRESENTATION",
+                        message=(
+                            "compiled gameplay transform does not match the "
+                            f"validated centered presentation for {segment.asset_id}"
+                        ),
+                        where=where,
+                    ))
+                    continue
             try:
                 approved_path = resolve_approved_asset(root, segment.asset_id)
             except AssetRegistryError as exc:

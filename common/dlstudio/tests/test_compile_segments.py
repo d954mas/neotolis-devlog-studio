@@ -153,6 +153,40 @@ def test_videoshot_preserves_asset_identity_and_editorial_role_in_ir():
     assert segs[0].expected_action_id == "station_queue_and_tram_pass"
 
 
+def test_same_source_with_conflicting_expected_identity_is_not_merged():
+    common = {
+        "src": "data/footage/day5.mp4",
+        "asset_id": "capture:day5_station",
+        "editorial_role": "gameplay",
+        "expected_build_id": "exe-sha256:" + "a" * 64,
+        "expected_action_id": "station_queue_and_tram_pass",
+    }
+    chunks = [
+        Chunk(words=(0, 0), content=VideoShot(
+            **common,
+            expected_state_id="day5.station.before",
+        )),
+        Chunk(words=(0, 0), content=VideoShot(
+            **common,
+            expected_state_id="day5.station.after",
+        )),
+    ]
+
+    segs, _, _diags = build_segments(
+        chunks,
+        [(0.0, 2.0), (2.0, 4.0)],
+        None,
+        4.0,
+        D,
+        {},
+    )
+
+    assert [segment.expected_state_id for segment in segs] == [
+        "day5.station.before",
+        "day5.station.after",
+    ]
+
+
 def test_videoshot_resolves_centered_cover_geometry_into_ir():
     design = mk_design(resolution=(100, 100))
     chunks = [Chunk(

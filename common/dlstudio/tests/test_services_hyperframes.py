@@ -121,6 +121,10 @@ def _approved_source(video: Path) -> tuple[Path, str, Path, object]:
         "state_id": "day4.paper",
         "build_id": "exe-sha256:" + "a" * 64,
         "action_id": "paper_visual_pass",
+        "seed": 42,
+        "parameters": {},
+        "initial_semantic_hash": "00000001",
+        "action_semantic_hash": "00000002",
         "actual_width": 1920,
         "actual_height": 1080,
         "actual_fps": 30,
@@ -136,6 +140,7 @@ def _approved_source(video: Path) -> tuple[Path, str, Path, object]:
         "frame_audit_passed": True,
         "game_elapsed_seconds": 15,
         "measured_playback_rate": 1.0,
+        "presentation": {"fit": "contain", "scale": 1.0},
     }
     registry = _register_ingested_captures(video, [facts])
     current = registry.assets[0]
@@ -414,6 +419,84 @@ def test_successful_render_writes_hash_bound_manifest(tmp_path, monkeypatch):
         out,
         tmp_path / "out.mp4.render.json",
         tmp_path,
+    )
+
+    with pytest.raises(RuntimeError, match="quality=final"):
+        hf.validate_hyperframes_render_manifest(
+            out,
+            tmp_path / "out.mp4.render.json",
+            tmp_path,
+            require_final=True,
+        )
+
+
+def test_legacy_devlog_root_keeps_manifest_paths_project_relative(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(hf.shutil, "which", lambda name: FAKE_NPX)
+
+    def fake_run(cmd, **kwargs):
+        Path(cmd[cmd.index("--output") + 1]).write_bytes(b"rendered-mp4")
+        return _completed()
+
+    monkeypatch.setattr(hf.subprocess, "run", fake_run)
+    (tmp_path / "devlog.toml").write_text("[v2]\n", encoding="utf-8")
+    project = hf.init_project(
+        tmp_path / "data" / "hyperframes" / "steps",
+        template="explain-steps",
+    )
+    values = tmp_path / "data" / "hyperframes" / "steps.json"
+    values.write_text(json.dumps({
+        "title": "HOW IT WORKS",
+        "step_1": "ONE",
+        "step_2": "TWO",
+        "step_3": "THREE",
+        "step_4": "FOUR",
+    }), encoding="utf-8")
+    out = tmp_path / "data" / "infographics" / "steps.mp4"
+
+    hf.render_html(project, out, quality="final", variables_file=values)
+
+    manifest_path = out.with_suffix(".mp4.render.json")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["artifact"]["path"] == "data/infographics/steps.mp4"
+    assert manifest["project"]["path"] == "data/hyperframes/steps"
+    hf.validate_hyperframes_render_manifest(
+        out,
+        manifest_path,
+        tmp_path,
+        require_final=True,
+    )
+
+
+def test_new_video_layout_infers_root_without_manifest_files(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(hf.shutil, "which", lambda name: FAKE_NPX)
+
+    def fake_run(cmd, **kwargs):
+        Path(cmd[cmd.index("--output") + 1]).write_bytes(b"rendered-mp4")
+        return _completed()
+
+    monkeypatch.setattr(hf.subprocess, "run", fake_run)
+    project = hf.init_project(
+        tmp_path / "data" / "hyperframes" / "card",
+    )
+    out = tmp_path / "data" / "infographics" / "card.mp4"
+
+    hf.render_html(project, out, quality="final")
+
+    manifest_path = out.with_suffix(".mp4.render.json")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["artifact"]["path"] == "data/infographics/card.mp4"
+    assert manifest["project"]["path"] == "data/hyperframes/card"
+    hf.validate_hyperframes_render_manifest(
+        out,
+        manifest_path,
+        tmp_path,
+        require_final=True,
     )
 
 
@@ -732,6 +815,10 @@ def test_render_proof_rejects_reapproved_metadata_revision_with_same_media(
         "state_id": "day4.different_state",
         "build_id": "exe-sha256:" + "b" * 64,
         "action_id": "different_visual_pass",
+        "seed": 43,
+        "parameters": {},
+        "initial_semantic_hash": "00000003",
+        "action_semantic_hash": "00000004",
         "actual_width": 1920,
         "actual_height": 1080,
         "actual_fps": 30,
@@ -747,6 +834,7 @@ def test_render_proof_rejects_reapproved_metadata_revision_with_same_media(
         "frame_audit_passed": True,
         "game_elapsed_seconds": 15,
         "measured_playback_rate": 1.0,
+        "presentation": {"fit": "contain", "scale": 1.0},
     }])
     current = registry.assets[0]
     approve_asset(

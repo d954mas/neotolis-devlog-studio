@@ -56,6 +56,30 @@ class CaptureBatch(_Model):
     requests: list[PreparedCaptureRequest]
 
 
+class CaptureFocusRect(_Model):
+    x: float = Field(ge=0)
+    y: float = Field(ge=0)
+    width: float = Field(gt=0)
+    height: float = Field(gt=0)
+
+
+class CapturePresentation(_Model):
+    output_width: int = Field(gt=0)
+    output_height: int = Field(gt=0)
+    fit: Literal["cover", "contain"]
+    focus_center_required: bool = False
+    focus_tolerance_ratio: float = Field(default=0.05, ge=0, le=0.5)
+    focus_rect: CaptureFocusRect | None = None
+
+    @model_validator(mode="after")
+    def validate_focus_contract(self) -> "CapturePresentation":
+        if self.focus_center_required and self.focus_rect is None:
+            raise ValueError(
+                "focus_center_required needs a game-owned focus_rect"
+            )
+        return self
+
+
 class CaptureRequestSpecV2(_Model):
     id: str = Field(min_length=1, max_length=120, pattern=r"^[A-Za-z0-9_-]+$")
     source: Literal["gameplay", "canvas", "diary", "steam", "desktop"]
@@ -69,6 +93,16 @@ class CaptureRequestSpecV2(_Model):
     ]
     state_id: str | None = None
     build_id: str | None = None
+    seed: int | None = Field(default=None, ge=0, le=4294967295)
+    parameters: dict[str, float | str] = Field(default_factory=dict)
+    expected_initial_semantic_hash: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-fA-F]{8}$",
+    )
+    expected_action_semantic_hash: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-fA-F]{8}$",
+    )
     orientation: Literal["landscape", "vertical", "square"]
     min_width: int = Field(gt=0)
     min_height: int = Field(gt=0)
@@ -81,6 +115,7 @@ class CaptureRequestSpecV2(_Model):
     clean_ui: bool = False
     action_id: str | None = None
     scene: str | None = None
+    presentation: CapturePresentation | None = None
     instructions: str = ""
 
     @model_validator(mode="after")
@@ -95,8 +130,6 @@ class CaptureRequestSpecV2(_Model):
             raise ValueError("gameplay requires state_id")
         if not self.build_id:
             raise ValueError("gameplay requires build_id")
-        if not self.action_id:
-            raise ValueError("gameplay requires action_id")
         if not self.scene:
             raise ValueError("gameplay requires a game-owned capture scene")
         if self.state_id != self.scene:
@@ -105,6 +138,26 @@ class CaptureRequestSpecV2(_Model):
             )
         if re.fullmatch(r"exe-sha256:[0-9a-fA-F]{64}", self.build_id) is None:
             raise ValueError("gameplay build_id requires exe-sha256:<64 hex>")
+        if self.seed is None:
+            raise ValueError("gameplay requires a deterministic scene seed")
+        if not self.expected_initial_semantic_hash:
+            raise ValueError("gameplay requires expected_initial_semantic_hash")
+        if self.action_id and not self.expected_action_semantic_hash:
+            raise ValueError(
+                "gameplay action requires expected_action_semantic_hash"
+            )
+        if (
+            self.action_id
+            and self.expected_action_semantic_hash.casefold()
+            == self.expected_initial_semantic_hash.casefold()
+        ):
+            raise ValueError(
+                "gameplay action probe must change semantic state"
+            )
+        if not self.action_id and self.expected_action_semantic_hash:
+            raise ValueError(
+                "passive gameplay cannot declare expected_action_semantic_hash"
+            )
         if self.head_handle_seconds < 5:
             raise ValueError("gameplay requires head_handle_seconds >= 5")
         if self.tail_handle_seconds < 5:
@@ -117,6 +170,8 @@ class CaptureRequestSpecV2(_Model):
             raise ValueError("gameplay requires continuous=true")
         if not self.clean_ui:
             raise ValueError("gameplay requires clean_ui=true")
+        if self.presentation is None:
+            raise ValueError("gameplay requires a presentation contract")
         return self
 
 
@@ -131,6 +186,11 @@ class CaptureBatchV2(_Model):
     game_root: str
     production_root: str
     requested_at: str
+    requests_path: str | None = None
+    requests_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-fA-F]{64}$",
+    )
     requests: list[PreparedCaptureRequestV2]
 
 
@@ -234,6 +294,23 @@ class CaptureSceneDescriptor(_Model):
     scene: CaptureSceneDescriptorBody
 
 
+class CaptureParameterResult(_Model):
+    parameter: str = Field(min_length=1)
+    value: float | str
+    status: CaptureSceneStatus
+
+
+class CaptureClockTraceEntry(_Model):
+    method: Literal[
+        "time.set_mode",
+        "time.pause",
+        "time.set_scale",
+        "time.resume",
+    ]
+    params: dict[str, float | str] = Field(default_factory=dict)
+    result: dict
+
+
 class GameCaptureReport(_Model):
     """Raw game responses plus monotonic timing measured by the capture tool."""
 
@@ -241,15 +318,31 @@ class GameCaptureReport(_Model):
     version: Literal[1] = 1
     status_endpoint: Literal["game.capture_scene.status"]
     describe_endpoint: Literal["game.capture_scene.describe"]
-    action_endpoint: Literal["game.capture_scene.trigger_action"]
+    load_endpoint: Literal["game.capture_scene.load"]
+    parameter_endpoint: Literal["game.capture_scene.set_parameter"]
+    action_endpoint: Literal["game.capture_scene.trigger_action"] | None = None
     scene_id: str = Field(min_length=1)
-    action_id: str = Field(min_length=1)
+    action_id: str | None = None
     build_id: str = Field(pattern=r"^exe-sha256:[0-9a-fA-F]{64}$")
+    process_id: int = Field(gt=0)
+    seed: int = Field(ge=0, le=4294967295)
+    parameters: dict[str, float | str] = Field(default_factory=dict)
+    expected_initial_semantic_hash: str = Field(pattern=r"^[0-9a-fA-F]{8}$")
+    expected_action_semantic_hash: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-fA-F]{8}$",
+    )
     monotonic_started_seconds: float = Field(ge=0)
     monotonic_ended_seconds: float = Field(gt=0)
+    encoded_duration_seconds: float = Field(gt=0)
+    action_media_seconds: float | None = Field(default=None, ge=0)
+    clock_trace: list[CaptureClockTraceEntry]
     descriptor: CaptureSceneDescriptor
+    load_result: CaptureSceneStatus
+    parameter_results: list[CaptureParameterResult] = Field(default_factory=list)
     before: CaptureSceneStatus
-    action_result: CaptureSceneStatus
+    pre_action: CaptureSceneStatus | None = None
+    action_result: CaptureSceneStatus | None = None
     after: CaptureSceneStatus
 
     @model_validator(mode="after")
@@ -263,9 +356,91 @@ class GameCaptureReport(_Model):
             raise ValueError("game capture scene does not hide game UI")
         if descriptor.scene.capabilities.semantic_hash is not True:
             raise ValueError("game capture scene lacks semantic hash support")
-        if self.action_id not in {action.id for action in descriptor.scene.actions}:
-            raise ValueError("game capture action is absent from the game descriptor")
-        statuses = (self.before, self.action_result, self.after)
+        if self.action_id:
+            if self.action_endpoint != "game.capture_scene.trigger_action":
+                raise ValueError("game capture action endpoint is missing")
+            if self.action_id not in {
+                action.id for action in descriptor.scene.actions
+            }:
+                raise ValueError(
+                    "game capture action is absent from the game descriptor"
+                )
+            if self.action_result is None:
+                raise ValueError("game capture action result is missing")
+            if self.pre_action is None:
+                raise ValueError("game capture pre-action status is missing")
+            if self.expected_action_semantic_hash is None:
+                raise ValueError("game capture action probe hash is missing")
+            if self.action_media_seconds is None:
+                raise ValueError("game capture action media time is missing")
+            if (
+                self.expected_action_semantic_hash.casefold()
+                == self.expected_initial_semantic_hash.casefold()
+            ):
+                raise ValueError(
+                    "game capture probe did not observe an action semantic change"
+                )
+            if (
+                self.action_result.semantic_hash.casefold()
+                == self.pre_action.semantic_hash.casefold()
+            ):
+                raise ValueError(
+                    "recorded action did not change semantic state"
+                )
+        elif (
+            self.action_endpoint is not None
+            or self.pre_action is not None
+            or self.action_result is not None
+            or self.expected_action_semantic_hash is not None
+            or self.action_media_seconds is not None
+        ):
+            raise ValueError("passive game capture contains action evidence")
+        if self.action_media_seconds is not None and (
+            self.action_media_seconds > self.encoded_duration_seconds
+        ):
+            raise ValueError("game capture action media time exceeds duration")
+        expected_clock = [
+            ("time.set_mode", {"mode": "manual"}),
+            ("time.pause", {}),
+            ("time.set_scale", {"scale": 1.0}),
+            ("time.set_mode", {"mode": "run"}),
+            ("time.set_scale", {"scale": 1.0}),
+            ("time.resume", {}),
+        ]
+        if self.action_id:
+            expected_clock.extend([
+                ("time.pause", {}),
+                ("time.resume", {}),
+            ])
+        actual_clock = [
+            (item.method, item.params)
+            for item in self.clock_trace
+        ]
+        if actual_clock != expected_clock:
+            raise ValueError("game capture clock was not normalized to real time")
+        parameter_facts = {
+            item.parameter: item.value for item in self.parameter_results
+        }
+        if (
+            len(self.parameter_results) != len(self.parameters)
+            or parameter_facts != self.parameters
+        ):
+            raise ValueError("game capture parameter results mismatch")
+        if (
+            self.before.semantic_hash.casefold()
+            != self.expected_initial_semantic_hash.casefold()
+        ):
+            raise ValueError("game capture initial semantic hash mismatch")
+        statuses = [
+            self.load_result,
+            *(item.status for item in self.parameter_results),
+            self.before,
+            self.after,
+        ]
+        if self.pre_action is not None:
+            statuses.append(self.pre_action)
+        if self.action_result is not None:
+            statuses.append(self.action_result)
         for status in statuses:
             if status.active_scene != self.scene_id:
                 raise ValueError("game capture status scene mismatch")
@@ -279,8 +454,13 @@ class GameCaptureReport(_Model):
                 raise ValueError("game capture scene was not ready")
         if len({status.generation for status in statuses}) != 1:
             raise ValueError("game capture scene restarted during recording")
-        if self.action_result.tick < self.before.tick:
-            raise ValueError("game capture action response predates recording")
+        if self.action_result is not None and not (
+            self.before.tick
+            <= self.pre_action.tick
+            <= self.action_result.tick
+            <= self.after.tick
+        ):
+            raise ValueError("game capture ticks are out of order")
         if self.after.tick <= self.before.tick:
             raise ValueError("game capture scene did not advance during recording")
         return self
@@ -302,6 +482,52 @@ def _read_json(path: Path) -> object:
         raise CaptureBatchError(f"capture manifest not found: {path}") from exc
     except json.JSONDecodeError as exc:
         raise CaptureBatchError(f"invalid capture JSON {path}: {exc}") from exc
+
+
+def _request_specs_sha256(specs: list[CaptureRequestSpecV2]) -> str:
+    payload = [
+        item.model_dump(mode="json")
+        for item in sorted(specs, key=lambda item: item.id)
+    ]
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def capture_request_sha256(
+    requests_path: str | Path,
+    request_ids: set[str],
+) -> str:
+    """Hash only the selected normalized v2 request semantics."""
+
+    path = Path(requests_path)
+    try:
+        payload = _read_json(path)
+        if (
+            not isinstance(payload, dict)
+            or payload.get("version") != 2
+            or not isinstance(payload.get("requests"), list)
+        ):
+            raise CaptureBatchError("capture requests require version 2")
+        specs = [
+            CaptureRequestSpecV2.model_validate(item)
+            for item in payload["requests"]
+        ]
+    except ValidationError as exc:
+        raise CaptureBatchError(f"invalid capture request: {exc}") from exc
+    by_id = {item.id: item for item in specs}
+    if len(by_id) != len(specs):
+        raise CaptureBatchError("capture request ids must be unique")
+    missing = sorted(request_ids - set(by_id))
+    if missing:
+        raise CaptureBatchError(
+            "capture request ids not found: " + ", ".join(missing)
+        )
+    return _request_specs_sha256([by_id[item] for item in request_ids])
 
 
 def _write_json(path: Path, payload: object) -> None:
@@ -327,6 +553,71 @@ def _target_path(production_root: Path, raw: str) -> Path:
             f"capture target must stay inside production data: {raw}"
         ) from exc
     return target
+
+
+def _presentation_facts(
+    presentation: CapturePresentation,
+    *,
+    source_width: int,
+    source_height: int,
+) -> dict:
+    out_w = presentation.output_width
+    out_h = presentation.output_height
+    if presentation.fit == "cover":
+        scale = max(out_w / source_width, out_h / source_height)
+        crop_w = out_w / scale
+        crop_h = out_h / scale
+        crop_x = (source_width - crop_w) / 2.0
+        crop_y = (source_height - crop_h) / 2.0
+    else:
+        scale = min(out_w / source_width, out_h / source_height)
+        crop_w = float(source_width)
+        crop_h = float(source_height)
+        crop_x = 0.0
+        crop_y = 0.0
+    if scale > 1.000001:
+        raise CaptureBatchError(
+            f"capture presentation would upscale source by {scale:.3f}x"
+        )
+    focus = presentation.focus_rect
+    if focus is not None:
+        inside = (
+            focus.x >= crop_x
+            and focus.y >= crop_y
+            and focus.x + focus.width <= crop_x + crop_w
+            and focus.y + focus.height <= crop_y + crop_h
+        )
+        if not inside:
+            raise CaptureBatchError(
+                "capture focus rectangle is clipped by the centered crop"
+            )
+        focus_cx = focus.x + focus.width / 2.0
+        focus_cy = focus.y + focus.height / 2.0
+        crop_cx = crop_x + crop_w / 2.0
+        crop_cy = crop_y + crop_h / 2.0
+        dx = abs(focus_cx - crop_cx) / crop_w
+        dy = abs(focus_cy - crop_cy) / crop_h
+        if max(dx, dy) > presentation.focus_tolerance_ratio:
+            raise CaptureBatchError(
+                "capture focus rectangle is not centered within tolerance"
+            )
+    return {
+        "output_width": out_w,
+        "output_height": out_h,
+        "fit": presentation.fit,
+        "scale": round(scale, 6),
+        "source_crop": {
+            "x": round(crop_x, 3),
+            "y": round(crop_y, 3),
+            "width": round(crop_w, 3),
+            "height": round(crop_h, 3),
+        },
+        "focus_rect": (
+            focus.model_dump(mode="json") if focus is not None else None
+        ),
+        "focus_center_required": presentation.focus_center_required,
+        "focus_tolerance_ratio": presentation.focus_tolerance_ratio,
+    }
 
 
 def _sha256(path: Path) -> str:
@@ -446,9 +737,29 @@ def _validate_v2_recorder_metadata(
             raise CaptureBatchError(
                 f"game-reported action mismatch: {result.request_id}"
             )
+        if report.seed != task.seed or report.parameters != task.parameters:
+            raise CaptureBatchError(
+                f"game-reported preparation mismatch: {result.request_id}"
+            )
+        if report.expected_initial_semantic_hash.casefold() != (
+            task.expected_initial_semantic_hash or ""
+        ).casefold():
+            raise CaptureBatchError(
+                f"game-reported initial semantic hash mismatch: {result.request_id}"
+            )
+        if (report.expected_action_semantic_hash or "").casefold() != (
+            task.expected_action_semantic_hash or ""
+        ).casefold():
+            raise CaptureBatchError(
+                f"game-reported action semantic hash mismatch: {result.request_id}"
+            )
         if report.build_id.casefold() != task.build_id.casefold():
             raise CaptureBatchError(
                 f"game-reported build mismatch: {result.request_id}"
+            )
+        if report.process_id != metadata.get("pid"):
+            raise CaptureBatchError(
+                f"game report PID differs from recorded window: {result.request_id}"
             )
         if metadata.get("game_report_path") != result.game_report_path:
             raise CaptureBatchError(
@@ -464,6 +775,7 @@ def _validate_v2_recorder_metadata(
             report.monotonic_ended_seconds - report.monotonic_started_seconds
         )
     else:
+        report = None
         report_path = None
         game_elapsed_seconds = None
     return {
@@ -487,6 +799,14 @@ def _validate_v2_recorder_metadata(
         "state_id": task.state_id,
         "build_id": task.build_id,
         "action_id": task.action_id,
+        "seed": report.seed if report is not None else None,
+        "parameters": report.parameters if report is not None else {},
+        "initial_semantic_hash": (
+            report.expected_initial_semantic_hash if report is not None else None
+        ),
+        "action_semantic_hash": (
+            report.expected_action_semantic_hash if report is not None else None
+        ),
         "client_rect": metadata.get("client_rect"),
         "simulation_rate": (
             1.0 if task.editorial_role == "gameplay" else metadata.get("simulation_rate")
@@ -501,6 +821,12 @@ def _validate_v2_recorder_metadata(
         "tail_handle_seconds": metadata.get("tail_handle_seconds"),
         "content_seconds": metadata.get("content_seconds"),
         "game_elapsed_seconds": game_elapsed_seconds,
+        "encoded_duration_seconds": (
+            report.encoded_duration_seconds if report is not None else None
+        ),
+        "action_media_seconds": (
+            report.action_media_seconds if report is not None else None
+        ),
     }
 
 
@@ -509,6 +835,7 @@ def prepare_capture_batch(
     requests_path: str | Path,
     *,
     out_path: str | Path | None = None,
+    request_ids: set[str] | None = None,
 ) -> CaptureBatch | CaptureBatchV2:
     """Normalize all requests into one external-agent handoff file."""
 
@@ -529,6 +856,13 @@ def prepare_capture_batch(
     ids = [item.id for item in specs]
     if len(ids) != len(set(ids)):
         raise CaptureBatchError("capture request ids must be unique")
+    if request_ids is not None:
+        missing_ids = sorted(request_ids - set(ids))
+        if missing_ids:
+            raise CaptureBatchError(
+                "capture request ids not found: " + ", ".join(missing_ids)
+            )
+        specs = [item for item in specs if item.id in request_ids]
 
     prepared_type = PreparedCaptureRequest if version == 1 else PreparedCaptureRequestV2
     batch_type = CaptureBatch if version == 1 else CaptureBatchV2
@@ -539,13 +873,21 @@ def prepare_capture_batch(
         )
         for spec in specs
     ]
+    batch_kwargs = {
+        "product_id": production.product.id,
+        "production_id": production.id,
+        "game_root": str(production.product.game_root),
+        "production_root": str(production.root),
+        "requested_at": datetime.now(timezone.utc).isoformat(),
+        "requests": tasks,
+    }
+    if version == 2:
+        batch_kwargs.update({
+            "requests_path": str(path.resolve()),
+            "requests_sha256": _request_specs_sha256(specs),
+        })
     batch = batch_type(
-        product_id=production.product.id,
-        production_id=production.id,
-        game_root=str(production.product.game_root),
-        production_root=str(production.root),
-        requested_at=datetime.now(timezone.utc).isoformat(),
-        requests=tasks,
+        **batch_kwargs,
     )
     destination = (
         Path(out_path)
@@ -590,6 +932,78 @@ def ingest_capture_results(
         raise CaptureBatchError(f"invalid capture result: {exc}") from exc
     if results.production_id != production.id:
         raise CaptureBatchError("capture results belong to a different production")
+    if isinstance(batch, CaptureBatchV2):
+        if not batch.requests_path or not batch.requests_sha256:
+            raise CaptureBatchError(
+                "v2 capture batch lacks source request identity; rebuild it"
+            )
+        source_requests = Path(batch.requests_path)
+        try:
+            source_requests.resolve().relative_to(production.root)
+            batch_file.resolve().relative_to(production.root)
+        except ValueError as exc:
+            raise CaptureBatchError(
+                "v2 capture batch and source requests must stay inside production"
+            ) from exc
+        if not source_requests.is_file():
+            raise CaptureBatchError("capture source requests are missing")
+        current_request_sha = capture_request_sha256(
+            source_requests,
+            {item.id for item in batch.requests},
+        )
+        if current_request_sha.casefold() != batch.requests_sha256.casefold():
+            raise CaptureBatchError(
+                "selected capture request changed after batch preparation; "
+                "rebuild and re-record"
+            )
+        if (
+            batch.product_id != production.product.id
+            or batch.production_id != production.id
+            or Path(batch.production_root).resolve() != production.root
+            or Path(batch.game_root).resolve()
+            != Path(production.product.game_root).resolve()
+        ):
+            raise CaptureBatchError(
+                "capture batch identity differs from the current production"
+            )
+        try:
+            source_payload = _read_json(source_requests)
+            if (
+                not isinstance(source_payload, dict)
+                or source_payload.get("version") != 2
+                or not isinstance(source_payload.get("requests"), list)
+            ):
+                raise CaptureBatchError("invalid source capture requests")
+            source_specs = [
+                CaptureRequestSpecV2.model_validate(item)
+                for item in source_payload["requests"]
+            ]
+        except ValidationError as exc:
+            raise CaptureBatchError(
+                f"invalid source capture requests: {exc}"
+            ) from exc
+        source_by_id = {item.id: item for item in source_specs}
+        if len(source_by_id) != len(source_specs):
+            raise CaptureBatchError("source capture request ids are not unique")
+        batch_ids = [item.id for item in batch.requests]
+        if len(batch_ids) != len(set(batch_ids)):
+            raise CaptureBatchError("capture batch request ids are not unique")
+        for task in batch.requests:
+            source = source_by_id.get(task.id)
+            if source is None:
+                raise CaptureBatchError(
+                    f"capture batch request is absent from source: {task.id}"
+                )
+            expected = PreparedCaptureRequestV2(
+                **source.model_dump(),
+                target_absolute=str(
+                    _target_path(production.root, source.target)
+                ),
+            )
+            if task.model_dump(mode="json") != expected.model_dump(mode="json"):
+                raise CaptureBatchError(
+                    f"capture batch request differs from source: {task.id}"
+                )
     tasks = {item.id: item for item in batch.requests}
     seen: set[str] = set()
     ingested: list[str] = []
@@ -677,6 +1091,15 @@ def ingest_capture_results(
                 raise CaptureBatchError(
                     f"encoded frame differs from recorder client_rect: {request_id}"
                 )
+            if task.presentation is None:
+                raise CaptureBatchError(
+                    f"capture presentation contract is missing: {request_id}"
+                )
+            facts["presentation"] = _presentation_facts(
+                task.presentation,
+                source_width=asset.width or 0,
+                source_height=asset.height or 0,
+            )
             if (facts.get("head_handle_seconds") or 0.0) < task.head_handle_seconds:
                 raise CaptureBatchError(
                     f"actual head handle below request: {request_id}"
@@ -694,6 +1117,7 @@ def ingest_capture_results(
             })
             if task.editorial_role == "gameplay":
                 game_elapsed = facts.get("game_elapsed_seconds")
+                encoded_duration = facts.get("encoded_duration_seconds")
                 media_duration = asset.duration or 0.0
                 if not isinstance(game_elapsed, (int, float)) or game_elapsed <= 0:
                     raise CaptureBatchError(
@@ -706,10 +1130,38 @@ def ingest_capture_results(
                         f"for {request_id}: media={media_duration:.3f}s, "
                         f"capture={float(game_elapsed):.3f}s"
                     )
+                if (
+                    not isinstance(encoded_duration, (int, float))
+                    or abs(float(encoded_duration) - media_duration) > tolerance
+                ):
+                    raise CaptureBatchError(
+                        f"gameplay encoded progress differs from media duration "
+                        f"for {request_id}"
+                    )
                 facts["measured_playback_rate"] = (
                     float(game_elapsed) / media_duration
                 )
             content_start = task.head_handle_seconds
+            if task.editorial_role == "gameplay" and task.action_id:
+                action_media = facts.get("action_media_seconds")
+                if not isinstance(action_media, (int, float)):
+                    raise CaptureBatchError(
+                        f"gameplay action media time is missing: {request_id}"
+                    )
+                content_start = float(action_media)
+            actual_tail = (asset.duration or 0.0) - (
+                content_start + task.content_seconds
+            )
+            if content_start < task.head_handle_seconds:
+                raise CaptureBatchError(
+                    f"actual head handle below request: {request_id}"
+                )
+            if actual_tail < task.tail_handle_seconds:
+                raise CaptureBatchError(
+                    f"actual tail handle below request: {request_id}"
+                )
+            facts["head_handle_seconds"] = content_start
+            facts["tail_handle_seconds"] = actual_tail
             content_end = content_start + task.content_seconds
             frame_report = analyze_rendered_video(
                 asset_path := (production.root / task.target).resolve(),

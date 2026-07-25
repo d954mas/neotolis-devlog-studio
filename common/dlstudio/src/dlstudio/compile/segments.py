@@ -268,6 +268,9 @@ def build_segments(
             and runs[-1].bg.asset_id == bg.asset_id
             and runs[-1].bg.render_manifest == bg.render_manifest
             and runs[-1].bg.editorial_role == bg.editorial_role
+            and runs[-1].bg.expected_state_id == bg.expected_state_id
+            and runs[-1].bg.expected_build_id == bg.expected_build_id
+            and runs[-1].bg.expected_action_id == bg.expected_action_id
             and runs[-1].bg.fit == bg.fit
             and runs[-1].bg.anchor_x == bg.anchor_x
             and runs[-1].bg.anchor_y == bg.anchor_y

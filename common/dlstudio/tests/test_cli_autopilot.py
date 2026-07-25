@@ -81,14 +81,23 @@ def test_capture_flow_prepares_once_and_names_the_external_recording_boundary(
         lambda ref: (SimpleNamespace(), production, "product:production"),
     )
 
-    def fake_prepare(root, requests_path, *, out_path):
+    def fake_prepare(root, requests_path, *, out_path, request_ids=None):
+        assert request_ids == {"day5_station"}
         Path(out_path).write_text(json.dumps({
             "version": 2,
+            "requests_sha256": __import__("hashlib").sha256(
+                requests.read_bytes()
+            ).hexdigest(),
             "requests": [{"id": "day5_station"}],
         }), encoding="utf-8")
         return SimpleNamespace(requests=[SimpleNamespace(id="day5_station")])
 
     monkeypatch.setattr(capture_batch, "prepare_capture_batch", fake_prepare)
+    monkeypatch.setattr(
+        capture_batch,
+        "capture_request_sha256",
+        lambda path, ids: "a" * 64,
+    )
     monkeypatch.setattr(
         asset_registry,
         "load_asset_registry",
@@ -101,7 +110,7 @@ def test_capture_flow_prepares_once_and_names_the_external_recording_boundary(
 
     output = capsys.readouterr().out
     assert "$devlog-record-media" in output
-    assert "capture_results.json" in output
+    assert "data/plan/capture_results/day5_station.json" in output
 
 
 def test_capture_flow_writes_identity_complete_gameplay_snippet(
@@ -109,15 +118,32 @@ def test_capture_flow_writes_identity_complete_gameplay_snippet(
     monkeypatch,
 ):
     from dlstudio.cli import autopilot
-    from dlstudio.services import asset_registry
+    from dlstudio.services import asset_registry, capture_batch
 
     production = tmp_path / "production"
-    batch = production / "data" / "plan" / "capture_batch.json"
+    batch = (
+        production
+        / "data"
+        / "plan"
+        / "capture_batches"
+        / "day5_station.json"
+    )
     batch.parent.mkdir(parents=True)
+    requests = production / "data" / "plan" / "capture_requests.json"
+    requests.write_text(
+        '{"version":2,"requests":[{"id":"day5_station"}]}',
+        encoding="utf-8",
+    )
     batch.write_text(json.dumps({
         "version": 2,
+        "requests_sha256": "a" * 64,
         "requests": [{"id": "day5_station"}],
     }), encoding="utf-8")
+    monkeypatch.setattr(
+        capture_batch,
+        "capture_request_sha256",
+        lambda path, ids: "a" * 64,
+    )
     monkeypatch.setattr(
         autopilot,
         "_load_target",
@@ -135,11 +161,21 @@ def test_capture_flow_writes_identity_complete_gameplay_snippet(
         build_id="exe-sha256:" + "c" * 64,
         action_id="station_queue_and_tram_pass",
         head_handle_seconds=5.0,
+        presentation={
+            "output_width": 1920,
+            "output_height": 1080,
+            "fit": "contain",
+        },
     )
     monkeypatch.setattr(
         asset_registry,
         "load_asset_registry",
         lambda root: SimpleNamespace(assets=[asset]),
+    )
+    monkeypatch.setattr(
+        asset_registry,
+        "resolve_approved_asset",
+        lambda root, asset_id: production / asset.artifact_path,
     )
 
     assert autopilot.cmd_capture_flow(_parse([
@@ -157,7 +193,65 @@ def test_capture_flow_writes_identity_complete_gameplay_snippet(
     assert 'expected_state_id="day5.station.new_visual"' in snippet
     assert 'expected_action_id="station_queue_and_tram_pass"' in snippet
     assert "offset=5.000" in snippet
+    assert 'fit="contain"' in snippet
     assert "loop=" not in snippet
+
+
+def test_capture_flow_refuses_stale_approved_take(tmp_path, monkeypatch):
+    from dlstudio.cli import CliError, autopilot
+    from dlstudio.services import asset_registry, capture_batch
+
+    production = tmp_path / "production"
+    batch = (
+        production / "data" / "plan" / "capture_batches" / "day5_station.json"
+    )
+    batch.parent.mkdir(parents=True)
+    requests = production / "data" / "plan" / "capture_requests.json"
+    requests.write_text(
+        '{"version":2,"requests":[{"id":"day5_station"}]}',
+        encoding="utf-8",
+    )
+    batch.write_text(json.dumps({
+        "version": 2,
+        "requests_sha256": "a" * 64,
+        "requests": [{"id": "day5_station"}],
+    }), encoding="utf-8")
+    monkeypatch.setattr(
+        capture_batch,
+        "capture_request_sha256",
+        lambda path, ids: "a" * 64,
+    )
+    monkeypatch.setattr(
+        autopilot,
+        "_load_target",
+        lambda ref: (SimpleNamespace(), production, "product:production"),
+    )
+    asset = SimpleNamespace(
+        asset_id="capture:day5_station",
+        status="approved",
+        artifact_path="data/footage/day5_station.mp4",
+        artifact_sha256="a" * 64,
+        validation_sha256="b" * 64,
+        revision=3,
+        editorial_role="gameplay",
+    )
+    monkeypatch.setattr(
+        asset_registry,
+        "load_asset_registry",
+        lambda root: SimpleNamespace(assets=[asset]),
+    )
+
+    def stale(*args, **kwargs):
+        raise asset_registry.AssetRegistryError(
+            "asset capture ingest proof is stale"
+        )
+
+    monkeypatch.setattr(asset_registry, "resolve_approved_asset", stale)
+
+    with pytest.raises(CliError, match="re-record and ingest"):
+        autopilot.cmd_capture_flow(_parse([
+            "capture-flow", "product:production", "day5_station",
+        ]))
 
 
 def test_autopilot_run_stops_at_checkpoint_and_resumes_to_exact_review(
@@ -326,7 +420,7 @@ def test_preflight_combines_ir_and_shot_manifest_issues(tmp_path, monkeypatch):
     monkeypatch.setattr(
         check_mod,
         "run_checks",
-        lambda value: CheckReport(
+        lambda value, **kwargs: CheckReport(
             issues=[
                 CheckIssue(
                     severity="warn",
@@ -391,7 +485,11 @@ def test_preflight_without_optional_shot_files_reports_ir_only(tmp_path, monkeyp
     import dlstudio.check as check_mod
 
     monkeypatch.setattr(compile_mod, "build_timeline", lambda edit: timeline)
-    monkeypatch.setattr(check_mod, "run_checks", lambda value: CheckReport())
+    monkeypatch.setattr(
+        check_mod,
+        "run_checks",
+        lambda value, **kwargs: CheckReport(),
+    )
 
     assert autopilot.cmd_preflight(_parse(["preflight", "some.edit"])) == 0
     payload = json.loads(

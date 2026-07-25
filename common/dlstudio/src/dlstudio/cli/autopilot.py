@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import secrets
 import time
 from datetime import datetime, timezone
@@ -311,10 +312,42 @@ def cmd_asset_approve(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_asset_register(args: argparse.Namespace) -> int:
+    from dlstudio.cli import CliError
+    from dlstudio.services.asset_registry import (
+        AssetRegistryError,
+        register_file_asset,
+    )
+
+    _edit, root, _canonical = _load_target(args.edit)
+    try:
+        registry = register_file_asset(
+            root,
+            asset_id=args.asset_id,
+            artifact_path=args.path,
+            editorial_role=args.role,
+            source_type=args.source_type,
+            source_url=args.source_url,
+            license_name=args.license,
+            credit=args.credit,
+        )
+    except AssetRegistryError as exc:
+        raise CliError(str(exc)) from exc
+    asset = next(item for item in registry.assets if item.asset_id == args.asset_id)
+    print(
+        f"[dl2] asset registered: {asset.asset_id} "
+        f"revision={asset.revision} sha256={asset.artifact_sha256} "
+        f"validation={asset.validation_sha256}"
+    )
+    print("[dl2] next: inspect it, then approve this exact revision with asset-approve")
+    return 0
+
+
 def cmd_capture_batch(args: argparse.Namespace) -> int:
     from dlstudio.cli import CliError
     from dlstudio.services.capture_batch import (
         CaptureBatchError,
+        capture_request_sha256,
         ingest_capture_results,
         prepare_capture_batch,
     )
@@ -360,12 +393,18 @@ def _capture_shot_snippet(asset: Any) -> str:
         f"    editorial_role={json.dumps(asset.editorial_role, ensure_ascii=False)},",
     ]
     if asset.editorial_role == "gameplay":
+        presentation = asset.presentation or {}
+        fit = presentation.get("fit")
+        if fit not in {"cover", "contain"}:
+            raise ValueError(
+                f"gameplay asset lacks a trusted presentation fit: {asset.asset_id}"
+            )
         fields.extend([
             f"    expected_state_id={json.dumps(asset.state_id, ensure_ascii=False)},",
             f"    expected_build_id={json.dumps(asset.build_id, ensure_ascii=False)},",
             f"    expected_action_id={json.dumps(asset.action_id, ensure_ascii=False)},",
             f"    offset={float(asset.head_handle_seconds or 0.0):.3f},",
-            '    fit="cover",',
+            f"    fit={json.dumps(fit)},",
             "    anchor_x=0.5,",
             "    anchor_y=0.5,",
         ])
@@ -379,9 +418,11 @@ def cmd_capture_flow(args: argparse.Namespace) -> int:
         AssetRegistryError,
         approve_asset,
         load_asset_registry,
+        resolve_approved_asset,
     )
     from dlstudio.services.capture_batch import (
         CaptureBatchError,
+        capture_request_sha256,
         ingest_capture_results,
         prepare_capture_batch,
     )
@@ -392,10 +433,40 @@ def cmd_capture_flow(args: argparse.Namespace) -> int:
         if args.requests
         else root / "data" / "plan" / "capture_requests.json"
     )
-    batch_path = root / "data" / "plan" / "capture_batch.json"
-    if args.refresh_batch or not batch_path.is_file():
+    if re.fullmatch(r"[A-Za-z0-9_-]{1,120}", args.request_id) is None:
+        raise CliError("capture request id contains unsafe characters")
+    if not requests.is_file():
+        raise CliError(f"capture requests not found: {requests}")
+    batch_path = (
+        root
+        / "data"
+        / "plan"
+        / "capture_batches"
+        / f"{args.request_id}.json"
+    )
+    try:
+        requests_sha = capture_request_sha256(requests, {args.request_id})
+    except CaptureBatchError as exc:
+        raise CliError(str(exc)) from exc
+    if batch_path.is_file() and not args.refresh_batch:
         try:
-            prepare_capture_batch(root, requests, out_path=batch_path)
+            existing_batch = json.loads(batch_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise CliError(f"invalid capture batch {batch_path}: {exc}") from exc
+        if existing_batch.get("requests_sha256") != requests_sha:
+            raise CliError(
+                "capture requests changed after this batch was prepared; "
+                "run capture-flow with --refresh-batch and re-record"
+            )
+    if args.refresh_batch or not batch_path.is_file():
+        batch_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            prepare_capture_batch(
+                root,
+                requests,
+                out_path=batch_path,
+                request_ids={args.request_id},
+            )
         except CaptureBatchError as exc:
             raise CliError(str(exc)) from exc
 
@@ -426,6 +497,13 @@ def cmd_capture_flow(args: argparse.Namespace) -> int:
             raise CliError(str(exc)) from exc
 
     asset_id = f"capture:{args.request_id}"
+    results_path = (
+        root
+        / "data"
+        / "plan"
+        / "capture_results"
+        / f"{args.request_id}.json"
+    )
     registry = load_asset_registry(root)
     asset = next((item for item in registry.assets if item.asset_id == asset_id), None)
     if asset is None:
@@ -433,7 +511,7 @@ def cmd_capture_flow(args: argparse.Namespace) -> int:
         print("[dl2] next: record the batch with $devlog-record-media, then run:")
         print(
             f"  dl2 capture-flow {canonical} {args.request_id} "
-            "--ingest data/plan/capture_results.json"
+            f"--ingest {results_path.relative_to(root).as_posix()}"
         )
         return 0
 
@@ -463,7 +541,14 @@ def cmd_capture_flow(args: argparse.Namespace) -> int:
         )
         return 0
 
-    snippet = _capture_shot_snippet(asset)
+    try:
+        resolve_approved_asset(root, asset.asset_id)
+        snippet = _capture_shot_snippet(asset)
+    except (AssetRegistryError, ValueError) as exc:
+        raise CliError(
+            f"capture {args.request_id!r} is stale or cannot be wired: {exc}; "
+            "re-record and ingest the current prepared batch"
+        ) from exc
     snippet_path = (
         root / "data" / "plan" / "capture_snippets" / f"{args.request_id}.py"
     )
@@ -501,7 +586,7 @@ def cmd_preflight(args: argparse.Namespace) -> int:
     started = time.perf_counter_ns()
     edit, root, _canonical = _load_target(args.edit)
     timeline = dl_compile.build_timeline(edit)
-    mechanical = dl_check.run_checks(timeline)
+    mechanical = dl_check.run_checks(timeline, strict_assets=args.final)
     issues = list(mechanical.issues)
     script_issues, script_inputs = _script_vo_issues(edit, root)
     issues.extend(script_issues)
@@ -893,6 +978,28 @@ def add_subparsers(sub: argparse._SubParsersAction) -> None:
     inventory.add_argument("edit", help="dotted edit, production path, or product:id")
     inventory.set_defaults(func=cmd_inventory)
 
+    register = sub.add_parser(
+        "asset-register",
+        help="register a non-gameplay video with hash-bound provenance",
+    )
+    register.add_argument("edit", help="dotted edit, production path, or product:id")
+    register.add_argument("asset_id", help="stable registry asset id")
+    register.add_argument("path", help="video path inside production data/")
+    register.add_argument(
+        "--role",
+        required=True,
+        choices=("reference", "presentation", "debug_proof"),
+    )
+    register.add_argument(
+        "--source-type",
+        required=True,
+        choices=("stock", "purchased", "licensed", "owned", "reference"),
+    )
+    register.add_argument("--source-url", default="")
+    register.add_argument("--license", default="")
+    register.add_argument("--credit", default="")
+    register.set_defaults(func=cmd_asset_register)
+
     approve = sub.add_parser(
         "asset-approve",
         help="approve one exact validated asset revision",
@@ -958,7 +1065,7 @@ def add_subparsers(sub: argparse._SubParsersAction) -> None:
     flow.add_argument(
         "--refresh-batch",
         action="store_true",
-        help="rebuild capture_batch.json from the current request file",
+        help="rebuild this request's batch from the current request file",
     )
     flow.set_defaults(func=cmd_capture_flow)
 

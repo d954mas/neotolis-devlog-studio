@@ -51,13 +51,18 @@ machine-distinguishable.
 On Windows, use the bundled client-area recorder:
 
 ```powershell
-python .agents/skills/devlog-record-media/scripts/record_window_realtime.py --pid <game-pid> --batch <production-root>/data/plan/capture_batch.json --request-id <request-id>
+# First lock semantic hashes from the exact running PID into the raw v2 request.
+python .agents/skills/devlog-record-media/scripts/record_window_realtime.py --pid <game-pid> --probe-requests <production-root>/data/plan/capture_requests.json --request-id <request-id>
+dl2 capture-flow <product:production> <request-id>
+# Then execute the isolated prepared batch printed by capture-flow.
+python .agents/skills/devlog-record-media/scripts/record_window_realtime.py --pid <game-pid> --batch <production-root>/data/plan/capture_batches/<request-id>.json --request-id <request-id>
 ```
 
 It records immediately, hides the mouse cursor, resolves the client rectangle
 and executable from the PID, verifies the executable SHA against `build_id`,
 checks the game-owned capture-scene descriptor/status, automatically triggers
-the declared action after the head handle, and writes both
+the declared action after the head handle, continues recording until the
+observed action response plus content and tail handles are complete, and writes both
 `<capture>.capture.json` and `<capture>.game.json`. The latter preserves raw
 `describe`, before/action/after status, one scene generation, semantic hashes,
 and monotonic wall duration. Compute the expected build id from the
@@ -65,8 +70,12 @@ exact executable before recording; a branch name or caller-supplied prose is
 not build proof. If the client area is smaller than the requested resolution
 or is outside the visible desktop, stop and fix the launch mode; do not
 upscale afterward. Batch mode reads all identity/geometry/duration values from
-Studio's prepared request and writes/merges
-`data/plan/capture_results.json`; do not retype those values manually.
+Studio's prepared request and writes one isolated
+`data/plan/capture_results/<request-id>.json`; do not retype those values manually.
+The semantic probe is a required preflight: it loads the declared seed, applies
+the parameters, verifies that the DevAPI listener belongs to the same PID, and
+atomically stores the game-reported initial/action hashes before the immutable
+capture batch is prepared.
 
 ## Validate Gameplay Before Ingest
 

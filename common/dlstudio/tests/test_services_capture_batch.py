@@ -137,6 +137,10 @@ def _gameplay_request_v2(**overrides) -> dict:
         "state_id": "day5.station.new_visual",
         "scene": "day5.station.new_visual",
         "build_id": "exe-sha256:" + "a" * 64,
+        "seed": 42,
+        "parameters": {},
+        "expected_initial_semantic_hash": "00000001",
+        "expected_action_semantic_hash": "00000002",
         "orientation": "landscape",
         "min_width": 1920,
         "min_height": 1080,
@@ -150,6 +154,13 @@ def _gameplay_request_v2(**overrides) -> dict:
         "action_id": "station_queue_and_tram_pass",
     }
     request.update(overrides)
+    if "presentation" not in overrides:
+        request["presentation"] = {
+            "output_width": request["min_width"],
+            "output_height": request["min_height"],
+            "fit": "contain",
+            "focus_center_required": False,
+        }
     return request
 
 
@@ -170,6 +181,114 @@ def test_prepare_capture_batch_v2_accepts_strict_realtime_gameplay(tmp_path):
     assert batch.requests[0].capture_method == "realtime_window"
     assert batch.requests[0].state_id == "day5.station.new_visual"
     assert batch.requests[0].head_handle_seconds == 5
+
+
+def test_gameplay_presentation_rejects_off_center_focus():
+    from dlstudio.services.capture_batch import (
+        CaptureBatchError,
+        CapturePresentation,
+        _presentation_facts,
+    )
+
+    presentation = CapturePresentation.model_validate({
+        "output_width": 1080,
+        "output_height": 1920,
+        "fit": "cover",
+        "focus_center_required": True,
+        "focus_tolerance_ratio": 0.05,
+        "focus_rect": {
+            "x": 650,
+            "y": 500,
+            "width": 200,
+            "height": 300,
+        },
+    })
+
+    with pytest.raises(
+        CaptureBatchError,
+        match="focus rectangle is not centered",
+    ):
+        _presentation_facts(
+            presentation,
+            source_width=1080,
+            source_height=1920,
+        )
+
+
+def test_prepare_capture_batch_v2_accepts_passive_game_owned_scene(tmp_path):
+    production = _production(tmp_path)
+    requests = production / "data" / "plan" / "capture_requests.json"
+    requests.parent.mkdir(parents=True)
+    requests.write_text(json.dumps({
+        "version": 2,
+        "requests": [_gameplay_request_v2(
+            state_id="crowd.progression",
+            scene="crowd.progression",
+            action_id=None,
+            expected_action_semantic_hash=None,
+            parameters={"population": "4"},
+        )],
+    }), encoding="utf-8")
+
+    from dlstudio.services.capture_batch import prepare_capture_batch
+
+    batch = prepare_capture_batch(production, requests)
+
+    assert batch.requests[0].action_id is None
+    assert batch.requests[0].parameters == {"population": "4"}
+
+
+def test_prepare_capture_batch_v2_can_scope_one_resumable_request(tmp_path):
+    production = _production(tmp_path)
+    requests = production / "data" / "plan" / "capture_requests.json"
+    requests.parent.mkdir(parents=True)
+    requests.write_text(json.dumps({
+        "version": 2,
+        "requests": [
+            _gameplay_request_v2(id="day4", target="data/footage/day4.mp4"),
+            _gameplay_request_v2(id="day5", target="data/footage/day5.mp4"),
+        ],
+    }), encoding="utf-8")
+
+    from dlstudio.services.capture_batch import prepare_capture_batch
+
+    batch = prepare_capture_batch(
+        production,
+        requests,
+        request_ids={"day5"},
+    )
+
+    assert [item.id for item in batch.requests] == ["day5"]
+    from dlstudio.services.capture_batch import capture_request_sha256
+
+    assert batch.requests_sha256 == capture_request_sha256(requests, {"day5"})
+
+
+def test_scoped_request_hash_ignores_unrelated_request_edits(tmp_path):
+    production = _production(tmp_path)
+    requests = production / "data" / "plan" / "capture_requests.json"
+    requests.parent.mkdir(parents=True)
+    first = _gameplay_request_v2(id="day5")
+    second = _gameplay_request_v2(id="day6", target="data/footage/day6.mp4")
+    requests.write_text(
+        json.dumps({"version": 2, "requests": [first, second]}),
+        encoding="utf-8",
+    )
+    from dlstudio.services.capture_batch import capture_request_sha256
+
+    original = capture_request_sha256(requests, {"day5"})
+    second["instructions"] = "changed independently"
+    requests.write_text(
+        json.dumps({"version": 2, "requests": [first, second]}),
+        encoding="utf-8",
+    )
+    assert capture_request_sha256(requests, {"day5"}) == original
+    first["instructions"] = "changed selected request"
+    requests.write_text(
+        json.dumps({"version": 2, "requests": [first, second]}),
+        encoding="utf-8",
+    )
+    assert capture_request_sha256(requests, {"day5"}) != original
 
 
 def test_realtime_recorder_hydrates_exact_task_and_writes_ingest_result(tmp_path):
@@ -206,7 +325,9 @@ def test_realtime_recorder_hydrates_exact_task_and_writes_ingest_result(tmp_path
     assert args.output == Path(request["target_absolute"])
     assert args.state_id == request["scene"]
     assert args.action_id == request["action_id"]
-    assert args.results == production / "data" / "plan" / "capture_results.json"
+    assert args.results == (
+        production / "data" / "plan" / "capture_results" / f"{request['id']}.json"
+    )
 
     output = Path(request["target_absolute"])
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -237,6 +358,142 @@ def test_realtime_recorder_hydrates_exact_task_and_writes_ingest_result(tmp_path
     assert saved["game_report_path"] == "data/footage/day5.mp4.game.json"
 
 
+def test_realtime_recorder_probe_locks_game_reported_semantic_hashes(
+    tmp_path,
+    monkeypatch,
+):
+    production = _production(tmp_path)
+    executable = tmp_path / "game.exe"
+    executable.write_bytes(b"exact-game-build")
+    request = _gameplay_request_v2()
+    request["build_id"] = (
+        "exe-sha256:" + hashlib.sha256(executable.read_bytes()).hexdigest()
+    )
+    request.pop("expected_initial_semantic_hash")
+    request.pop("expected_action_semantic_hash")
+    requests_path = production / "data" / "plan" / "capture_requests.json"
+    requests_path.parent.mkdir(parents=True, exist_ok=True)
+    requests_path.write_text(
+        json.dumps({"version": 2, "requests": [request]}),
+        encoding="utf-8",
+    )
+    recorder = _record_script_module()
+
+    class FakeDevApi:
+        def __init__(self, port):
+            self.port = port
+
+        def close(self):
+            pass
+
+        def result(self, method, params=None):
+            if method == "game.capture_scene.describe":
+                return {
+                    "scene": {
+                        "id": request["scene"],
+                        "capabilities": {
+                            "hidesGameUi": True,
+                            "semanticHash": True,
+                        },
+                        "actions": [{"id": request["action_id"]}],
+                    }
+                }
+            status = {
+                "activeScene": request["scene"],
+                "ready": True,
+                "semanticHash": "a1b2c3d4",
+            }
+            if method == "game.capture_scene.trigger_action":
+                return {**status, "semanticHash": "d4c3b2a1"}
+            return status
+
+    monkeypatch.setattr(recorder, "_executable_for_pid", lambda pid: executable)
+    monkeypatch.setattr(recorder, "_listener_pids", lambda port: {123})
+    monkeypatch.setattr(recorder, "_DevApi", FakeDevApi)
+    args = recorder._parser().parse_args([
+        "--pid",
+        "123",
+        "--probe-requests",
+        str(requests_path),
+        "--request-id",
+        request["id"],
+    ])
+
+    assert recorder._probe_request(args) == 0
+
+    locked = json.loads(requests_path.read_text(encoding="utf-8"))["requests"][0]
+    assert locked["expected_initial_semantic_hash"] == "a1b2c3d4"
+    assert locked["expected_action_semantic_hash"] == "d4c3b2a1"
+
+
+def test_realtime_recorder_preserves_real_parameter_result_shape():
+    recorder = _record_script_module()
+
+    class FakeDevApi:
+        def result(self, method, params=None):
+            status = {
+                "activeScene": "crowd.progression",
+                "ready": True,
+                "semanticHash": "1234abcd",
+            }
+            if method == "game.capture_scene.describe":
+                return {
+                    "scene": {
+                        "id": "crowd.progression",
+                        "capabilities": {
+                            "hidesGameUi": True,
+                            "semanticHash": True,
+                        },
+                        "actions": [],
+                    }
+                }
+            if method == "game.capture_scene.set_parameter":
+                return {
+                    "parameter": params["parameter"],
+                    "value": params["value"],
+                    "status": status,
+                }
+            return status
+
+    _descriptor, _load, parameter_results, _before, _action = (
+        recorder._prepare_game_scene(
+            FakeDevApi(),
+            scene_id="crowd.progression",
+            seed=777,
+            parameters={"population": "1000"},
+            action_id=None,
+            trigger_action=False,
+        )
+    )
+
+    assert parameter_results == [{
+        "parameter": "population",
+        "value": "1000",
+        "status": {
+            "activeScene": "crowd.progression",
+            "ready": True,
+            "semanticHash": "1234abcd",
+        },
+    }]
+
+
+def test_realtime_recorder_extends_tail_from_observed_action_time():
+    recorder = _record_script_module()
+
+    assert recorder._required_capture_end(
+        action_media_seconds=5.075,
+        head_handle_seconds=5.0,
+        content_seconds=27.0,
+        tail_handle_seconds=5.0,
+    ) == pytest.approx(37.325)
+    assert recorder._required_capture_end(
+        action_media_seconds=None,
+        head_handle_seconds=5.0,
+        content_seconds=27.0,
+        tail_handle_seconds=5.0,
+    ) == pytest.approx(37.25)
+
+
 def test_prepare_capture_batch_v2_rejects_frame_stepped_gameplay(tmp_path):
     production = _production(tmp_path)
     requests = production / "data" / "plan" / "capture_requests.json"
@@ -260,7 +517,8 @@ def test_prepare_capture_batch_v2_rejects_frame_stepped_gameplay(tmp_path):
         ("state_id", "", "state_id"),
         ("scene", None, "game-owned capture scene"),
         ("build_id", "", "build_id"),
-        ("action_id", "", "action_id"),
+        ("seed", None, "deterministic scene seed"),
+        ("expected_initial_semantic_hash", None, "expected_initial_semantic_hash"),
         ("head_handle_seconds", 4.9, "head_handle_seconds"),
         ("tail_handle_seconds", 0, "tail_handle_seconds"),
         ("simulation_rate", 2.0, "simulation_rate"),
@@ -323,6 +581,7 @@ def _prepare_v2_gameplay_capture(
         "action_id": request["action_id"],
         "executable_path": "C:/game/game.exe",
         "executable_sha256": "a" * 64,
+        "pid": 123,
         "artifact": str(captured),
         "sha256": artifact_sha,
         "client_area": True,
@@ -343,12 +602,67 @@ def _prepare_v2_gameplay_capture(
         "version": 1,
         "status_endpoint": "game.capture_scene.status",
         "describe_endpoint": "game.capture_scene.describe",
+        "load_endpoint": "game.capture_scene.load",
+        "parameter_endpoint": "game.capture_scene.set_parameter",
         "action_endpoint": "game.capture_scene.trigger_action",
         "scene_id": actual_state or request["state_id"],
         "action_id": request["action_id"],
         "build_id": request["build_id"],
+        "process_id": 123,
+        "seed": request["seed"],
+        "parameters": request["parameters"],
+        "expected_initial_semantic_hash": request[
+            "expected_initial_semantic_hash"
+        ],
+        "expected_action_semantic_hash": request[
+            "expected_action_semantic_hash"
+        ],
         "monotonic_started_seconds": 100.0,
         "monotonic_ended_seconds": 100.0 + game_elapsed_seconds,
+        "encoded_duration_seconds": 11.0,
+        "action_media_seconds": 5.0,
+        "clock_trace": [
+            {
+                "method": "time.set_mode",
+                "params": {"mode": "manual"},
+                "result": {"mode": "manual"},
+            },
+            {
+                "method": "time.pause",
+                "params": {},
+                "result": {"paused": True},
+            },
+            {
+                "method": "time.set_scale",
+                "params": {"scale": 1.0},
+                "result": {"scale": 1.0},
+            },
+            {
+                "method": "time.set_mode",
+                "params": {"mode": "run"},
+                "result": {"mode": "run"},
+            },
+            {
+                "method": "time.set_scale",
+                "params": {"scale": 1.0},
+                "result": {"scale": 1.0},
+            },
+            {
+                "method": "time.resume",
+                "params": {},
+                "result": {"paused": False},
+            },
+            {
+                "method": "time.pause",
+                "params": {},
+                "result": {"paused": True},
+            },
+            {
+                "method": "time.resume",
+                "params": {},
+                "result": {"paused": False},
+            },
+        ],
         "descriptor": {
             "apiVersion": 1,
             "gameId": "game-not-a-trolley-problem",
@@ -368,7 +682,28 @@ def _prepare_v2_gameplay_capture(
                 "title": "Day 5 station",
             },
         },
+        "load_result": {
+            "activeScene": actual_state or request["state_id"],
+            "apiVersion": 1,
+            "contractVersion": 1,
+            "gameId": "game-not-a-trolley-problem",
+            "generation": 7,
+            "ready": True,
+            "semanticHash": "00000001",
+            "tick": 0,
+        },
+        "parameter_results": [],
         "before": {
+            "activeScene": actual_state or request["state_id"],
+            "apiVersion": 1,
+            "contractVersion": 1,
+            "gameId": "game-not-a-trolley-problem",
+            "generation": 7,
+            "ready": True,
+            "semanticHash": "00000001",
+            "tick": 10,
+        },
+        "pre_action": {
             "activeScene": actual_state or request["state_id"],
             "apiVersion": 1,
             "contractVersion": 1,
@@ -449,6 +784,46 @@ def _fake_gameplay_catalog(production: Path):
             source_role="real_product",
         )],
     )
+
+
+def test_game_capture_report_requires_semantic_change_at_recorded_action(
+    tmp_path,
+):
+    production = _production(tmp_path)
+    _prepare_v2_gameplay_capture(production)
+    report_path = (
+        production / "data" / "footage" / "day5_station.mp4.game.json"
+    )
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["action_result"]["semanticHash"] = report["pre_action"]["semanticHash"]
+
+    from pydantic import ValidationError
+    from dlstudio.services.capture_batch import GameCaptureReport
+
+    with pytest.raises(
+        ValidationError,
+        match="recorded action did not change semantic state",
+    ):
+        GameCaptureReport.model_validate(report)
+
+
+def test_game_capture_report_requires_atomic_action_clock_bracket(tmp_path):
+    production = _production(tmp_path)
+    _prepare_v2_gameplay_capture(production)
+    report_path = (
+        production / "data" / "footage" / "day5_station.mp4.game.json"
+    )
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["clock_trace"] = report["clock_trace"][:-2]
+
+    from pydantic import ValidationError
+    from dlstudio.services.capture_batch import GameCaptureReport
+
+    with pytest.raises(
+        ValidationError,
+        match="clock was not normalized",
+    ):
+        GameCaptureReport.model_validate(report)
 
 
 def test_capture_ingest_v2_validates_hash_bound_recorder_metadata(
@@ -570,6 +945,33 @@ def test_capture_ingest_v2_rejects_tampered_game_report_before_catalog(
     assert catalog_called is False
 
 
+def test_capture_ingest_v2_rejects_game_tick_rollback(tmp_path):
+    production = _production(tmp_path)
+    result_path = _prepare_v2_gameplay_capture(production)
+    results = json.loads(result_path.read_text(encoding="utf-8"))
+    result = results["results"][0]
+    report_path = production / result["game_report_path"]
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["action_result"]["tick"] = 1000
+    report["after"]["tick"] = 11
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    report_sha = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    metadata_path = production / result["recorder_metadata_path"]
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["game_report_sha256"] = report_sha
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    result["game_report_sha256"] = report_sha
+    result["recorder_metadata_sha256"] = hashlib.sha256(
+        metadata_path.read_bytes()
+    ).hexdigest()
+    result_path.write_text(json.dumps(results), encoding="utf-8")
+
+    from dlstudio.services.capture_batch import CaptureBatchError, ingest_capture_results
+
+    with pytest.raises(CaptureBatchError, match="ticks are out of order"):
+        ingest_capture_results(production, result_path)
+
+
 def test_capture_ingest_v2_rejects_sidecar_state_mismatch_before_catalog(
     tmp_path,
     monkeypatch,
@@ -634,6 +1036,47 @@ def test_capture_ingest_v2_accepts_failed_result_without_fake_artifact(
 
     assert receipt.ingested == ()
     assert receipt.failed == ("day5_station",)
+
+
+def test_capture_ingest_v2_rejects_batch_semantics_changed_after_prepare(
+    tmp_path,
+):
+    production = _production(tmp_path)
+    requests = production / "data" / "plan" / "capture_requests.json"
+    requests.parent.mkdir(parents=True)
+    requests.write_text(json.dumps({
+        "version": 2,
+        "requests": [_gameplay_request_v2()],
+    }), encoding="utf-8")
+
+    from dlstudio.services.capture_batch import (
+        CaptureBatchError,
+        ingest_capture_results,
+        prepare_capture_batch,
+    )
+
+    prepare_capture_batch(production, requests)
+    batch_path = production / "data" / "plan" / "capture_batch.json"
+    batch = json.loads(batch_path.read_text(encoding="utf-8"))
+    batch["requests"][0]["state_id"] = "character.anatomy"
+    batch["requests"][0]["scene"] = "character.anatomy"
+    batch_path.write_text(json.dumps(batch), encoding="utf-8")
+    results = production / "data" / "plan" / "capture_results.json"
+    results.write_text(json.dumps({
+        "version": 2,
+        "production_id": "2026_07_18_reel_01",
+        "results": [{
+            "request_id": "day5_station",
+            "status": "failed",
+            "note": "not recorded",
+        }],
+    }), encoding="utf-8")
+
+    with pytest.raises(
+        CaptureBatchError,
+        match="capture batch request differs from source",
+    ):
+        ingest_capture_results(production, results)
 
 
 def test_capture_ingest_v2_requires_one_result_per_request(tmp_path, monkeypatch):

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
+import threading
 
 import pytest
 
@@ -36,6 +38,22 @@ def _facts(tmp_path: Path, *, content: bytes = b"take-one") -> dict:
         "state_id": "day5.station.new_visual",
         "build_id": "exe-sha256:" + "a" * 64,
         "action_id": "station_queue_and_tram_pass",
+        "seed": 42,
+        "parameters": {},
+        "initial_semantic_hash": "00000001",
+        "action_semantic_hash": "00000002",
+        "presentation": {
+            "fit": "contain",
+            "scale": 1.0,
+            "source_crop": {
+                "x": 0.0,
+                "y": 0.0,
+                "width": 1920.0,
+                "height": 1080.0,
+            },
+            "focus_rect": None,
+            "focus_tolerance_ratio": 0.05,
+        },
         "actual_width": 1920,
         "actual_height": 1080,
         "actual_fps": 60,
@@ -70,6 +88,165 @@ def test_register_validated_capture_creates_stable_semantic_identity(tmp_path):
     assert asset.state_id == "day5.station.new_visual"
     assert asset.artifact_path == "data/footage/day5.mp4"
     assert (tmp_path / "data" / "assets" / "registry.json").is_file()
+
+
+def test_register_and_approve_hash_bound_reference_video(tmp_path, monkeypatch):
+    from dlstudio.services.asset_registry import (
+        approve_asset,
+        register_file_asset,
+        resolve_approved_asset,
+    )
+
+    artifact = tmp_path / "data" / "footage" / "stock.mp4"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_bytes(b"licensed-stock-video")
+    monkeypatch.setattr(
+        "dlstudio.services.asset_registry._validate_video_artifact",
+        lambda path: None,
+    )
+    registry = register_file_asset(
+        tmp_path,
+        asset_id="stock:city-01",
+        artifact_path="data/footage/stock.mp4",
+        editorial_role="reference",
+        source_type="stock",
+        source_url="https://example.test/video/1",
+        license_name="Pexels",
+        credit="Example creator",
+    )
+    current = registry.assets[0]
+
+    approved = approve_asset(
+        tmp_path,
+        current.asset_id,
+        expected_sha256=current.artifact_sha256,
+        expected_revision=current.revision,
+        expected_validation_sha256=current.validation_sha256,
+        approved_by="author",
+    )
+
+    assert approved.assets[0].status == "approved"
+    assert resolve_approved_asset(tmp_path, current.asset_id) == artifact
+
+
+def test_generic_registration_rejects_hyperframes_output(tmp_path):
+    from dlstudio.services.asset_registry import (
+        AssetRegistryError,
+        register_file_asset,
+    )
+
+    artifact = tmp_path / "data" / "infographics" / "draft.mp4"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_bytes(b"draft-hyperframes-output")
+
+    with pytest.raises(AssetRegistryError, match="render_manifest"):
+        register_file_asset(
+            tmp_path,
+            asset_id="owned:draft-motion",
+            artifact_path="data/infographics/draft.mp4",
+            editorial_role="presentation",
+            source_type="owned",
+        )
+
+
+def test_existing_generic_approval_cannot_resolve_hyperframes_output(
+    tmp_path,
+    monkeypatch,
+):
+    from dlstudio.services.asset_registry import (
+        AssetRegistryError,
+        _file_validation_sha256,
+        approve_asset,
+        register_file_asset,
+        resolve_approved_asset,
+    )
+
+    original = tmp_path / "data" / "footage" / "motion.mp4"
+    original.parent.mkdir(parents=True)
+    original.write_bytes(b"legacy-draft-hyperframes-output")
+    monkeypatch.setattr(
+        "dlstudio.services.asset_registry._validate_video_artifact",
+        lambda path: None,
+    )
+    current = register_file_asset(
+        tmp_path,
+        asset_id="owned:legacy-motion",
+        artifact_path="data/footage/motion.mp4",
+        editorial_role="presentation",
+        source_type="owned",
+    ).assets[0]
+    approve_asset(
+        tmp_path,
+        current.asset_id,
+        expected_sha256=current.artifact_sha256,
+        expected_revision=current.revision,
+        expected_validation_sha256=current.validation_sha256,
+        approved_by="legacy",
+    )
+
+    moved = tmp_path / "data" / "infographics" / "motion.mp4"
+    moved.parent.mkdir(parents=True)
+    moved.write_bytes(original.read_bytes())
+    registry_path = tmp_path / "data" / "assets" / "registry.json"
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    row = registry["assets"][0]
+    provenance = tmp_path / row["provenance_path"]
+    proof = json.loads(provenance.read_text(encoding="utf-8"))
+    proof["artifact_path"] = "data/infographics/motion.mp4"
+    provenance.write_text(json.dumps(proof), encoding="utf-8")
+    provenance_sha = hashlib.sha256(provenance.read_bytes()).hexdigest()
+    validation_sha = _file_validation_sha256(
+        artifact_path="data/infographics/motion.mp4",
+        artifact_sha256=row["artifact_sha256"],
+        editorial_role=row["editorial_role"],
+        provenance_path=row["provenance_path"],
+        provenance_sha256=provenance_sha,
+    )
+    row["artifact_path"] = "data/infographics/motion.mp4"
+    row["provenance_sha256"] = provenance_sha
+    row["validation_sha256"] = validation_sha
+    row["approved_validation_sha256"] = validation_sha
+    registry_path.write_text(json.dumps(registry), encoding="utf-8")
+
+    with pytest.raises(AssetRegistryError, match="render_manifest"):
+        resolve_approved_asset(tmp_path, current.asset_id)
+
+
+def test_approved_reference_fails_when_provenance_changes(tmp_path, monkeypatch):
+    from dlstudio.services.asset_registry import (
+        AssetRegistryError,
+        approve_asset,
+        register_file_asset,
+        resolve_approved_asset,
+    )
+
+    artifact = tmp_path / "data" / "footage" / "owned.mp4"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_bytes(b"owned-video")
+    monkeypatch.setattr(
+        "dlstudio.services.asset_registry._validate_video_artifact",
+        lambda path: None,
+    )
+    current = register_file_asset(
+        tmp_path,
+        asset_id="owned:broll",
+        artifact_path="data/footage/owned.mp4",
+        editorial_role="reference",
+        source_type="owned",
+    ).assets[0]
+    approve_asset(
+        tmp_path,
+        current.asset_id,
+        expected_sha256=current.artifact_sha256,
+        expected_revision=current.revision,
+        expected_validation_sha256=current.validation_sha256,
+        approved_by="author",
+    )
+    provenance = tmp_path / current.provenance_path
+    provenance.write_bytes(b"changed")
+
+    with pytest.raises(AssetRegistryError, match="provenance is stale"):
+        resolve_approved_asset(tmp_path, current.asset_id)
 
 
 def test_replacing_approved_capture_invalidates_approval_and_increments_revision(
@@ -147,6 +324,59 @@ def test_resolve_approved_asset_rejects_file_changed_after_approval(tmp_path):
         resolve_approved_asset(tmp_path, "capture:day5_station")
 
 
+def test_resolve_approved_gameplay_rechecks_proof_files(tmp_path):
+    from dlstudio.services.asset_registry import (
+        AssetRegistryError,
+        approve_asset,
+        resolve_approved_asset,
+    )
+
+    facts = _facts(tmp_path)
+    current = _register(tmp_path, facts).assets[0]
+    approve_asset(
+        tmp_path,
+        current.asset_id,
+        expected_sha256=current.artifact_sha256,
+        expected_revision=current.revision,
+        expected_validation_sha256=current.validation_sha256,
+        approved_by="author",
+    )
+    (tmp_path / facts["game_report_path"]).write_bytes(b"changed")
+
+    with pytest.raises(AssetRegistryError, match="game capture report is stale"):
+        resolve_approved_asset(tmp_path, current.asset_id)
+
+
+def test_legacy_approved_gameplay_without_new_proof_fails_closed(tmp_path):
+    import json
+
+    from dlstudio.services.asset_registry import (
+        AssetRegistryError,
+        approve_asset,
+        resolve_approved_asset,
+    )
+
+    facts = _facts(tmp_path)
+    current = _register(tmp_path, facts).assets[0]
+    approve_asset(
+        tmp_path,
+        current.asset_id,
+        expected_sha256=current.artifact_sha256,
+        expected_revision=current.revision,
+        expected_validation_sha256=current.validation_sha256,
+        approved_by="author",
+    )
+    registry_path = tmp_path / "data" / "assets" / "registry.json"
+    payload = json.loads(registry_path.read_text(encoding="utf-8"))
+    payload["assets"][0]["game_report_path"] = None
+    payload["assets"][0]["game_report_sha256"] = None
+    payload["assets"][0]["measured_playback_rate"] = None
+    registry_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(AssetRegistryError, match="lacks game capture report"):
+        resolve_approved_asset(tmp_path, current.asset_id)
+
+
 def test_semantic_relabel_of_same_file_invalidates_approval(tmp_path):
     from dlstudio.services.asset_registry import (
         approve_asset,
@@ -215,12 +445,65 @@ def test_approval_rejects_stale_semantic_revision_even_when_media_sha_is_same(
         )
 
 
+def test_concurrent_ingest_cannot_be_overwritten_by_stale_approval(
+    tmp_path,
+    monkeypatch,
+):
+    from dlstudio.services import asset_registry
+
+    first = _facts(tmp_path)
+    current = _register(tmp_path, first).assets[0]
+    entered = threading.Event()
+    release = threading.Event()
+    original_verify = asset_registry._verify_registered_asset
+
+    def delayed_verify(root, asset):
+        entered.set()
+        assert release.wait(timeout=5)
+        return original_verify(root, asset)
+
+    monkeypatch.setattr(asset_registry, "_verify_registered_asset", delayed_verify)
+    errors: list[BaseException] = []
+
+    def approve():
+        try:
+            asset_registry.approve_asset(
+                tmp_path,
+                current.asset_id,
+                expected_sha256=current.artifact_sha256,
+                expected_revision=current.revision,
+                expected_validation_sha256=current.validation_sha256,
+                approved_by="author",
+            )
+        except BaseException as exc:  # pragma: no cover - assertion reports below
+            errors.append(exc)
+
+    def ingest():
+        try:
+            _register(tmp_path, dict(first, state_id="day5.station.corrected"))
+        except BaseException as exc:  # pragma: no cover - assertion reports below
+            errors.append(exc)
+
+    approval_thread = threading.Thread(target=approve)
+    approval_thread.start()
+    assert entered.wait(timeout=5)
+    ingest_thread = threading.Thread(target=ingest)
+    ingest_thread.start()
+    release.set()
+    approval_thread.join(timeout=5)
+    ingest_thread.join(timeout=5)
+
+    assert not errors
+    final = asset_registry.load_asset_registry(tmp_path).assets[0]
+    assert final.revision == current.revision + 1
+    assert final.status == "validated"
+
+
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [
         ("capture_method", "deterministic_devapi", "realtime_window"),
         ("build_id", "legacy-source:unknown", "exe-sha256"),
-        ("action_id", "", "action_id"),
         ("simulation_rate", 10.0, "simulation_rate"),
         ("continuous", False, "continuous"),
         ("clean_ui", False, "clean_ui"),

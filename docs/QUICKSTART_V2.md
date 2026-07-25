@@ -103,22 +103,39 @@ VideoShot(
 
 Сначала опиши нужные состояния в `data/plan/capture_requests.json` версии 2.
 Для gameplay обязательны одинаковые `state_id` и `scene` (точный id
-game-owned capture scene), точный `build_id`, объявленный сценой `action_id`,
+game-owned capture scene), точный `build_id`, `seed`, ожидаемый semantic hash
+и, если сценарию нужно действие, объявленный сценой `action_id`,
 `capture_method="realtime_window"`, скорость `1.0`, чистый UI и запас не
 меньше 5 секунд с обеих сторон. Затем веди одну сцену одной resumable-командой:
 
 ```bash
-dl2 capture-flow not_a_trolley_problem:2026_07_18_devlog_01 day5_station
-# внешний recorder выполняет созданный data/plan/capture_batch.json
-dl2 capture-flow not_a_trolley_problem:2026_07_18_devlog_01 day5_station \
-  --ingest data/plan/capture_results.json
+# Один раз привяжи request к фактическому PID/build/seed/parameters:
+python .agents/skills/devlog-record-media/scripts/record_window_realtime.py \
+  --pid <game-pid> \
+  --probe-requests <production-root>/data/plan/capture_requests.json \
+  --request-id <request-id>
+dl2 capture-flow <product:production> <request-id>
+# внешний recorder выполняет созданный
+# data/plan/capture_batches/<request-id>.json
+python .agents/skills/devlog-record-media/scripts/record_window_realtime.py \
+  --pid <game-pid> \
+  --batch <production-root>/data/plan/capture_batches/<request-id>.json \
+  --request-id <request-id>
+python .agents/skills/devlog-record-media/scripts/validate_gameplay_capture.py \
+  --contract <production-root>/data/plan/capture_requests.json \
+  --production-root <production-root> \
+  --result <production-root>/data/plan/capture_results/<request-id>.json \
+  --request-id <request-id> \
+  --report <production-root>/data/review/<request-id>-capture-audit.json
+dl2 capture-flow <product:production> <request-id> \
+  --ingest data/plan/capture_results/<request-id>.json
 # после просмотра валидированного клипа — явный авторский checkpoint:
-dl2 capture-flow not_a_trolley_problem:2026_07_18_devlog_01 day5_station --approve
+dl2 capture-flow <product:production> <request-id> --approve
 ```
 
 Recorder создаёт `<clip>.game.json` из ответов
 `game.capture_scene.describe/status` и привязывает его SHA-256 к metadata и
-`capture_results.json`. Ingest блокирует запись, если сцена перезапустилась,
+`capture_results/<request-id>.json`. Ingest блокирует запись, если сцена перезапустилась,
 действие не объявлено, нет semantic/clean-UI capability, отчёт изменился или
 длительность MP4 отличается от измеренного реального времени более чем на 3%
 (минимальный допуск 0.5 секунды). Одного поля `simulation_rate=1.0` от

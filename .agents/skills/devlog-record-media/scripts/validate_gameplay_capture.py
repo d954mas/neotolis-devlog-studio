@@ -79,7 +79,11 @@ def _resolve_artifact(
     production_root: Path,
     result: dict[str, Any] | None,
 ) -> Path:
-    raw = result.get("path") if result is not None else contract.get("artifact")
+    raw = (
+        result.get("path")
+        if result is not None
+        else contract.get("target") or contract.get("artifact")
+    )
     if not isinstance(raw, str) or not raw:
         raise ValueError("artifact path is missing")
     path = Path(raw)
@@ -133,7 +137,10 @@ def _freeze_durations(video: Path, ffmpeg: str, threshold: float) -> list[float]
     run = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if run.returncode != 0:
         raise ValueError(f"FFmpeg freeze scan failed: {run.stderr[-500:]}")
-    return [float(value) for value in re.findall(r"freeze_duration:\\s*([0-9.]+)", run.stderr)]
+    return [
+        float(value)
+        for value in re.findall(r"freeze_duration:\s*([0-9.]+)", run.stderr)
+    ]
 
 
 def _presentation_checks(
@@ -231,14 +238,38 @@ def main() -> int:
     args = _parser().parse_args()
     audit = Audit()
     try:
-        contract = _load_json(args.contract)
+        contract_payload = _load_json(args.contract)
+        if (
+            contract_payload.get("version") == 2
+            and isinstance(contract_payload.get("requests"), list)
+        ):
+            requested_id = args.request_id
+            candidates = [
+                item
+                for item in contract_payload["requests"]
+                if isinstance(item, dict)
+                and (requested_id is None or item.get("id") == requested_id)
+            ]
+            if len(candidates) != 1:
+                raise ValueError(
+                    "v2 capture requests need exactly one matching --request-id"
+                )
+            contract = candidates[0]
+            request_id = contract.get("id")
+            schema_ok = True
+        else:
+            contract = contract_payload
+            request_id = args.request_id or contract.get("request_id")
+            schema_ok = (
+                contract.get("schema") == "devlog.gameplay_capture"
+                and contract.get("version") == 1
+            )
         audit.require(
-            contract.get("schema") == "devlog.gameplay_capture" and contract.get("version") == 1,
+            schema_ok,
             "CAPTURE-SCHEMA",
             "capture contract schema is valid",
-            "capture contract requires schema=devlog.gameplay_capture and version=1",
+            "capture contract requires raw v2 requests or legacy v1 schema",
         )
-        request_id = args.request_id or contract.get("request_id")
         if not isinstance(request_id, str) or not request_id:
             raise ValueError("request id is missing")
         result = _result_for(args.result, request_id) if args.result else None
@@ -265,6 +296,49 @@ def main() -> int:
 
         sidecar_path = artifact.with_suffix(artifact.suffix + ".capture.json")
         sidecar = _load_json(sidecar_path) if sidecar_path.is_file() else {}
+        artifact_sha = _sha256(artifact)
+        audit.require(
+            sidecar.get("schema") == "devlog.realtime_window_capture"
+            and sidecar.get("version") == 1,
+            "CAPTURE-SIDECAR-SCHEMA",
+            "recorder metadata schema is valid",
+            "invalid or missing recorder metadata schema",
+        )
+        sidecar_artifact = Path(str(sidecar.get("artifact") or ""))
+        if not sidecar_artifact.is_absolute():
+            sidecar_artifact = args.production_root.resolve() / sidecar_artifact
+        audit.require(
+            sidecar_artifact.resolve() == artifact,
+            "CAPTURE-SIDECAR-PATH",
+            "recorder metadata names the exact artifact",
+            "recorder metadata artifact path mismatch",
+        )
+        audit.require(
+            sidecar.get("sha256") == artifact_sha,
+            "CAPTURE-ARTIFACT-HASH",
+            "artifact hash matches recorder metadata",
+            "artifact hash differs from recorder metadata",
+        )
+        if result is not None:
+            result_metadata = result.get("recorder_metadata_path")
+            result_metadata_path = Path(str(result_metadata or ""))
+            if not result_metadata_path.is_absolute():
+                result_metadata_path = (
+                    args.production_root.resolve() / result_metadata_path
+                )
+            audit.require(
+                result.get("sha256") == artifact_sha,
+                "CAPTURE-RESULT-HASH",
+                "artifact hash matches capture result",
+                "capture result artifact hash mismatch",
+            )
+            audit.require(
+                result_metadata_path.resolve() == sidecar_path.resolve()
+                and result.get("recorder_metadata_sha256") == _sha256(sidecar_path),
+                "CAPTURE-SIDECAR-HASH",
+                "capture result binds the recorder metadata",
+                "capture result metadata path/hash mismatch",
+            )
         actual_method = sidecar.get("capture_method")
         if not actual_method and result is not None:
             actual_method = _method_from_result(result)
@@ -307,6 +381,10 @@ def main() -> int:
         if role == "gameplay":
             scene_id = contract.get("scene")
             action_id = contract.get("action_id")
+            seed = contract.get("seed")
+            parameters = contract.get("parameters") or {}
+            expected_initial = contract.get("expected_initial_semantic_hash")
+            expected_action = contract.get("expected_action_semantic_hash")
             audit.require(
                 isinstance(scene_id, str) and scene_id == state_id,
                 "CAPTURE-GAME-SCENE",
@@ -338,7 +416,12 @@ def main() -> int:
                 )
                 actual_report_sha = _sha256(report_path)
                 audit.require(
-                    actual_report_sha == expected_report_sha,
+                    actual_report_sha == expected_report_sha
+                    and sidecar.get("game_report_sha256") == actual_report_sha
+                    and (
+                        result is None
+                        or result.get("game_report_sha256") == actual_report_sha
+                    ),
                     "CAPTURE-GAME-REPORT-HASH",
                     "game capture report hash matches",
                     "game capture report hash mismatch",
@@ -351,13 +434,29 @@ def main() -> int:
                 )
                 actions = scene.get("actions") if isinstance(scene, dict) else None
                 statuses = [
+                    game_report.get("load_result"),
+                    *[
+                        item.get("status")
+                        for item in game_report.get("parameter_results", [])
+                        if isinstance(item, dict)
+                    ],
                     game_report.get("before"),
-                    game_report.get("action_result"),
                     game_report.get("after"),
                 ]
+                if action_id:
+                    statuses.append(game_report.get("pre_action"))
+                    statuses.append(game_report.get("action_result"))
                 audit.require(
                     game_report.get("schema") == "devlog.game_capture_report"
-                    and game_report.get("version") == 1,
+                    and game_report.get("version") == 1
+                    and game_report.get("status_endpoint")
+                    == "game.capture_scene.status"
+                    and game_report.get("describe_endpoint")
+                    == "game.capture_scene.describe"
+                    and game_report.get("load_endpoint")
+                    == "game.capture_scene.load"
+                    and game_report.get("parameter_endpoint")
+                    == "game.capture_scene.set_parameter",
                     "CAPTURE-GAME-REPORT-SCHEMA",
                     "game capture report schema is valid",
                     "invalid game capture report schema",
@@ -371,21 +470,103 @@ def main() -> int:
                     "game descriptor scene mismatch",
                 )
                 audit.require(
-                    game_report.get("action_id") == action_id
-                    and action_id in {
-                        item.get("id")
-                        for item in actions or []
-                        if isinstance(item, dict)
-                    },
+                    (
+                        not action_id
+                        and game_report.get("action_id") is None
+                        and game_report.get("action_result") is None
+                    )
+                    or (
+                        game_report.get("action_id") == action_id
+                        and action_id in {
+                            item.get("id")
+                            for item in actions or []
+                            if isinstance(item, dict)
+                        }
+                        and isinstance(game_report.get("action_result"), dict)
+                    ),
                     "CAPTURE-GAME-ACTION",
-                    "game descriptor proves the requested action",
-                    "game action is not declared by the scene",
+                    "game descriptor/action evidence matches the request",
+                    "game action evidence does not match the request",
                 )
                 audit.require(
                     game_report.get("build_id") == build_id,
                     "CAPTURE-GAME-BUILD",
                     "game report is bound to the requested executable",
                     "game report build mismatch",
+                )
+                parameter_results = game_report.get("parameter_results")
+                reported_parameters = {
+                    item.get("parameter"): item.get("value")
+                    for item in parameter_results or []
+                    if isinstance(item, dict)
+                }
+                audit.require(
+                    game_report.get("seed") == seed
+                    and game_report.get("parameters") == parameters
+                    and len(parameter_results or []) == len(parameters)
+                    and reported_parameters == parameters,
+                    "CAPTURE-GAME-PREPARATION",
+                    "game load seed and parameter trace match the request",
+                    "game load seed/parameter trace mismatch",
+                )
+                before_status = game_report.get("before")
+                pre_action_status = game_report.get("pre_action")
+                action_status = game_report.get("action_result")
+                audit.require(
+                    isinstance(before_status, dict)
+                    and before_status.get("semanticHash") == expected_initial
+                    and (
+                        not action_id
+                        or (
+                            isinstance(pre_action_status, dict)
+                            and isinstance(action_status, dict)
+                            and re.fullmatch(
+                                r"[0-9a-fA-F]{8}",
+                                str(action_status.get("semanticHash") or ""),
+                            )
+                            is not None
+                            and action_status.get("semanticHash")
+                            != pre_action_status.get("semanticHash")
+                            and expected_action != expected_initial
+                            and game_report.get(
+                                "expected_action_semantic_hash"
+                            )
+                            == expected_action
+                        )
+                    ),
+                    "CAPTURE-GAME-SEMANTIC",
+                    "game semantic preparation and action proof are present",
+                    "game semantic state mismatch",
+                )
+                expected_clock = [
+                    ("time.set_mode", {"mode": "manual"}),
+                    ("time.pause", {}),
+                    ("time.set_scale", {"scale": 1.0}),
+                    ("time.set_mode", {"mode": "run"}),
+                    ("time.set_scale", {"scale": 1.0}),
+                    ("time.resume", {}),
+                ]
+                if action_id:
+                    expected_clock.extend([
+                        ("time.pause", {}),
+                        ("time.resume", {}),
+                    ])
+                actual_clock = [
+                    (item.get("method"), item.get("params") or {})
+                    for item in game_report.get("clock_trace", [])
+                    if isinstance(item, dict)
+                ]
+                audit.require(
+                    actual_clock == expected_clock,
+                    "CAPTURE-GAME-CLOCK",
+                    "game clock was normalized to run at 1.0x",
+                    "game clock normalization trace is missing or invalid",
+                )
+                audit.require(
+                    game_report.get("process_id") == sidecar.get("pid"),
+                    "CAPTURE-GAME-PROCESS",
+                    "DevAPI evidence is bound to the recorded process",
+                    "DevAPI process differs from recorded window process",
                 )
                 audit.require(
                     isinstance(capabilities, dict)
@@ -408,17 +589,34 @@ def main() -> int:
                     if isinstance(status, dict)
                 }
                 before_tick = (
-                    statuses[0].get("tick", -1)
-                    if isinstance(statuses[0], dict)
+                    before_status.get("tick", -1)
+                    if isinstance(before_status, dict)
                     else -1
                 )
+                after_status = game_report.get("after")
                 after_tick = (
-                    statuses[2].get("tick", -1)
-                    if isinstance(statuses[2], dict)
+                    after_status.get("tick", -1)
+                    if isinstance(after_status, dict)
                     else -1
+                )
+                action_tick = (
+                    action_status.get("tick", -1)
+                    if isinstance(action_status, dict)
+                    else before_tick
+                )
+                pre_action_tick = (
+                    pre_action_status.get("tick", -1)
+                    if isinstance(pre_action_status, dict)
+                    else before_tick
                 )
                 audit.require(
-                    status_ok and len(generations) == 1 and after_tick > before_tick,
+                    status_ok
+                    and len(generations) == 1
+                    and before_tick
+                    <= pre_action_tick
+                    <= action_tick
+                    <= after_tick
+                    and after_tick > before_tick,
                     "CAPTURE-GAME-CONTINUITY",
                     "game status stayed ready in one advancing scene generation",
                     "game scene restarted, stalled, or changed during recording",
@@ -443,6 +641,16 @@ def main() -> int:
                 f"encoded {probe['duration']:.3f}s != measured "
                 f"{game_elapsed:.3f}s (tolerance {tolerance:.3f}s)",
             )
+            encoded_duration = float(
+                game_report.get("encoded_duration_seconds", 0)
+            )
+            audit.require(
+                encoded_duration > 0
+                and abs(encoded_duration - probe["duration"]) <= tolerance,
+                "CAPTURE-ENCODED-DURATION",
+                "FFmpeg progress duration matches the artifact",
+                "FFmpeg progress duration differs from the artifact",
+            )
         orientation = "landscape" if width > height else "vertical" if height > width else "square"
         audit.require(orientation == contract.get("orientation"), "CAPTURE-ORIENTATION",
                       f"orientation is {orientation}",
@@ -464,6 +672,23 @@ def main() -> int:
         audit.require(probe["duration"] + 0.05 >= required_duration, "CAPTURE-DURATION",
                       f"duration {probe['duration']:.3f}s covers content and handles",
                       f"duration {probe['duration']:.3f}s < required {required_duration:.3f}s")
+        if action_id:
+            action_media = float(
+                game_report.get("action_media_seconds", -1)
+            )
+            actual_tail = probe["duration"] - action_media - content
+            audit.require(
+                action_media + 0.05 >= head and actual_tail + 0.05 >= tail,
+                "CAPTURE-ACTUAL-HANDLES",
+                (
+                    f"measured handles cover head/tail: "
+                    f"{action_media:.3f}s / {actual_tail:.3f}s"
+                ),
+                (
+                    f"measured handles are short: "
+                    f"{action_media:.3f}s / {actual_tail:.3f}s"
+                ),
+            )
         planned = contract.get("planned_use")
         if isinstance(planned, dict):
             start = float(planned.get("start", -1))
@@ -492,6 +717,12 @@ def main() -> int:
 
         _presentation_checks(audit, contract, width, height)
 
+        if contract.get("continuous") is True and args.skip_freeze_scan:
+            audit.add(
+                "error",
+                "CAPTURE-FREEZE",
+                "continuous gameplay cannot skip the mandatory freeze scan",
+            )
         if contract.get("continuous") is True and not args.skip_freeze_scan:
             ffmpeg = shutil.which(args.ffmpeg)
             if ffmpeg is None:

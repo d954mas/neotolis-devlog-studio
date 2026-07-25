@@ -214,6 +214,16 @@ def _find_production_root(project: Path, explicit: Path | None) -> Path | None:
                 return load_production_manifest(candidate).root
             except ProductionError as exc:
                 raise RuntimeError(f"invalid production root: {exc}") from exc
+        try:
+            relative = project.relative_to(candidate)
+        except ValueError:
+            continue
+        # Legacy projects have no production.toml. Infer their root only
+        # from the canonical data/hyperframes layout; merely encountering a
+        # devlog.toml farther up (for example the workspace root in tests)
+        # must not capture an unrelated project.
+        if relative.parts[:2] == ("data", "hyperframes"):
+            return candidate.resolve()
     return None
 
 
@@ -310,6 +320,8 @@ def validate_hyperframes_render_manifest(
     artifact: str | Path,
     manifest_path: str | Path,
     production_root: str | Path,
+    *,
+    require_final: bool = False,
 ) -> None:
     """Revalidate a generated video and every release input at final-check time."""
     root = Path(production_root).resolve()
@@ -324,6 +336,10 @@ def validate_hyperframes_render_manifest(
     manifest = _json_object(manifest_file, label="HyperFrames render manifest")
     if manifest.get("schema") != "devlog.hyperframes_render/v2":
         raise RuntimeError("HyperFrames render manifest has an unsupported schema.")
+    if require_final and manifest.get("quality") != "final":
+        raise RuntimeError(
+            "shipping requires a HyperFrames manifest rendered at quality=final."
+        )
 
     artifact_path = _manifest_file(root, manifest.get("artifact"), label="artifact")
     expected_artifact = Path(artifact)

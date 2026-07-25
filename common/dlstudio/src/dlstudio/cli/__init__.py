@@ -237,6 +237,9 @@ def load_edit(dotted: str) -> tuple[Edit, Path]:
     project_root = production_root or _project_root_for_module(Path(module_file), workspace_root)
     _LOADED_EDIT_MODULES[dotted] = module_name
     os.chdir(project_root)
+    from dlstudio.services.bundle import recover_bundle_transactions
+
+    recover_bundle_transactions(project_root)
     print(f"[dl2] cwd -> {project_root}")
     return edit, project_root
 
@@ -311,7 +314,7 @@ def gate_pre_render_checks(
     effective = timeline_for_design(timeline, design)
     report = dl_check.run_checks(
         effective,
-        strict_assets=strict_assets or timeline.asset_policy == "production",
+        strict_assets=strict_assets,
     )
     for issue in report.issues:
         print(f"[dl2] [{issue.severity.upper()}] {issue.code} {issue.where}: {issue.message}")

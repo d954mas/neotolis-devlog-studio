@@ -64,6 +64,8 @@ def seg(
     expected_state_id=None,
     expected_build_id=None,
     expected_action_id=None,
+    fit="cover",
+    geometry=None,
 ):
     return IRSegment(
         kind=kind,
@@ -76,6 +78,8 @@ def seg(
         editorial_role=editorial_role,
         transition_intent=transition_intent,
         loop=loop,
+        fit=fit,
+        geometry=geometry,
         expected_state_id=expected_state_id,
         expected_build_id=expected_build_id,
         expected_action_id=expected_action_id,
@@ -110,9 +114,27 @@ def test_vq_asset_id_requires_binding_for_declared_gameplay():
         editorial_role="gameplay",
     )
 
-    rep = run_checks(mk_timeline(beats=[mk_beat(segments=[shot])]))
+    rep = run_checks(mk_timeline(
+        beats=[mk_beat(segments=[shot])],
+        asset_policy="production",
+    ))
 
     assert any(issue.code == "VQ-ASSET-ID" for issue in rep.errors)
+
+
+def test_draft_allows_unapproved_gameplay_placeholder():
+    shot = seg(
+        "data/footage/day5.mp4",
+        kind="video",
+        editorial_role="gameplay",
+    )
+
+    rep = run_checks(
+        mk_timeline(beats=[mk_beat(segments=[shot])]),
+        strict_assets=False,
+    )
+
+    assert not any(issue.code == "VQ-ASSET-ID" for issue in rep.errors)
 
 
 def test_vq_asset_id_passes_exact_approved_binding(tmp_path, monkeypatch):
@@ -153,6 +175,10 @@ def test_vq_asset_id_passes_exact_approved_binding(tmp_path, monkeypatch):
         "state_id": "day5.station.new_visual",
         "build_id": "exe-sha256:" + "a" * 64,
         "action_id": "station_queue_and_tram_pass",
+        "seed": 42,
+        "parameters": {},
+        "initial_semantic_hash": "00000001",
+        "action_semantic_hash": "00000002",
         "actual_duration": 11,
         "simulation_rate": 1.0,
         "continuous": True,
@@ -163,9 +189,15 @@ def test_vq_asset_id_passes_exact_approved_binding(tmp_path, monkeypatch):
         "head_handle_seconds": 5,
         "tail_handle_seconds": 5,
         "frame_audit_passed": True,
-        "game_elapsed_seconds": 11,
-        "measured_playback_rate": 1.0,
-    }])
+            "game_elapsed_seconds": 11,
+            "measured_playback_rate": 1.0,
+            "presentation": {
+                "output_width": 1080,
+                "output_height": 1920,
+                "fit": "contain",
+                "scale": 1.0,
+            },
+        }])
     current = registry.assets[0]
     approve_asset(
         tmp_path,
@@ -186,6 +218,16 @@ def test_vq_asset_id_passes_exact_approved_binding(tmp_path, monkeypatch):
         expected_state_id="day5.station.new_visual",
         expected_build_id="exe-sha256:" + "a" * 64,
         expected_action_id="station_queue_and_tram_pass",
+        fit="contain",
+        geometry=IRSegmentGeometry.resolve(
+            fit="contain",
+            anchor_x=0.5,
+            anchor_y=0.5,
+            source_width=1080,
+            source_height=1920,
+            output_width=1080,
+            output_height=1920,
+        ),
     )
 
     rep = run_checks(mk_timeline(
@@ -198,6 +240,35 @@ def test_vq_asset_id_passes_exact_approved_binding(tmp_path, monkeypatch):
         for issue in rep.issues
     )
 
+    shot.fit = "cover"
+    shot.geometry = IRSegmentGeometry.resolve(
+        fit="cover",
+        anchor_x=0.5,
+        anchor_y=0.5,
+        source_width=1080,
+        source_height=1920,
+        output_width=1080,
+        output_height=1920,
+    )
+    rep = run_checks(mk_timeline(
+        beats=[mk_beat(duration=1, segments=[shot])],
+        asset_policy="production",
+    ))
+    assert any(
+        issue.code == "VQ-ASSET-PRESENTATION"
+        for issue in rep.errors
+    )
+
+    shot.fit = "contain"
+    shot.geometry = IRSegmentGeometry.resolve(
+        fit="contain",
+        anchor_x=0.5,
+        anchor_y=0.5,
+        source_width=1080,
+        source_height=1920,
+        output_width=1080,
+        output_height=1920,
+    )
     shot.offset = 0
     rep = run_checks(mk_timeline(
         beats=[mk_beat(duration=1, segments=[shot])],
@@ -239,7 +310,9 @@ def test_production_generated_video_revalidates_render_manifest(monkeypatch):
     calls = []
     monkeypatch.setattr(
         "dlstudio.services.hyperframes.validate_hyperframes_render_manifest",
-        lambda artifact, manifest, root: calls.append((artifact, manifest, root)),
+        lambda artifact, manifest, root, **kwargs: calls.append(
+            (artifact, manifest, root, kwargs)
+        ),
     )
     shot = seg(
         "data/infographics/chart.mp4",
@@ -258,6 +331,7 @@ def test_production_generated_video_revalidates_render_manifest(monkeypatch):
         "data/infographics/chart.mp4",
         "data/infographics/chart.mp4.render.json",
     )
+    assert calls[0][3] == {"require_final": True}
 
 
 def test_production_policy_rejects_gameplay_loop_and_missing_expectations():
