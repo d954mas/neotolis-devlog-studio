@@ -297,6 +297,8 @@ def cmd_asset_approve(args: argparse.Namespace) -> int:
             root,
             args.asset_id,
             expected_sha256=args.sha,
+            expected_revision=args.revision,
+            expected_validation_sha256=args.validation_sha,
             approved_by=args.approved_by,
         )
     except AssetRegistryError as exc:
@@ -765,6 +767,14 @@ def add_subparsers(sub: argparse._SubParsersAction) -> None:
     approve.add_argument("edit", help="dotted edit, production path, or product:id")
     approve.add_argument("asset_id", help="stable registry asset id")
     approve.add_argument("--sha", required=True, help="exact current artifact SHA-256")
+    approve.add_argument(
+        "--revision", required=True, type=int, help="exact current registry revision"
+    )
+    approve.add_argument(
+        "--validation-sha",
+        required=True,
+        help="exact current semantic validation SHA-256",
+    )
     approve.add_argument("--approved-by", default="author")
     approve.set_defaults(func=cmd_asset_approve)
 

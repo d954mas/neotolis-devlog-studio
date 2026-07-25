@@ -17,7 +17,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from dlstudio.production import load_production_manifest
-from dlstudio.services.asset_registry import register_validated_captures
+from dlstudio.services.asset_registry import _register_ingested_captures
 from dlstudio.services.autopilot import build_asset_catalog
 from dlstudio.services.render_preflight import analyze_rendered_video
 
@@ -327,6 +327,11 @@ def _validate_v2_recorder_metadata(
         "state_id": task.state_id,
         "build_id": task.build_id,
         "client_rect": metadata.get("client_rect"),
+        "simulation_rate": metadata.get("simulation_rate"),
+        "continuous": metadata.get("continuous"),
+        "clean_ui": metadata.get("clean_ui"),
+        "client_area": metadata.get("client_area"),
+        "cursor_visible": metadata.get("cursor_visible"),
         "head_handle_seconds": metadata.get("head_handle_seconds"),
         "tail_handle_seconds": metadata.get("tail_handle_seconds"),
         "content_seconds": metadata.get("content_seconds"),
@@ -547,6 +552,7 @@ def ingest_capture_results(
                 "verdict": "pass",
                 "issues": [],
             }
+            facts["frame_audit_passed"] = True
         if min_duration and (asset.duration or 0.0) < min_duration:
             raise CaptureBatchError(
                 f"capture duration below request for {request_id}: "
@@ -555,7 +561,25 @@ def ingest_capture_results(
 
     registry_path: Path | None = None
     if version == 2 and ingested:
-        register_validated_captures(
+        try:
+            batch_relative = batch_file.resolve().relative_to(production.root)
+            results_relative = Path(results_path).resolve().relative_to(
+                production.root
+            )
+        except ValueError as exc:
+            raise CaptureBatchError(
+                "v2 capture batch and results must stay inside the production"
+            ) from exc
+        batch_sha = _sha256(batch_file)
+        results_sha = _sha256(Path(results_path))
+        for facts in validated.values():
+            facts.update({
+                "capture_batch_path": batch_relative.as_posix(),
+                "capture_batch_sha256": batch_sha,
+                "capture_results_path": results_relative.as_posix(),
+                "capture_results_sha256": results_sha,
+            })
+        _register_ingested_captures(
             production.root,
             [validated[request_id] for request_id in ingested],
         )

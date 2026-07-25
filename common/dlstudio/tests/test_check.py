@@ -110,21 +110,49 @@ def test_vq_asset_id_passes_exact_approved_binding(tmp_path, monkeypatch):
     import hashlib
 
     digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
-    from dlstudio.services.asset_registry import approve_asset, register_validated_capture
+    metadata = tmp_path / "data" / "footage" / "day5.mp4.capture.json"
+    metadata.write_bytes(b"metadata")
+    batch = tmp_path / "data" / "plan" / "capture_batch.json"
+    batch.parent.mkdir(parents=True)
+    batch.write_bytes(b"batch")
+    results = tmp_path / "data" / "plan" / "capture_results.json"
+    results.write_bytes(b"results")
+    from dlstudio.services.asset_registry import (
+        _register_ingested_captures,
+        approve_asset,
+    )
 
-    register_validated_capture(tmp_path, {
+    registry = _register_ingested_captures(tmp_path, [{
         "request_id": "day5_station",
         "artifact_path": "data/footage/day5.mp4",
         "artifact_sha256": digest,
+        "metadata_path": "data/footage/day5.mp4.capture.json",
+        "metadata_sha256": hashlib.sha256(metadata.read_bytes()).hexdigest(),
+        "capture_batch_path": "data/plan/capture_batch.json",
+        "capture_batch_sha256": hashlib.sha256(batch.read_bytes()).hexdigest(),
+        "capture_results_path": "data/plan/capture_results.json",
+        "capture_results_sha256": hashlib.sha256(results.read_bytes()).hexdigest(),
         "editorial_role": "gameplay",
         "capture_method": "realtime_window",
         "state_id": "day5.station.new_visual",
-        "build_id": "git:abc123",
-    })
+        "build_id": "exe-sha256:" + "a" * 64,
+        "simulation_rate": 1.0,
+        "continuous": True,
+        "clean_ui": True,
+        "client_area": True,
+        "cursor_visible": False,
+        "content_seconds": 1,
+        "head_handle_seconds": 5,
+        "tail_handle_seconds": 5,
+        "frame_audit_passed": True,
+    }])
+    current = registry.assets[0]
     approve_asset(
         tmp_path,
         "capture:day5_station",
         expected_sha256=digest,
+        expected_revision=current.revision,
+        expected_validation_sha256=current.validation_sha256,
         approved_by="author",
     )
     monkeypatch.chdir(tmp_path)

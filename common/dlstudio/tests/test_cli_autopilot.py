@@ -42,8 +42,14 @@ def test_parser_exposes_inventory_preflight_and_storyboard_commands():
         "capture:day5_station",
         "--sha",
         "a" * 64,
+        "--revision",
+        "3",
+        "--validation-sha",
+        "b" * 64,
     ])
     assert approve.func is autopilot.cmd_asset_approve
+    assert approve.revision == 3
+    assert approve.validation_sha == "b" * 64
     assert approve.approved_by == "author"
 
 

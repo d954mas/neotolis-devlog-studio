@@ -46,36 +46,59 @@ def _mock_toolchain(monkeypatch, captured: dict, *, rc: int = 0, stderr: str = "
 
 def _approved_source(video: Path) -> tuple[Path, str, Path, object]:
     from dlstudio.services.asset_registry import (
+        _register_ingested_captures,
         approve_asset,
         load_asset_registry,
-        register_validated_capture,
     )
 
     source = video / "data" / "footage" / "source.mp4"
     source.parent.mkdir(parents=True)
     source.write_bytes(b"registered-source")
     source_hash = _sha256(source)
+    metadata = source.with_suffix(".mp4.capture.json")
+    metadata.write_bytes(b"metadata")
+    batch = video / "data" / "plan" / "capture_batch.json"
+    batch.parent.mkdir(parents=True)
+    batch.write_bytes(b"batch")
+    results = video / "data" / "plan" / "capture_results.json"
+    results.write_bytes(b"results")
     facts = {
         "request_id": "day4_visual",
         "artifact_path": "data/footage/source.mp4",
         "artifact_sha256": source_hash,
+        "metadata_path": "data/footage/source.mp4.capture.json",
+        "metadata_sha256": _sha256(metadata),
+        "capture_batch_path": "data/plan/capture_batch.json",
+        "capture_batch_sha256": _sha256(batch),
+        "capture_results_path": "data/plan/capture_results.json",
+        "capture_results_sha256": _sha256(results),
         "editorial_role": "gameplay",
         "capture_method": "realtime_window",
         "state_id": "day4.paper",
-        "build_id": "git:test",
+        "build_id": "exe-sha256:" + "a" * 64,
         "actual_width": 1920,
         "actual_height": 1080,
         "actual_fps": 30,
-        "actual_duration": 10,
-        "head_handle_seconds": 2,
-        "tail_handle_seconds": 2,
+        "actual_duration": 15,
+        "simulation_rate": 1.0,
+        "continuous": True,
+        "clean_ui": True,
+        "client_area": True,
+        "cursor_visible": False,
+        "content_seconds": 5,
+        "head_handle_seconds": 5,
+        "tail_handle_seconds": 5,
+        "frame_audit_passed": True,
     }
-    register_validated_capture(video, facts)
+    registry = _register_ingested_captures(video, [facts])
+    current = registry.assets[0]
     asset_id = "capture:day4_visual"
     approve_asset(
         video,
         asset_id,
         expected_sha256=source_hash,
+        expected_revision=current.revision,
+        expected_validation_sha256=current.validation_sha256,
         approved_by="test",
     )
     catalog = video / "data" / "assets" / "catalog.json"
@@ -545,33 +568,52 @@ def test_render_proof_rejects_reapproved_metadata_revision_with_same_media(
     monkeypatch,
 ):
     from dlstudio.services.asset_registry import (
+        _register_ingested_captures,
         approve_asset,
-        register_validated_capture,
     )
 
     captured: dict = {}
     _mock_toolchain(monkeypatch, captured)
     video = tmp_path / "video"
     source, asset_id, geometry, old_record = _approved_source(video)
-    register_validated_capture(video, {
+    metadata = video / "data" / "footage" / "source.mp4.capture.json"
+    batch = video / "data" / "plan" / "capture_batch.json"
+    results = video / "data" / "plan" / "capture_results.json"
+    registry = _register_ingested_captures(video, [{
         "request_id": "day4_visual",
         "artifact_path": "data/footage/source.mp4",
         "artifact_sha256": _sha256(source),
+        "metadata_path": "data/footage/source.mp4.capture.json",
+        "metadata_sha256": _sha256(metadata),
+        "capture_batch_path": "data/plan/capture_batch.json",
+        "capture_batch_sha256": _sha256(batch),
+        "capture_results_path": "data/plan/capture_results.json",
+        "capture_results_sha256": _sha256(results),
         "editorial_role": "gameplay",
         "capture_method": "realtime_window",
         "state_id": "day4.different_state",
-        "build_id": "git:different",
+        "build_id": "exe-sha256:" + "b" * 64,
         "actual_width": 1920,
         "actual_height": 1080,
         "actual_fps": 30,
-        "actual_duration": 10,
-        "head_handle_seconds": 2,
-        "tail_handle_seconds": 2,
-    })
+        "actual_duration": 15,
+        "simulation_rate": 1.0,
+        "continuous": True,
+        "clean_ui": True,
+        "client_area": True,
+        "cursor_visible": False,
+        "content_seconds": 5,
+        "head_handle_seconds": 5,
+        "tail_handle_seconds": 5,
+        "frame_audit_passed": True,
+    }])
+    current = registry.assets[0]
     approve_asset(
         video,
         asset_id,
         expected_sha256=_sha256(source),
+        expected_revision=current.revision,
+        expected_validation_sha256=current.validation_sha256,
         approved_by="test",
     )
     project = hf.init_project(tmp_path / "proof", template="before-after")
