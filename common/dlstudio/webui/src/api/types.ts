@@ -45,6 +45,7 @@ export interface ProductOverview {
 
 export interface Project {
   edit_name: string;
+  storage_identity: string;
   output: string;
   design: ProjectDesign;
   beats: ProjectBeat[];
@@ -89,6 +90,7 @@ export interface AutopilotCheckpointRow {
 }
 
 export interface AutopilotCheckpointData {
+  checkpoint_digest: string;
   wall_time: AutopilotWallTime;
   blockers: AutopilotBlocker[];
   notices?: AutopilotBlocker[];

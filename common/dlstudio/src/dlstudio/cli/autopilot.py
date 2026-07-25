@@ -13,6 +13,7 @@ import os
 import re
 import secrets
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -80,10 +81,59 @@ def _read_shots(path: Path) -> list[dict[str, Any]]:
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    staged = path.with_name(f".{path.name}.{secrets.token_hex(6)}.tmp")
+    try:
+        with staged.open("w", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(staged, path)
+    finally:
+        staged.unlink(missing_ok=True)
+
+
+@contextmanager
+def _exclusive_run_lock(root: Path):
+    """Reject concurrent state-machine writers for one production."""
+
+    from dlstudio.cli import CliError
+
+    path = root / "data" / "review" / ".autopilot-run.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = path.open("a+b")
+    try:
+        if handle.tell() == 0:
+            handle.write(b"\0")
+            handle.flush()
+        handle.seek(0)
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            raise CliError(
+                f"another autopilot-run is active for this production: {root}"
+            ) from exc
+        yield
+    finally:
+        try:
+            handle.seek(0)
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        except OSError:
+            pass
+        handle.close()
 
 
 def _utc_now() -> str:
@@ -114,6 +164,55 @@ def _load_run_state(path: Path) -> dict[str, Any]:
 def _save_run_state(path: Path, state: dict[str, Any]) -> None:
     state["updated_at"] = _utc_now()
     _write_json(path, state)
+
+
+def _require_current_exact_review(root: Path) -> None:
+    """Reject a missing/stale final review before entering package authoring."""
+    from dlstudio.cli import CliError
+
+    def read_object(path: Path) -> dict[str, Any]:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise CliError(f"exact review evidence is missing or invalid: {path}") from exc
+        if not isinstance(payload, dict):
+            raise CliError(f"exact review evidence must be an object: {path}")
+        return payload
+
+    preflight = read_object(root / "data" / "review" / "preflight.json")
+    inputs = preflight.get("inputs")
+    if not isinstance(inputs, dict) or not preflight.get("ok") or preflight.get("errors") != 0:
+        raise CliError("final preflight is not passing for the exact review artifact")
+    raw = inputs.get("render_artifact")
+    if not isinstance(raw, str) or not raw:
+        raise CliError("final preflight does not name an exact render artifact")
+    value = Path(raw)
+    artifact = value.resolve() if value.is_absolute() else (root / value).resolve()
+    if artifact.is_symlink() or not artifact.is_file():
+        raise CliError(f"exact review artifact is missing: {artifact}")
+    digest = _sha256(artifact)
+    if str(inputs.get("render_artifact_sha256", "")).casefold() != digest:
+        raise CliError("final preflight is stale for the current render bytes")
+
+    feedback = read_object(root / "data" / "review" / "feedback.json")
+    full = feedback.get("full")
+    review = full.get("video") if isinstance(full, dict) else None
+    if not isinstance(review, dict):
+        raise CliError("exact full-video review is missing")
+    verdict = str(review.get("verdict", "")).casefold()
+    if verdict not in {"pass", "ship"}:
+        raise CliError(f"exact full-video review is not shippable: {verdict!r}")
+    review_raw = review.get("artifact_path")
+    if not isinstance(review_raw, str) or not review_raw:
+        raise CliError("exact full-video review does not name its artifact")
+    review_value = Path(review_raw)
+    review_path = (
+        review_value.resolve()
+        if review_value.is_absolute()
+        else (root / review_value).resolve()
+    )
+    if review_path != artifact or str(review.get("artifact_sha256", "")).casefold() != digest:
+        raise CliError("exact full-video review is stale for the current render bytes")
 
 
 def _run_stage(
@@ -595,6 +694,14 @@ def cmd_preflight(args: argparse.Namespace) -> int:
     started = time.perf_counter_ns()
     edit, root, _canonical = _load_target(args.edit)
     timeline = dl_compile.build_timeline(edit)
+    compiled_ir_sha256 = (
+        __import__(
+            "dlstudio.services.autopilot_checkpoint",
+            fromlist=["compiled_timeline_sha256"],
+        ).compiled_timeline_sha256(timeline)
+        if hasattr(timeline, "model_dump")
+        else None
+    )
     mechanical = dl_check.run_checks(timeline, strict_assets=args.final)
     issues = list(mechanical.issues)
     script_issues, script_inputs = _script_vo_issues(edit, root)
@@ -692,9 +799,21 @@ def cmd_preflight(args: argparse.Namespace) -> int:
         "autofix_suggestions": [],
         "inputs": {
             "shot_manifest": manifest_input,
+            "shot_manifest_sha256": (
+                __import__(
+                    "dlstudio.services.autopilot_checkpoint",
+                    fromlist=["preflight_manifest_sha256"],
+                ).preflight_manifest_sha256(manifest_path)
+                if manifest_path.is_file()
+                else None
+            ),
             "asset_catalog": catalog_input,
+            "asset_catalog_sha256": (
+                _sha256(catalog_path) if catalog_path.is_file() else None
+            ),
             "render_artifact": str(artifact_path) if artifact_path is not None else None,
             "render_artifact_sha256": artifact_sha256,
+            "compiled_ir_sha256": compiled_ir_sha256,
             **script_inputs,
         },
     }
@@ -780,12 +899,12 @@ def cmd_review_pack(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_autopilot_run(args: argparse.Namespace) -> int:
+def _cmd_autopilot_run_unlocked(args: argparse.Namespace) -> int:
     """Run deterministic production stages without agent polling.
 
-    The command stops only at the author storyboard checkpoint and at the
-    exact-review boundary.  Re-running with ``--resume`` advances the same
-    run id instead of rediscovering commands and rebuilding prior stages.
+    The command stops at the author storyboard, exact-review, and explicit
+    package boundaries. Re-running with ``--resume`` advances the same run id
+    instead of rediscovering commands and rebuilding prior stages.
     """
     from dlstudio.cli import CliError, cmd_final
     from dlstudio.cli.delivery import cmd_deliver, cmd_publish_evidence
@@ -869,6 +988,12 @@ def cmd_autopilot_run(args: argparse.Namespace) -> int:
         if status == "awaiting_checkpoint" or (
             status == "blocked" and phase == "finalize"
         ):
+            from dlstudio.services.autopilot_checkpoint import require_current_approval
+
+            try:
+                require_current_approval(root)
+            except ValueError as exc:
+                raise CliError(f"author checkpoint is not current: {exc}") from exc
             human_active_ms = max(0, int(round(args.human_minutes * 60_000)))
             state["human_active_ms"] = int(state.get("human_active_ms", 0)) + human_active_ms
             if human_active_ms:
@@ -919,7 +1044,21 @@ def cmd_autopilot_run(args: argparse.Namespace) -> int:
             print(f"[dl2] autopilot-run {run_id}: awaiting exact review")
             return 0
 
-        if status == "awaiting_exact_review" or (
+        if status == "awaiting_exact_review":
+            _require_current_exact_review(root)
+            state["status"] = "awaiting_package"
+            state["phase"] = "package"
+            state["next_action"] = (
+                "create the production package at data/publish/publish.json, "
+                "data/publish/metadata.md, and data/publish/cover.png or "
+                "thumbnail.png; then resume the same command"
+            )
+            _save_run_state(state_path, state)
+            print(f"[dl2] autopilot-run {run_id}: awaiting publish package")
+            print(f"[dl2] next: {state['next_action']}")
+            return 0
+
+        if status == "awaiting_package" or (
             status == "blocked" and phase == "delivery"
         ):
             state["phase"] = "delivery"
@@ -934,7 +1073,11 @@ def cmd_autopilot_run(args: argparse.Namespace) -> int:
                     cmd_deliver,
                     argparse.Namespace(
                         edit=canonical, video=None, metadata=None, image=None,
-                        overwrite=False,
+                        # publish_evidence immediately above binds every
+                        # source to the exact reviewed final. Re-running the
+                        # same production may therefore atomically replace an
+                        # older delivery bundle.
+                        overwrite=True,
                     ),
                 ),
             ):
@@ -956,6 +1099,18 @@ def cmd_autopilot_run(args: argparse.Namespace) -> int:
             os.environ.pop(_RUN_ID_ENV, None)
         else:
             os.environ[_RUN_ID_ENV] = previous_run_id
+
+
+def cmd_autopilot_run(args: argparse.Namespace) -> int:
+    """Serialize one production run while preserving the caller's cwd."""
+
+    original_cwd = Path.cwd()
+    try:
+        _edit, root, _canonical = _load_target(args.edit)
+    finally:
+        os.chdir(original_cwd)
+    with _exclusive_run_lock(root):
+        return _cmd_autopilot_run_unlocked(args)
 
 
 def add_subparsers(sub: argparse._SubParsersAction) -> None:
@@ -992,7 +1147,7 @@ def add_subparsers(sub: argparse._SubParsersAction) -> None:
 
     register = sub.add_parser(
         "asset-register",
-        help="register a non-gameplay video with hash-bound provenance",
+        help="register non-gameplay video/audio with hash-bound provenance",
     )
     register.add_argument("edit", help="dotted edit, production path, or product:id")
     register.add_argument("asset_id", help="stable registry asset id")

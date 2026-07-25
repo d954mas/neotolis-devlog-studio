@@ -8,6 +8,11 @@ import type {
   Project,
   Timeline,
 } from "./api/types";
+import {
+  restoreUploadedTakes,
+  serializeUploadedTakes,
+  takesStorageKey,
+} from "./lib/takes";
 import type { SessionTake } from "./lib/takes";
 import { CheckBanner } from "./components/CheckBanner";
 import { Sidebar } from "./components/Sidebar";
@@ -55,6 +60,8 @@ export function App() {
   const [takesByBeat, setTakesByBeat] = useState<Record<string, SessionTake[]>>(
     {},
   );
+  const hydratedTakesKey = useRef<string | null>(null);
+  const skipNextTakesPersist = useRef(false);
   const [renderInfo, setRenderInfo] = useState<Record<string, RenderInfo>>({});
   const [renderPreview, setRenderPreview] = useState<Record<string, string>>(
     {},
@@ -145,10 +152,39 @@ export function App() {
     loadCheckpoint();
   }, []);
 
+  // Uploaded takes and in-flight job ids survive a browser reload. The key is
+  // edit-scoped so two Studio productions on the same origin cannot leak take
+  // paths into one another.
+  useEffect(() => {
+    if (!project?.storage_identity) return;
+    const key = takesStorageKey(project.storage_identity);
+    if (hydratedTakesKey.current !== key) {
+      skipNextTakesPersist.current = true;
+      setTakesByBeat(restoreUploadedTakes(localStorage.getItem(key), api.fileUrl));
+      hydratedTakesKey.current = key;
+    }
+  }, [project?.storage_identity]);
+
+  useEffect(() => {
+    const key = hydratedTakesKey.current;
+    if (!key) return;
+    if (skipNextTakesPersist.current) {
+      skipNextTakesPersist.current = false;
+      return;
+    }
+    localStorage.setItem(key, serializeUploadedTakes(takesByBeat));
+  }, [takesByBeat]);
+
   async function approveCheckpoint() {
     setCheckpointBusy(true);
     try {
-      const result = await api.approveAutopilotCheckpoint("author");
+      if (!checkpoint?.checkpoint_digest) {
+        throw new Error("checkpoint digest is missing; reload the checkpoint");
+      }
+      const result = await api.approveAutopilotCheckpoint(
+        checkpoint.checkpoint_digest,
+        "author",
+      );
       setCheckpoint(result.checkpoint);
       setCheckpointErr(null);
     } catch (e) {

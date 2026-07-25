@@ -37,7 +37,7 @@ the `RESOLUTION` tuple in `design.py` — there is no separate format field.
 | Quick result from a beats.py edit | `dl2 iter <edit> --stale -j 4` |
 | One-beat iteration | `dl2 compose <edit> <beat>` |
 | Watchable draft + review artifacts | `dl2 preview <edit>` → draft at `EDIT.output` + `data/review/contact_sheet.jpg` + `data/review/keyframes/` |
-| Product-first video run | `dl2 autopilot-run <product:production>` → author checkpoint → `--resume` → exact review → `--resume` |
+| Product-first video run | `dl2 autopilot-run <product:production>` → author checkpoint → `--resume` → exact review → `--resume` → package checkpoint → `--resume` |
 | Final upload-ready render | `dl2 final <edit>` (1080p, −14 LUFS loudnorm) |
 | Start a new video | `dl2 new-video <project> --format vertical` (or `landscape`) |
 | Scratch VO for a beat | `dl2 scratch-tts <edit> <beat>` → `dl2 transcribe <wav> <words.json>` → wire BOTH paths into the beat in `beats.py` |
@@ -101,7 +101,7 @@ Agent routing:
    those first and open a full-resolution frame only after the pack exposes a
    concrete anomaly. Never stream all keyframes into model context by default.
 9. **One run, one id, no polling.** Resume `data/review/autopilot_run.json`
-   at the author and exact-review boundaries. Do not rediscover and manually
+   at the author, exact-review, and package boundaries. Do not rediscover and manually
    dispatch inventory/preflight/storyboard/final/publish/delivery commands.
 10. **Capture method is part of asset identity.** DevAPI may prepare game state,
     but ordinary gameplay is recorded as one real-time client-area media stream.

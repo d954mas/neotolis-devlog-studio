@@ -6,6 +6,7 @@ and keeps the former JSON document only as a one-time migration input.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
@@ -15,6 +16,7 @@ from typing import Any, Iterator
 
 SCHEMA_VERSION = 1
 LEGACY_SCHEMA = "dlstudio.research/v1"
+_PROJECT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 
 
 class ResearchDatabaseError(RuntimeError):
@@ -188,10 +190,15 @@ def connect(workspace_root: Path) -> Iterator[sqlite3.Connection]:
 
 def _insert_payload(connection: sqlite3.Connection, payload: dict[str, Any]) -> None:
     for project in payload.get("projects", []):
+        project_id = project.get("id")
+        if not isinstance(project_id, str) or not _PROJECT_ID_RE.fullmatch(project_id):
+            raise ResearchDatabaseError(
+                f"legacy research project has unsafe id: {project_id!r}"
+            )
         connection.execute(
             "INSERT INTO projects(id, title, description, style_profile, created_at) VALUES (?, ?, ?, ?, ?)",
             (
-                project["id"], project["title"], project.get("description", ""),
+                project_id, project["title"], project.get("description", ""),
                 project.get("style_profile", ""), project.get("created_at") or _utc_now(),
             ),
         )
@@ -381,7 +388,8 @@ def load_payload(workspace_root: Path) -> dict[str, Any]:
                     dict(row)
                     for row in connection.execute(
                         """SELECT captured_at, views, likes, comments FROM reel_metrics
-                        WHERE project_id = ? AND reel_id = ? ORDER BY captured_at""",
+                        WHERE project_id = ? AND reel_id = ?
+                        ORDER BY julianday(captured_at)""",
                         (project_id, reel_row["id"]),
                     )
                 ]
@@ -469,7 +477,7 @@ def get_feed_page(
     cursor_id: str | None,
 ) -> dict[str, Any]:
     sort_expression = {
-        "newest": "r.published_at",
+        "newest": "julianday(r.published_at)",
         "views": "CAST(r.views AS REAL)",
         "outlier": "CASE WHEN a.median_views > 0 THEN CAST(r.views AS REAL) / a.median_views ELSE -1.0 END",
         "velocity": """CASE
@@ -490,7 +498,7 @@ def get_feed_page(
         "limit": limit + 1,
     }
     if cutoff_iso is not None:
-        filters.append("r.published_at >= :cutoff_iso")
+        filters.append("julianday(r.published_at) >= julianday(:cutoff_iso)")
         parameters["cutoff_iso"] = cutoff_iso
     if author_id is not None:
         filters.append("r.author_id = :author_id")
@@ -508,7 +516,7 @@ def get_feed_page(
         metric_ranked AS (
             SELECT project_id, reel_id, captured_at, views,
                 ROW_NUMBER() OVER (
-                    PARTITION BY project_id, reel_id ORDER BY captured_at DESC
+                    PARTITION BY project_id, reel_id ORDER BY julianday(captured_at) DESC
                 ) AS rank
             FROM reel_metrics
             WHERE project_id = :project_id
@@ -568,7 +576,7 @@ def get_feed_page(
         reel_ids = [row["id"] for row in rows]
         metrics = _rows_by_reel(
             connection, "reel_metrics", "captured_at, views, likes, comments",
-            project_id, reel_ids, "reel_id, captured_at",
+            project_id, reel_ids, "reel_id, julianday(captured_at)",
         )
         patterns = _rows_by_reel(
             connection, "reel_patterns", "position, value",

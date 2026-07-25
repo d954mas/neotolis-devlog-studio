@@ -5,6 +5,7 @@ import json
 import math
 import shutil
 import wave
+from pathlib import Path
 
 import pytest
 
@@ -66,7 +67,7 @@ def test_parse_silencedetect_pairs_ranges_and_closes_trailing_silence():
     ]
 
 
-def test_automatic_plan_combines_signal_fillers_and_exact_phrase_repeats():
+def test_automatic_plan_preserves_repetition_without_semantic_evidence():
     payload = _payload([
         ("Мы", 0.00, 0.20),
         ("строим", 0.22, 0.50),
@@ -86,7 +87,8 @@ def test_automatic_plan_combines_signal_fillers_and_exact_phrase_repeats():
     )
 
     reasons = {reason for cut in plan.cuts for reason in cut.reasons}
-    assert {"filler", "exact_phrase_repeat", "silence"} <= reasons
+    assert {"filler", "silence"} <= reasons
+    assert "exact_phrase_repeat" not in reasons
     assert plan.input_audio_sha256 == "a" * 64
     assert plan.input_words_sha256 == "b" * 64
     assert plan.output_duration == pytest.approx(
@@ -204,6 +206,7 @@ def test_execute_speech_edit_materializes_wav_words_and_audit_artifact(tmp_path)
     result = execute_speech_edit(
         source_audio, source_words, out_audio, out_words, artifact, plan=plan,
         output_audio_ref="data/audio/edited.wav",
+        output_words_ref="data/audio/edited_words.json",
     )
 
     assert result.duration == pytest.approx(1.388, abs=1 / 48_000)
@@ -223,6 +226,9 @@ def test_execute_speech_edit_materializes_wav_words_and_audit_artifact(tmp_path)
     assert audit["joins"][0]["max_step_dbfs"] <= -30.0
     assert audit["output"]["audio_sha256"] == sha256_file(out_audio)
     assert audit["output"]["words_sha256"] == sha256_file(out_words)
+    assert audit["output"]["words_path"] == "data/audio/edited_words.json"
+    assert Path(audit["input"]["audio_path"]).is_file()
+    assert Path(audit["input"]["words_path"]).is_file()
 
 
 def test_execute_speech_edit_rejects_stale_hash_before_writing(tmp_path):

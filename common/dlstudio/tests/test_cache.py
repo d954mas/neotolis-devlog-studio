@@ -353,6 +353,34 @@ def test_incomplete_entry_is_a_miss_and_copies_nothing(tmp_path):
 
 # ─── atomicity ──────────────────────────────────────────────────────────
 
+def test_get_second_copy_failure_preserves_existing_output_pair(tmp_path, monkeypatch):
+    rendered = tmp_path / "rendered.mp4"
+    _write_pair(rendered, b"new-video", stem_content=b"new-stem")
+    cache.put("restore-key", rendered)
+
+    out = tmp_path / "data" / "finalize" / "beat.mp4"
+    _write_pair(out, b"old-video", stem_content=b"old-stem")
+    real_copyfile = cache.shutil.copyfile
+    copies = 0
+
+    def fail_second_copy(source, destination):
+        nonlocal copies
+        copies += 1
+        if copies == 2:
+            Path(destination).write_bytes(b"partial")
+            raise OSError("disk full while staging stem")
+        return real_copyfile(source, destination)
+
+    monkeypatch.setattr(cache.shutil, "copyfile", fail_second_copy)
+
+    with pytest.raises(OSError, match="disk full"):
+        cache.get("restore-key", out)
+
+    assert out.read_bytes() == b"old-video"
+    assert cache.vo_stem_sibling(out).read_bytes() == b"old-stem"
+    assert list(out.parent.glob(".*.cache-restore-*")) == []
+
+
 def test_put_leaves_no_tmp_file(tmp_path):
     rendered = tmp_path / "rendered.mp4"
     _write_pair(rendered)

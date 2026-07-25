@@ -413,6 +413,13 @@ class GameCaptureReport(_Model):
                 raise ValueError(
                     "recorded action did not change semantic state"
                 )
+            if (
+                self.action_result.semantic_hash.casefold()
+                != self.expected_action_semantic_hash.casefold()
+            ):
+                raise ValueError(
+                    "recorded action semantic hash does not match the probe"
+                )
         elif (
             self.action_endpoint is not None
             or self.pre_action is not None

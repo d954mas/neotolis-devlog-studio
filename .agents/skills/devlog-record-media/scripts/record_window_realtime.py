@@ -18,6 +18,8 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
+from contextlib import contextmanager
 
 
 _FINALIZATION_MARGIN_SECONDS = 0.25
@@ -383,6 +385,25 @@ def _hydrate_from_batch(args: argparse.Namespace) -> str | None:
             raise SystemExit(
                 "manual action capture requires --expected-action-semantic-hash"
             )
+        if args.results is not None:
+            if not args.request_id:
+                raise SystemExit(
+                    "manual --results requires --request-id for an isolated "
+                    "per-request result"
+                )
+            expected_results = (
+                args.production_root
+                / "data"
+                / "plan"
+                / "capture_results"
+                / f"{args.request_id}.json"
+            )
+            if args.results.resolve() != expected_results.resolve():
+                raise SystemExit(
+                    "--results must use the isolated per-request path "
+                    f"{expected_results}"
+                )
+            args.results = expected_results
         return args.production_id
     if not args.request_id:
         raise SystemExit("--batch requires --request-id")
@@ -434,21 +455,28 @@ def _hydrate_from_batch(args: argparse.Namespace) -> str | None:
                 f"--{field.replace('_', '-')} contradicts the capture batch"
             )
         setattr(args, field, value)
-    if args.results is None:
-        args.results = (
-            args.production_root
-            / "data"
-            / "plan"
-            / "capture_results"
-            / f"{args.request_id}.json"
+    expected_results = (
+        args.production_root
+        / "data"
+        / "plan"
+        / "capture_results"
+        / f"{args.request_id}.json"
+    )
+    if (
+        args.results is not None
+        and args.results.resolve() != expected_results.resolve()
+    ):
+        raise SystemExit(
+            "--results must use the isolated per-request path "
+            f"{expected_results}"
         )
+    args.results = expected_results
     return str(payload.get("production_id") or "")
 
 
 def _write_result(
     path: Path,
     *,
-    existing_path: Path | None = None,
     production_id: str,
     request_id: str,
     production_root: Path,
@@ -476,30 +504,19 @@ def _write_result(
         "game_report_sha256": game_report_sha,
         "captured_at": captured_at,
     }
-    existing: dict = {}
-    source = existing_path if existing_path is not None else path
-    if source.is_file():
-        existing = json.loads(source.read_text(encoding="utf-8"))
-        if (
-            not isinstance(existing, dict)
-            or existing.get("version") != 2
-            or existing.get("production_id") != production_id
-        ):
-            raise RuntimeError("existing capture results belong to another batch")
-    results = [
-        item
-        for item in existing.get("results", [])
-        if isinstance(item, dict) and item.get("request_id") != request_id
-    ]
-    results.append(result)
-    results.sort(key=lambda item: str(item.get("request_id", "")))
+    # One recorder owns one request result file. Aggregating a shared results
+    # document here would require the read, merge, and bundle promotion to hold
+    # the same cross-process transaction lock; doing the read before
+    # promote_bundle loses concurrent recorder updates. Studio prepares the
+    # per-request path in _hydrate_from_batch, so publish a replaceable
+    # single-request snapshot and let the capture-flow coordinator aggregate.
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(
             {
                 "version": 2,
                 "production_id": production_id,
-                "results": results,
+                "results": [result],
             },
             ensure_ascii=False,
             indent=2,
@@ -596,7 +613,40 @@ def _clock_call(
     return result
 
 
-def _probe_request(args: argparse.Namespace) -> int:
+@contextmanager
+def _request_file_lock(path: Path):
+    lock_path = path.with_name(f".{path.name}.lock")
+    handle = lock_path.open("a+b")
+    try:
+        if lock_path.stat().st_size == 0:
+            handle.write(b"\0")
+            handle.flush()
+        handle.seek(0)
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            handle.seek(0)
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
+
+
+def _probe_request_unlocked(args: argparse.Namespace) -> int:
     if args.batch is not None:
         raise SystemExit("--probe-requests cannot be combined with --batch")
     if not args.request_id:
@@ -713,11 +763,14 @@ def _probe_request(args: argparse.Namespace) -> int:
     return 0
 
 
-def main() -> int:
-    args = _parser().parse_args()
-    if args.probe_requests is not None:
-        return _probe_request(args)
-    production_id = _hydrate_from_batch(args)
+def _probe_request(args: argparse.Namespace) -> int:
+    if args.probe_requests is None:
+        raise SystemExit("--probe-requests path is required")
+    with _request_file_lock(args.probe_requests.resolve()):
+        return _probe_request_unlocked(args)
+
+
+def _record(args: argparse.Namespace, production_id: str | None) -> int:
     if min(args.content_seconds, args.head_handle, args.tail_handle) < 0:
         raise SystemExit("durations must be non-negative")
     if args.content_seconds <= 0 or args.fps <= 0:
@@ -748,8 +801,9 @@ def main() -> int:
     if output.exists():
         raise SystemExit(f"refusing to overwrite existing output: {output}")
     output.parent.mkdir(parents=True, exist_ok=True)
-    partial = output.with_name(f"{output.stem}.partial{output.suffix}")
-    if partial.exists():
+    partial_pattern = f"{output.stem}.partial-*{output.suffix}"
+    stale_partials = sorted(output.parent.glob(partial_pattern))
+    if stale_partials:
         archive = (
             production_root
             / "data"
@@ -758,14 +812,18 @@ def main() -> int:
             / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         )
         archive.mkdir(parents=True, exist_ok=False)
-        for staged in (
-            partial,
-            partial.with_suffix(partial.suffix + ".game.json"),
-            partial.with_suffix(partial.suffix + ".capture.json"),
-        ):
-            if staged.exists():
-                os.replace(staged, archive / staged.name)
+        for stale in stale_partials:
+            for staged in (
+                stale,
+                stale.with_suffix(stale.suffix + ".game.json"),
+                stale.with_suffix(stale.suffix + ".capture.json"),
+            ):
+                if staged.exists():
+                    os.replace(staged, archive / staged.name)
         print(f"RECOVERED_INCOMPLETE_CAPTURE archive={archive}", flush=True)
+    partial = output.with_name(
+        f"{output.stem}.partial-{os.getpid()}-{uuid.uuid4().hex[:8]}{output.suffix}"
+    )
 
     executable = _executable_for_pid(args.pid)
     executable_sha = _sha256(executable)
@@ -929,6 +987,14 @@ def main() -> int:
                     raise RuntimeError(
                         "capture action returned no valid semantic hash"
                     )
+                if (
+                    str(action_result.get("semanticHash") or "").casefold()
+                    != str(args.expected_action_semantic_hash or "").casefold()
+                ):
+                    raise RuntimeError(
+                        "capture action semantic hash differs from the probed "
+                        "expected action hash"
+                    )
             else:
                 action_result = None
         target_end = _required_capture_end(
@@ -1082,7 +1148,6 @@ def main() -> int:
         )
         _write_result(
             results_staging,
-            existing_path=results_path,
             production_id=production_id,
             request_id=args.request_id,
             production_root=production_root,
@@ -1097,7 +1162,12 @@ def main() -> int:
             captured_at=ended_at,
         )
         replacements.append((results_staging, results_path))
-    promote_bundle(replacements)
+    try:
+        promote_bundle(replacements, require_absent=True)
+    except FileExistsError as exc:
+        raise RuntimeError(
+            "capture evidence is immutable; use a new request/revision instead"
+        ) from exc
     print(
         f"CAPTURE_OK artifact={output} metadata={metadata_path} "
         f"game_report={game_report_path}"
@@ -1105,6 +1175,16 @@ def main() -> int:
         flush=True,
     )
     return 0
+
+
+def main() -> int:
+    args = _parser().parse_args()
+    if args.probe_requests is not None:
+        return _probe_request(args)
+    production_id = _hydrate_from_batch(args)
+    output = args.output.resolve()
+    with _request_file_lock(output):
+        return _record(args, production_id)
 
 
 if __name__ == "__main__":

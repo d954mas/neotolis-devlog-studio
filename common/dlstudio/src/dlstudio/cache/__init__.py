@@ -182,9 +182,68 @@ def get(key: str, out_path: Path) -> bool:
         return False
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(cp, out_path)
-    shutil.copyfile(sp, vo_stem_sibling(out_path))
+    stem_path = vo_stem_sibling(out_path)
+    nonce = uuid.uuid4().hex
+    staged_mp4 = out_path.with_name(
+        f".{out_path.name}.cache-restore-{nonce}"
+    )
+    staged_stem = stem_path.with_name(
+        f".{stem_path.name}.cache-restore-{nonce}"
+    )
+    try:
+        shutil.copyfile(cp, staged_mp4)
+        shutil.copyfile(sp, staged_stem)
+        _promote_restored_pair(
+            [(staged_mp4, out_path), (staged_stem, stem_path)]
+        )
+    finally:
+        staged_mp4.unlink(missing_ok=True)
+        staged_stem.unlink(missing_ok=True)
     return True
+
+
+def _promote_restored_pair(replacements: list[tuple[Path, Path]]) -> None:
+    """Promote a cache pair without exposing one new half by itself.
+
+    Normal render outputs live below one production ``data/`` root, so reuse
+    the durable bundle journal used by speech-edit and take processing.  The
+    small rollback fallback preserves the public cache helper for callers
+    materializing to a non-production temporary directory.
+    """
+    from dlstudio.services.bundle import promote_bundle
+
+    try:
+        promote_bundle(replacements)
+        return
+    except ValueError as exc:
+        if "production data root" not in str(exc):
+            raise
+
+    nonce = uuid.uuid4().hex
+    backups: list[tuple[Path, Path | None]] = []
+    promoted: list[Path] = []
+    try:
+        for _staged, target in replacements:
+            backup = target.with_name(f".{target.name}.cache-backup-{nonce}")
+            if target.exists():
+                os.replace(target, backup)
+                backups.append((target, backup))
+            else:
+                backups.append((target, None))
+        for staged, target in replacements:
+            os.replace(staged, target)
+            promoted.append(target)
+    except BaseException:
+        for target in reversed(promoted):
+            target.unlink(missing_ok=True)
+        for target, backup in reversed(backups):
+            if backup is not None and backup.exists():
+                os.replace(backup, target)
+        raise
+    finally:
+        for _target, backup in backups:
+            if backup is not None:
+                backup.unlink(missing_ok=True)
 
 
 def _atomic_replace(tmp: Path, cp: Path, *, retries: int = 8, delay: float = 0.03) -> None:

@@ -129,6 +129,35 @@ def test_register_and_approve_hash_bound_reference_video(tmp_path, monkeypatch):
     assert resolve_approved_asset(tmp_path, current.asset_id) == artifact
 
 
+def test_register_file_asset_supports_licensed_music(tmp_path, monkeypatch):
+    from dlstudio.services.asset_registry import register_file_asset
+
+    artifact = tmp_path / "data" / "music" / "track.ogg"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_bytes(b"licensed-music")
+    monkeypatch.setattr(
+        "dlstudio.services.asset_registry._validate_audio_artifact",
+        lambda path: None,
+    )
+
+    registry = register_file_asset(
+        tmp_path,
+        asset_id="music:track-01",
+        artifact_path="data/music/track.ogg",
+        editorial_role="reference",
+        source_type="licensed",
+        license_name="CC-BY 4.0",
+        credit="Music Creator",
+    )
+
+    record = registry.assets[0]
+    provenance = json.loads(
+        (tmp_path / record.provenance_path).read_text(encoding="utf-8")
+    )
+    assert record.artifact_path == "data/music/track.ogg"
+    assert provenance["schema"] == "devlog.audio_provenance"
+
+
 def test_generic_registration_rejects_hyperframes_output(tmp_path):
     from dlstudio.services.asset_registry import (
         AssetRegistryError,

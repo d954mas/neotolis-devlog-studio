@@ -28,11 +28,12 @@ mechanical cleanup is needed, step 2 may be skipped and
 The baseline removes only:
 
 - signal-confirmed long silence, while retaining short handles;
-- explicit filler tokens such as `э`, `эм`, `мм`, `uh`, and `um`;
-- an exact adjacent phrase restart, keeping the later take.
+- explicit filler tokens such as `э`, `эм`, `мм`, `uh`, and `um`.
 
-The agent may add `false_start`, `repeat`, `semantic`, or `noise` cuts after
-reading the transcript. It must leave uncertain material intact. Rewording,
+Exact repetition is preserved by the baseline because it may be intentional
+rhetoric. The agent may add `false_start`, `repeat`, `semantic`, or `noise`
+cuts only after reading the transcript and confirming that the earlier phrase
+is superseded. It must leave uncertain material intact. Rewording,
 synthesizing speech, or requesting a new performance is not speech edit and
 requires the author.
 

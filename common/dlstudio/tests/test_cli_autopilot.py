@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -61,6 +62,33 @@ def test_parser_exposes_inventory_preflight_and_storyboard_commands():
     assert flow.func is autopilot.cmd_capture_flow
     assert flow.request_id == "day5_station"
     assert flow.ingest == "data/plan/capture_results.json"
+
+
+def test_autopilot_json_write_is_atomic_on_replace_failure(tmp_path, monkeypatch):
+    from dlstudio.cli import autopilot
+
+    target = tmp_path / "data" / "review" / "autopilot_run.json"
+    target.parent.mkdir(parents=True)
+    target.write_text('{"run_id":"old"}\n', encoding="utf-8")
+
+    def fail_replace(_source, _target):
+        raise OSError("simulated interruption")
+
+    monkeypatch.setattr(autopilot.os, "replace", fail_replace)
+    with pytest.raises(OSError, match="simulated interruption"):
+        autopilot._write_json(target, {"run_id": "new"})
+
+    assert json.loads(target.read_text(encoding="utf-8"))["run_id"] == "old"
+    assert not list(target.parent.glob(".autopilot_run.json.*.tmp"))
+
+
+def test_autopilot_run_lock_rejects_concurrent_writer(tmp_path):
+    from dlstudio.cli import autopilot
+
+    with autopilot._exclusive_run_lock(tmp_path):
+        with pytest.raises(cli.CliError, match="another autopilot-run"):
+            with autopilot._exclusive_run_lock(tmp_path):
+                pass
 
 
 def test_capture_flow_prepares_once_and_names_the_external_recording_boundary(
@@ -288,6 +316,11 @@ def test_autopilot_run_stops_at_checkpoint_and_resumes_to_exact_review(
     assert calls == ["inventory", "preflight", "storyboard", "review_pack"]
 
     import dlstudio.cli as cli_root
+    from dlstudio.services import autopilot_checkpoint
+
+    monkeypatch.setattr(
+        autopilot_checkpoint, "require_current_approval", lambda root: {}
+    )
     monkeypatch.setattr(cli_root, "cmd_final", stage("final"))
     assert autopilot.cmd_autopilot_run(
         _parse([
@@ -299,6 +332,133 @@ def test_autopilot_run_stops_at_checkpoint_and_resumes_to_exact_review(
     assert state["status"] == "awaiting_exact_review"
     assert state["human_active_ms"] == 450000
     assert calls[-4:] == ["preflight", "final", "preflight", "review_pack"]
+
+
+def test_autopilot_resume_refuses_final_without_current_author_approval(
+    tmp_path, monkeypatch
+):
+    from dlstudio.cli import CliError, autopilot
+    import dlstudio.cli as cli_root
+
+    production = tmp_path / "production"
+    state_path = production / "data/review/autopilot_run.json"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(json.dumps({
+        "version": 1,
+        "run_id": "run_20260718_unapproved",
+        "production": "product:production",
+        "status": "awaiting_checkpoint",
+        "phase": "author_checkpoint",
+        "started_at": "2026-07-18T00:00:00Z",
+        "updated_at": "2026-07-18T00:00:00Z",
+        "human_active_ms": 0,
+        "stages": [],
+        "next_action": None,
+    }), encoding="utf-8")
+    monkeypatch.setattr(
+        autopilot,
+        "_load_target",
+        lambda ref: (SimpleNamespace(), production, "product:production"),
+    )
+    monkeypatch.setattr(
+        cli_root,
+        "cmd_final",
+        lambda args: pytest.fail("final render must not run without approval"),
+    )
+
+    with pytest.raises(CliError, match="author checkpoint is not current"):
+        autopilot.cmd_autopilot_run(
+            _parse(["autopilot-run", "product:production", "--resume"])
+        )
+
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["status"] == "awaiting_checkpoint"
+    assert state["phase"] == "author_checkpoint"
+
+
+def test_autopilot_third_invocation_stops_at_explicit_package_checkpoint(
+    tmp_path, monkeypatch, capsys
+):
+    from dlstudio.cli import autopilot
+
+    production = tmp_path / "production"
+    state_path = production / "data/review/autopilot_run.json"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(json.dumps({
+        "version": 1,
+        "run_id": "run_20260718_package",
+        "production": "product:production",
+        "status": "awaiting_exact_review",
+        "phase": "exact_review",
+        "started_at": "2026-07-18T00:00:00Z",
+        "updated_at": "2026-07-18T00:00:00Z",
+        "human_active_ms": 0,
+        "stages": [],
+        "next_action": None,
+    }), encoding="utf-8")
+    monkeypatch.setattr(
+        autopilot,
+        "_load_target",
+        lambda ref: (SimpleNamespace(), production, "product:production"),
+    )
+    monkeypatch.setattr(autopilot, "_require_current_exact_review", lambda root: None)
+
+    assert autopilot.cmd_autopilot_run(
+        _parse(["autopilot-run", "product:production", "--resume"])
+    ) == 0
+
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["status"] == "awaiting_package"
+    assert state["phase"] == "package"
+    assert "data/publish/publish.json" in state["next_action"]
+    assert "awaiting publish package" in capsys.readouterr().out
+
+
+def test_autopilot_package_resume_runs_evidence_and_delivery(
+    tmp_path, monkeypatch
+):
+    from dlstudio.cli import autopilot
+    from dlstudio.cli import delivery
+
+    production = tmp_path / "production"
+    state_path = production / "data/review/autopilot_run.json"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(json.dumps({
+        "version": 1,
+        "run_id": "run_20260718_delivery",
+        "production": "product:production",
+        "status": "awaiting_package",
+        "phase": "package",
+        "started_at": "2026-07-18T00:00:00Z",
+        "updated_at": "2026-07-18T00:00:00Z",
+        "human_active_ms": 0,
+        "stages": [],
+        "next_action": "create package",
+    }), encoding="utf-8")
+    monkeypatch.setattr(
+        autopilot,
+        "_load_target",
+        lambda ref: (SimpleNamespace(), production, "product:production"),
+    )
+    calls = []
+    delivery_args = []
+    monkeypatch.setattr(
+        delivery, "cmd_publish_evidence", lambda args: calls.append("evidence") or 0
+    )
+    monkeypatch.setattr(
+        delivery,
+        "cmd_deliver",
+        lambda args: delivery_args.append(args) or calls.append("delivery") or 0,
+    )
+
+    assert autopilot.cmd_autopilot_run(
+        _parse(["autopilot-run", "product:production", "--resume"])
+    ) == 0
+
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["status"] == "completed"
+    assert calls == ["evidence", "delivery"]
+    assert delivery_args[0].overwrite is True
 
 
 def test_autopilot_resume_retries_failed_finalize_without_rebuilding_storyboard(
@@ -326,6 +486,10 @@ def test_autopilot_resume_retries_failed_finalize_without_rebuilding_storyboard(
         autopilot,
         "_load_target",
         lambda ref: (SimpleNamespace(), production, "product:production"),
+    )
+    from dlstudio.services import autopilot_checkpoint
+    monkeypatch.setattr(
+        autopilot_checkpoint, "require_current_approval", lambda root: {}
     )
     calls = []
     failures = iter((1, 0))
@@ -463,11 +627,21 @@ def test_preflight_combines_ir_and_shot_manifest_issues(tmp_path, monkeypatch):
     ]
     assert payload["inputs"] == {
         "shot_manifest": "data/plan/shot_manifest.json",
+        "shot_manifest_sha256": __import__(
+            "dlstudio.services.autopilot_checkpoint",
+            fromlist=["preflight_manifest_sha256"],
+        ).preflight_manifest_sha256(
+            production / "data" / "plan" / "shot_manifest.json"
+        ),
         "asset_catalog": "data/assets/catalog.json",
+        "asset_catalog_sha256": hashlib.sha256(
+            (production / "data" / "assets" / "catalog.json").read_bytes()
+        ).hexdigest(),
         "script_approval": None,
         "creator_profile": None,
         "render_artifact": None,
         "render_artifact_sha256": None,
+        "compiled_ir_sha256": None,
     }
 
 
@@ -500,11 +674,14 @@ def test_preflight_without_optional_shot_files_reports_ir_only(tmp_path, monkeyp
     assert payload["issues"] == []
     assert payload["inputs"] == {
         "shot_manifest": None,
+        "shot_manifest_sha256": None,
         "asset_catalog": None,
+        "asset_catalog_sha256": None,
         "script_approval": None,
         "creator_profile": None,
         "render_artifact": None,
         "render_artifact_sha256": None,
+        "compiled_ir_sha256": None,
     }
 
 

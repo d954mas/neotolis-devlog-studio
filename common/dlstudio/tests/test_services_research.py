@@ -125,6 +125,41 @@ def test_existing_json_store_is_migrated_once_without_data_loss(tmp_path):
     assert not source.exists()
 
 
+def test_legacy_research_import_rejects_path_traversal_project_id(tmp_path):
+    source = tmp_path / "data" / "research" / "index.json"
+    source.parent.mkdir(parents=True)
+    source.write_text(json.dumps({
+        "schema": "dlstudio.research/v1",
+        "projects": [{
+            "id": "../../escape",
+            "title": "Unsafe",
+            "created_at": "2026-07-19T12:00:00Z",
+            "authors": [],
+            "reels": [],
+            "experiments": [],
+        }],
+    }), encoding="utf-8")
+
+    with pytest.raises(research.ResearchError, match="unsafe id"):
+        research.load_store(tmp_path)
+    assert not (tmp_path / "escape" / "README.md").exists()
+
+
+def test_project_brief_resolver_rejects_linked_project_root(tmp_path):
+    projects = tmp_path / "data" / "research" / "projects"
+    projects.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    linked = projects / "gamedev"
+    try:
+        linked.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlinks are unavailable")
+
+    with pytest.raises(research.ResearchError, match="link/junction"):
+        research._resolve_project_brief(tmp_path, "gamedev")
+
+
 def test_store_keeps_a_daily_local_database_backup(tmp_path):
     project = research.create_project(tmp_path, title="Gamedev", now=NOW)
 
@@ -459,3 +494,68 @@ def test_feed_uses_stable_cursor_pagination(tmp_path):
 
     with pytest.raises(research.ResearchError, match="invalid feed cursor"):
         research.get_project_feed(tmp_path, project_id, cursor="not-a-cursor", now=NOW)
+
+
+def test_feed_normalizes_offsets_and_orders_by_absolute_instant(tmp_path):
+    project_id = _seed(tmp_path)
+    research.ingest_reel(
+        tmp_path,
+        project_id,
+        reel_id="offset-older",
+        author_id="topdev",
+        url="https://www.instagram.com/reel/offset-older/",
+        published_at="2026-07-19T12:00:00+05:00",
+        metrics_captured_at="2026-07-19T13:00:00+05:00",
+    )
+    research.ingest_reel(
+        tmp_path,
+        project_id,
+        reel_id="utc-newer",
+        author_id="topdev",
+        url="https://www.instagram.com/reel/utc-newer/",
+        published_at="2026-07-19T08:00:00Z",
+    )
+
+    feed = research.get_project_feed(tmp_path, project_id, limit=20, now=NOW)
+    selected = [item for item in feed["reels"] if item["id"] in {"offset-older", "utc-newer"}]
+    assert [item["id"] for item in selected] == ["utc-newer", "offset-older"]
+    assert selected[1]["published_at"] == "2026-07-19T07:00:00Z"
+    assert selected[1]["metrics_captured_at"] == "2026-07-19T08:00:00Z"
+
+
+def test_experiment_context_paths_cannot_escape_project(tmp_path):
+    project_id = _seed(tmp_path)
+    research.ingest_reel(
+        tmp_path,
+        project_id,
+        reel_id="reference",
+        author_id="topdev",
+        url="https://www.instagram.com/reel/reference/",
+        published_at="2026-07-18T12:00:00Z",
+    )
+    experiment = research.create_experiment(
+        tmp_path,
+        project_id,
+        reel_id="reference",
+        hypothesis="safe path",
+    )
+    victim = tmp_path.parent / "victim.md"
+    victim.write_text("keep", encoding="utf-8")
+    database = tmp_path / "data" / "research" / "research.sqlite3"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "UPDATE experiments SET agent_context_path = ? WHERE id = ?",
+            ("../../victim.md", experiment["id"]),
+        )
+        connection.commit()
+
+    with pytest.raises(research.ResearchError, match="unsafe experiment context"):
+        research.record_experiment_result(
+            tmp_path,
+            project_id,
+            experiment["id"],
+            verdict="worked",
+        )
+    with pytest.raises(research.ResearchError, match="unsafe experiment context"):
+        research.remove_author(tmp_path, project_id, "topdev")
+    assert victim.read_text(encoding="utf-8") == "keep"

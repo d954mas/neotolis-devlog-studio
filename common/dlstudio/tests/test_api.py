@@ -13,6 +13,7 @@ root; the autouse `_restore_cwd` fixture in conftest puts cwd back.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import subprocess
@@ -334,19 +335,31 @@ def _write_checkpoint_inputs(root: Path) -> Path:
     plan.mkdir(parents=True, exist_ok=True)
     assets.mkdir(parents=True, exist_ok=True)
     review.mkdir(parents=True, exist_ok=True)
+    source = root / "data" / "footage" / "game.mp4"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(b"reviewed-gameplay")
     manifest = plan / "shot_manifest.json"
     manifest.write_text(json.dumps({"shots": [{
         "id": "b01_s01", "vo_thesis": "real game proof",
         "src": "data/footage/game.mp4", "t0": 0, "t1": 3,
         "approved": False,
     }]}), encoding="utf-8")
-    (assets / "catalog.json").write_text(json.dumps({"assets": [{
+    catalog = assets / "catalog.json"
+    catalog.write_text(json.dumps({"assets": [{
         "path": "data/footage/game.mp4", "provenance": "game_capture",
+        "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
         "source_role": "real_product", "quality_flags": [],
     }]}), encoding="utf-8")
     (review / "preflight.json").write_text(json.dumps({
         "wall_time": {"budget_minutes": 60, "elapsed_minutes": 12},
         "issues": [],
+        "inputs": {
+            "shot_manifest_sha256": __import__(
+                "dlstudio.services.autopilot_checkpoint",
+                fromlist=["preflight_manifest_sha256"],
+            ).preflight_manifest_sha256(manifest),
+            "asset_catalog_sha256": hashlib.sha256(catalog.read_bytes()).hexdigest(),
+        },
     }), encoding="utf-8")
     return manifest
 
@@ -360,7 +373,11 @@ def test_autopilot_checkpoint_get_and_approve_are_production_scoped(light_client
     assert snapshot.json()["rows"][0]["shot"]["provenance"] == "game_capture"
 
     approved = client.post(
-        "/api/autopilot/checkpoint/approve", json={"approved_by": "author"}
+        "/api/autopilot/checkpoint/approve",
+        json={
+            "approved_by": "author",
+            "expected_checkpoint_digest": snapshot.json()["checkpoint_digest"],
+        },
     )
     assert approved.status_code == 200
     assert approved.json()["checkpoint"]["approved_all"] is True

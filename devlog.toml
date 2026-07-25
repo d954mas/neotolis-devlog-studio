@@ -3,7 +3,6 @@
 default_edit = "neotolis_diary.edits.youtube"
 
 [v2]
-default_edit = "not_a_trolley_problem:2026_07_17_devlog_01"
 
 [v2.final]
 width = "1080p"

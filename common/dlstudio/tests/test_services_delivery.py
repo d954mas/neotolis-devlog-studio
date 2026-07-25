@@ -13,6 +13,7 @@ from dlstudio.services.delivery import (
     build_delivery_bundle,
     parse_metadata,
 )
+from dlstudio.services import delivery
 
 
 def _manifest(tmp_path: Path, *, kind: str = "devlog") -> ProductionManifest:
@@ -259,3 +260,137 @@ def test_bundle_overwrites_different_content_only_with_explicit_flag(tmp_path: P
 
     assert destination.read_bytes() == video.read_bytes()
     assert destination in result.copied
+
+
+def test_fresh_bundle_copy_failure_leaves_no_partial_delivery(tmp_path, monkeypatch):
+    manifest = _manifest(tmp_path)
+    video, metadata, image = _sources(tmp_path)
+    real_atomic_copy = delivery._atomic_copy
+    copies = 0
+
+    def fail_second_copy(entry):
+        nonlocal copies
+        copies += 1
+        if copies == 2:
+            raise OSError("disk full")
+        return real_atomic_copy(entry)
+
+    monkeypatch.setattr(delivery, "_atomic_copy", fail_second_copy)
+
+    with pytest.raises(OSError, match="disk full"):
+        build_delivery_bundle(
+            manifest,
+            video_path=video,
+            metadata_path=metadata,
+            image_path=image,
+        )
+
+    assert not manifest.delivery_dir.exists()
+
+
+def test_overwrite_promotion_failure_restores_previous_bundle(tmp_path, monkeypatch):
+    manifest = _manifest(tmp_path)
+    old_video, old_metadata, old_image = _sources(tmp_path)
+    first = build_delivery_bundle(
+        manifest,
+        video_path=old_video,
+        metadata_path=old_metadata,
+        image_path=old_image,
+    )
+    before = {
+        path.name: path.read_bytes()
+        for path in (
+            first.video_path,
+            first.metadata_path,
+            first.image_path,
+            first.manifest_path,
+        )
+    }
+
+    new_sources = tmp_path / "replacement"
+    new_sources.mkdir()
+    new_video = new_sources / "video.mp4"
+    new_video.write_bytes(b"replacement-video")
+    new_metadata = new_sources / "metadata.md"
+    new_metadata.write_text(
+        "## Title\nReplacement\n## Description\nNew package\n"
+        "## Hashtags\n#Replacement\n",
+        encoding="utf-8",
+    )
+    new_image = new_sources / "art.png"
+    new_image.write_bytes(b"replacement-image")
+
+    real_replace = delivery.os.replace
+
+    def fail_stage_promotion(source, destination):
+        source_path = Path(source)
+        destination_path = Path(destination)
+        if (
+            destination_path == manifest.delivery_dir
+            and source_path.name.startswith(f".{manifest.delivery_dir.name}.stage-")
+        ):
+            raise OSError("promotion interrupted")
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(delivery.os, "replace", fail_stage_promotion)
+
+    with pytest.raises(OSError, match="promotion interrupted"):
+        build_delivery_bundle(
+            manifest,
+            video_path=new_video,
+            metadata_path=new_metadata,
+            image_path=new_image,
+            overwrite=True,
+        )
+
+    assert {
+        path.name: path.read_bytes()
+        for path in (
+            first.video_path,
+            first.metadata_path,
+            first.image_path,
+            first.manifest_path,
+        )
+    } == before
+    assert not list(manifest.delivery_dir.parent.glob(".*.delivery-*"))
+
+
+def test_next_build_recovers_interrupted_directory_swap(tmp_path):
+    manifest = _manifest(tmp_path)
+    video, metadata, image = _sources(tmp_path)
+    first = build_delivery_bundle(
+        manifest,
+        video_path=video,
+        metadata_path=metadata,
+        image_path=image,
+    )
+    before = first.video_path.read_bytes()
+    parent = manifest.delivery_dir.parent
+    backup = parent / f".{manifest.delivery_dir.name}.backup-crash"
+    stage = parent / f".{manifest.delivery_dir.name}.stage-crash"
+    delivery.os.replace(manifest.delivery_dir, backup)
+    stage.mkdir()
+    (stage / "video.mp4").write_bytes(b"partial-new-bundle")
+    journal = delivery._delivery_journal_path(manifest.delivery_dir)
+    delivery._write_delivery_journal(journal, {
+        "schema": "dlstudio.delivery_transaction",
+        "version": 1,
+        "state": "backed_up",
+        "target": str(manifest.delivery_dir.resolve()),
+        "stage": str(stage.resolve()),
+        "backup": str(backup.resolve()),
+        "had_target": True,
+    })
+
+    recovered = build_delivery_bundle(
+        manifest,
+        video_path=video,
+        metadata_path=metadata,
+        image_path=image,
+    )
+
+    assert recovered.copied == ()
+    assert recovered.video_path.read_bytes() == before
+    assert not backup.exists()
+    assert not stage.exists()
+    assert not journal.exists()

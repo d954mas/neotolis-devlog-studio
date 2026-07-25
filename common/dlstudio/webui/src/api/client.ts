@@ -46,9 +46,13 @@ export const api = {
     }),
   autopilotCheckpoint: () =>
     getJSON<AutopilotCheckpointData>("/api/autopilot/checkpoint"),
-  approveAutopilotCheckpoint: (approvedBy = "author") =>
+  approveAutopilotCheckpoint: (
+    expectedCheckpointDigest: string,
+    approvedBy = "author",
+  ) =>
     postJSON<AutopilotApprovalResult>("/api/autopilot/checkpoint/approve", {
       approved_by: approvedBy,
+      expected_checkpoint_digest: expectedCheckpointDigest,
     }),
   requestAutopilotChange: (
     action: AutopilotRequestAction,

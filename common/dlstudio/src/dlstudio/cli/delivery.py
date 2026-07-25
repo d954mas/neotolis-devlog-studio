@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import time
 from pathlib import Path
 
@@ -95,6 +96,15 @@ def cmd_deliver(args: argparse.Namespace) -> int:
         f"[dl2]   copied: {len(result.copied)}, "
         f"unchanged: {len(result.skipped)}"
     )
+    evidence_path = manifest.publish_dir / "evidence.json"
+    try:
+        evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        evidence = {}
+    attribution = evidence.get("attribution") if isinstance(evidence, dict) else None
+    if isinstance(attribution, dict) and attribution.get("required_assets"):
+        print("[dl2] ⚠️ АТРИБУЦИЯ ОБЯЗАТЕЛЬНА — copy this text when publishing:")
+        print(str(attribution.get("text") or "").strip())
     return 0
 
 

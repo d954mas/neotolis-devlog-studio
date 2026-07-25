@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -255,6 +256,225 @@ def _set_gate(payload: dict, gate: str, evidence: str) -> None:
     passed.append({"gate": gate, "evidence": evidence})
 
 
+def _license_requires_attribution(entry: dict) -> bool:
+    explicit = entry.get("attribution_required")
+    if isinstance(explicit, bool):
+        return explicit
+    license_text = str(entry.get("license") or entry.get("license_name") or "")
+    normalized = re.sub(r"[^a-z0-9]+", " ", license_text.casefold()).strip()
+    if any(
+        phrase in normalized
+        for phrase in (
+            "cc0",
+            "public domain",
+            "no attribution required",
+            "attribution not required",
+            "pexels",
+            "pixabay",
+        )
+    ):
+        return False
+    return any(
+        phrase in normalized
+        for phrase in (
+            "cc by",
+            "creative commons attribution",
+            "by attribution",
+            "attribution required",
+            "requires attribution",
+            "must credit",
+        )
+    )
+
+
+def _used_asset_obligations(
+    manifest: ProductionManifest,
+    payload: dict,
+) -> list[dict[str, str]]:
+    used_paths: set[str] = set()
+    used_ids: set[str] = set()
+    try:
+        from dlstudio.compile import _referenced_paths
+        from dlstudio.production import load_production_edit_module
+
+        if (manifest.edit_dir / "__init__.py").is_file():
+            module, _loaded_manifest, _module_name = load_production_edit_module(
+                manifest.root,
+                force_reload=True,
+            )
+            edit = getattr(module, "EDIT", None)
+            if edit is None:
+                raise PublishEvidenceError(
+                    f"production edit does not expose EDIT: {manifest.edit_dir}"
+                )
+            for path in _referenced_paths(edit):
+                normalized = str(path).replace("\\", "/")
+                used_paths.add(normalized)
+    except PublishEvidenceError:
+        raise
+    except Exception as exc:
+        raise PublishEvidenceError(
+            f"cannot enumerate exact production assets: {exc}"
+        ) from exc
+    shot_path = manifest.root / "data" / "plan" / "shot_manifest.json"
+    if shot_path.is_file():
+        try:
+            shot_payload = json.loads(shot_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise PublishEvidenceError(f"invalid JSON in {shot_path}: {exc}") from exc
+        shots = (
+            shot_payload.get("shots", [])
+            if isinstance(shot_payload, dict)
+            else shot_payload
+        )
+        if isinstance(shots, list):
+            used_paths.update(
+                str(shot.get("src")).replace("\\", "/")
+                for shot in shots
+                if isinstance(shot, dict) and shot.get("src")
+            )
+    declared = payload.get("used_assets", [])
+    if isinstance(declared, list):
+        for item in declared:
+            if isinstance(item, str):
+                used_paths.add(item.replace("\\", "/"))
+            elif isinstance(item, dict):
+                path = item.get("path") or item.get("artifact_path") or item.get("src")
+                asset_id = item.get("asset_id") or item.get("id")
+                if path:
+                    normalized = str(path).replace("\\", "/")
+                    used_paths.add(normalized)
+                if asset_id:
+                    used_ids.add(str(asset_id))
+
+    registry_path = manifest.root / "data" / "assets" / "registry.json"
+    registry = _read_object(registry_path) if registry_path.is_file() else {}
+    records = registry.get("assets", [])
+    registered_paths = {
+        str(record.get("artifact_path") or "").replace("\\", "/")
+        for record in records
+        if isinstance(record, dict) and record.get("artifact_path")
+    } if isinstance(records, list) else set()
+    provenance_roots = (
+        "data/footage/",
+        "data/images/",
+        "data/music/",
+        "data/sfx/",
+    )
+    missing_registration = sorted(
+        path
+        for path in used_paths
+        if path.casefold().startswith(provenance_roots)
+        and path not in registered_paths
+    )
+    if missing_registration:
+        raise PublishEvidenceError(
+            "used external asset is not registered with hash-bound provenance: "
+            f"{missing_registration[0]}"
+        )
+    obligations: list[dict[str, str]] = []
+    if isinstance(records, list):
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            artifact_path = str(record.get("artifact_path") or "").replace("\\", "/")
+            asset_id = str(record.get("asset_id") or "")
+            if artifact_path not in used_paths and asset_id not in used_ids:
+                continue
+            artifact = _production_data_path(
+                manifest, artifact_path, f"registered asset {asset_id or artifact_path}"
+            )
+            expected_artifact_hash = str(
+                record.get("artifact_sha256") or ""
+            ).casefold()
+            if not expected_artifact_hash or _sha256(artifact) != expected_artifact_hash:
+                raise PublishEvidenceError(
+                    f"used registered asset is stale: {asset_id or artifact_path}"
+                )
+            provenance_raw = record.get("provenance_path")
+            if not isinstance(provenance_raw, str) or not provenance_raw:
+                raise PublishEvidenceError(
+                    f"used registered asset has no provenance record: "
+                    f"{asset_id or artifact_path}"
+                )
+            provenance_path = _production_data_path(
+                manifest, provenance_raw, f"provenance for {asset_id or artifact_path}"
+            )
+            expected_provenance_hash = str(
+                record.get("provenance_sha256") or ""
+            ).casefold()
+            if not expected_provenance_hash:
+                raise PublishEvidenceError(
+                    f"used asset provenance is not hash-bound: "
+                    f"{asset_id or artifact_path}"
+                )
+            if _sha256(provenance_path) != expected_provenance_hash:
+                raise PublishEvidenceError(
+                    f"asset provenance is stale for {asset_id or artifact_path}"
+                )
+            provenance = _read_object(provenance_path)
+            if not _license_requires_attribution(provenance):
+                continue
+            obligations.append({
+                "asset_id": asset_id or artifact_path,
+                "license": str(provenance.get("license") or "").strip(),
+                "credit": str(provenance.get("credit") or "").strip(),
+            })
+
+    if isinstance(declared, list):
+        for item in declared:
+            if not isinstance(item, dict) or not _license_requires_attribution(item):
+                continue
+            obligations.append({
+                "asset_id": str(item.get("asset_id") or item.get("id") or item.get("path") or "asset"),
+                "license": str(item.get("license") or item.get("license_name") or "").strip(),
+                "credit": str(item.get("credit") or "").strip(),
+            })
+    return [
+        dict(zip(("asset_id", "license", "credit"), key))
+        for key in dict.fromkeys(
+            (item["asset_id"], item["license"], item["credit"])
+            for item in obligations
+        )
+    ]
+
+
+def _validate_attribution(manifest: ProductionManifest, payload: dict) -> list[dict[str, str]]:
+    obligations = _used_asset_obligations(manifest, payload)
+    for obligation in obligations:
+        missing = [
+            field for field in ("credit", "license") if not obligation[field]
+        ]
+        if missing:
+            raise PublishEvidenceError(
+                f"attribution provenance is incomplete for {obligation['asset_id']}: "
+                + ", ".join(missing)
+            )
+    attribution = payload.get("attribution")
+    package_requires = isinstance(attribution, dict) and attribution.get("required") is True
+    if not obligations and not package_requires:
+        return []
+    if not isinstance(attribution, dict) or attribution.get("required") is not True:
+        raise PublishEvidenceError(
+            "attribution-required used assets must set publish.json attribution.required=true"
+        )
+    text = str(attribution.get("text") or "").strip()
+    if not text:
+        raise PublishEvidenceError(
+            "copy-ready attribution text is required for attribution-required used assets"
+        )
+    folded = text.casefold()
+    for obligation in obligations:
+        for field in ("credit", "license"):
+            expected = obligation[field]
+            if expected and expected.casefold() not in folded:
+                raise PublishEvidenceError(
+                    f"copy-ready attribution is missing {field} for "
+                    f"{obligation['asset_id']}: {expected}"
+                )
+    return obligations
+
+
 def refresh_publish_evidence(
     manifest: ProductionManifest,
     *,
@@ -281,7 +501,23 @@ def refresh_publish_evidence(
     with Image.open(image) as opened:
         image_width, image_height = opened.size
     metadata = manifest.publish_dir / "metadata.md"
-    parse_metadata(metadata.read_text(encoding="utf-8"))
+    metadata_text = metadata.read_text(encoding="utf-8")
+    parse_metadata(metadata_text)
+    attribution_obligations = _validate_attribution(manifest, payload)
+    attribution = payload.get("attribution")
+    attribution_text = (
+        str(attribution.get("text") or "").strip()
+        if isinstance(attribution, dict)
+        else ""
+    )
+    if (
+        attribution_obligations
+        and attribution_text.casefold() not in metadata_text.casefold()
+    ):
+        raise PublishEvidenceError(
+            "copy-ready attribution must be included verbatim in the "
+            "delivered metadata.md"
+        )
 
     preflight_path = manifest.review_dir / "preflight.json"
     preflight = _read_object(preflight_path)
@@ -337,6 +573,13 @@ def refresh_publish_evidence(
         "exact_final_blind_review",
         f"{verdict.upper()} reported for video SHA-256 {video_hash}",
     )
+    if attribution_obligations:
+        _set_gate(
+            payload,
+            "attribution_ready",
+            "copy-ready attribution present for "
+            + ", ".join(item["asset_id"] for item in attribution_obligations),
+        )
     generated_at = datetime.now(timezone.utc).isoformat()
     evidence = {
         "version": 1,
@@ -357,6 +600,11 @@ def refresh_publish_evidence(
             "path": str(metadata),
             "sha256": _sha256(metadata),
             "validated": True,
+        },
+        "attribution": {
+            "required_assets": attribution_obligations,
+            "copy_ready": bool(attribution_obligations),
+            "text": attribution_text if attribution_obligations else None,
         },
     }
     payload["evidence_version"] = 1

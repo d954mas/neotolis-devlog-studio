@@ -160,11 +160,16 @@ dl2 autopilot-run not_a_trolley_problem:2026_07_18_reel_01
 dl2 autopilot-run not_a_trolley_problem:2026_07_18_reel_01 --resume --human-minutes 8
 # один exact-hash blind review
 dl2 autopilot-run not_a_trolley_problem:2026_07_18_reel_01 --resume
+# create data/publish/publish.json, metadata.md and cover/thumbnail
+dl2 autopilot-run not_a_trolley_problem:2026_07_18_reel_01 --resume
 ```
 
 Run хранится в `data/review/autopilot_run.json`; все stage events получают
 один `run_id`. Команда останавливается на первом failed gate и продолжает тот
 же run после `--resume`, без polling и повторного command discovery.
+После exact review она останавливается на явной границе `awaiting_package`;
+следующий resume запускает evidence validation и delivery только после
+создания названных checkpoint-файлов пакета.
 
 `inventory` создаёт `data/assets/catalog.json`, `preflight` проверяет approved
 script/VO/source/duplicate/pacing/readability и пишет JSON-отчёт, а
@@ -211,9 +216,9 @@ dl2 check myreel.edits.main
 ```
 
 Полный контракт плана, артефакта и перенумерации word-index ссылок:
-`docs/SPEECH_EDIT.md`. Если достаточно только консервативной чистки длинных
-пауз, явных слов-паразитов и точных повторов, агент вызывает
-`dl2 speech-edit myreel.edits.main b01` без файла плана.
+`docs/SPEECH_EDIT.md`. Вызов без файла плана создаёт только безопасный
+baseline и сохраняет повторы. Для удаления повторов агент сначала готовит
+hash-bound plan, добавляет семантически обоснованные cuts и применяет его.
 
 ## 7. Final
 

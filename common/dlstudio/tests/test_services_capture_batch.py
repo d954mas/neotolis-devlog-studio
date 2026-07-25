@@ -26,6 +26,25 @@ def _record_script_module():
     return module
 
 
+def _validator_script_module():
+    path = (
+        Path(__file__).resolve().parents[3]
+        / ".agents"
+        / "skills"
+        / "devlog-record-media"
+        / "scripts"
+        / "validate_gameplay_capture.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "validate_gameplay_capture",
+        path,
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _production(tmp_path: Path) -> Path:
     product = tmp_path / "not_a_trolley_problem"
     production = product / "reels" / "2026_07_18_reel_01"
@@ -358,7 +377,43 @@ def test_realtime_recorder_hydrates_exact_task_and_writes_ingest_result(tmp_path
     assert saved["game_report_path"] == "data/footage/day5.mp4.game.json"
 
 
-def test_realtime_recorder_staging_merges_existing_shared_results(tmp_path):
+def test_realtime_recorder_rejects_shared_results_path(tmp_path):
+    production = _production(tmp_path)
+    request = _gameplay_request_v2(
+        target="data/footage/day5.mp4",
+        min_width=192,
+        min_height=108,
+        min_fps=30,
+        content_seconds=1,
+    )
+    request["target_absolute"] = str(production / request["target"])
+    batch_path = production / "data" / "plan" / "capture_batch.json"
+    batch_path.parent.mkdir(parents=True, exist_ok=True)
+    batch_path.write_text(json.dumps({
+        "version": 2,
+        "product_id": "not_a_trolley_problem",
+        "production_id": "2026_07_18_reel_01",
+        "game_root": str(production.parent.parent),
+        "production_root": str(production),
+        "requested_at": "2026-07-24T00:00:00Z",
+        "requests": [request],
+    }), encoding="utf-8")
+    recorder = _record_script_module()
+    args = recorder._parser().parse_args([
+        "--pid", "123",
+        "--batch", str(batch_path),
+        "--request-id", request["id"],
+        "--results", str(production / "data" / "plan" / "capture_results.json"),
+    ])
+
+    with pytest.raises(
+        SystemExit,
+        match="isolated per-request path",
+    ):
+        recorder._hydrate_from_batch(args)
+
+
+def test_realtime_recorder_writes_isolated_per_request_result(tmp_path):
     recorder = _record_script_module()
     production = _production(tmp_path)
     output = production / "data" / "footage" / "day5.mp4"
@@ -383,7 +438,6 @@ def test_realtime_recorder_staging_merges_existing_shared_results(tmp_path):
 
     recorder._write_result(
         staging,
-        existing_path=results,
         production_id="2026_07_18_reel_01",
         request_id="day5",
         production_root=production,
@@ -399,10 +453,9 @@ def test_realtime_recorder_staging_merges_existing_shared_results(tmp_path):
     )
 
     payload = json.loads(staging.read_text(encoding="utf-8"))
-    assert [item["request_id"] for item in payload["results"]] == [
-        "day4",
-        "day5",
-    ]
+    assert [item["request_id"] for item in payload["results"]] == ["day5"]
+    existing = json.loads(results.read_text(encoding="utf-8"))
+    assert [item["request_id"] for item in existing["results"]] == ["day4"]
 
 
 def test_realtime_recorder_probe_locks_game_reported_semantic_hashes(
@@ -898,6 +951,94 @@ def test_game_capture_report_requires_semantic_change_at_recorded_action(
         match="recorded action did not change semantic state",
     ):
         GameCaptureReport.model_validate(report)
+
+
+def test_game_capture_report_requires_recorded_action_to_match_probe_hash(
+    tmp_path,
+):
+    production = _production(tmp_path)
+    _prepare_v2_gameplay_capture(production)
+    report_path = (
+        production / "data" / "footage" / "day5_station.mp4.game.json"
+    )
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["action_result"]["semanticHash"] = "deadbeef"
+
+    from pydantic import ValidationError
+    from dlstudio.services.capture_batch import GameCaptureReport
+
+    with pytest.raises(
+        ValidationError,
+        match="recorded action semantic hash does not match the probe",
+    ):
+        GameCaptureReport.model_validate(report)
+
+
+def test_standalone_validator_requires_recorded_action_to_match_probe_hash(
+    tmp_path,
+    monkeypatch,
+):
+    production = _production(tmp_path)
+    result_path = _prepare_v2_gameplay_capture(production)
+    results = json.loads(result_path.read_text(encoding="utf-8"))
+    result = results["results"][0]
+    report_path = production / result["game_report_path"]
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["action_result"]["semanticHash"] = "deadbeef"
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    report_sha = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    metadata_path = production / result["recorder_metadata_path"]
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["game_report_sha256"] = report_sha
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    result["game_report_sha256"] = report_sha
+    result["recorder_metadata_sha256"] = hashlib.sha256(
+        metadata_path.read_bytes()
+    ).hexdigest()
+    result_path.write_text(json.dumps(results), encoding="utf-8")
+
+    validator = _validator_script_module()
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "validate_gameplay_capture.py",
+            "--contract",
+            str(production / "data" / "plan" / "capture_requests.json"),
+            "--production-root",
+            str(production),
+            "--result",
+            str(result_path),
+            "--request-id",
+            "day5_station",
+            "--report",
+            str(tmp_path / "capture-audit.json"),
+        ],
+    )
+    monkeypatch.setattr(
+        validator,
+        "_probe",
+        lambda *_args: {
+            "streams": [{
+                "codec_type": "video",
+                "width": 192,
+                "height": 108,
+                "avg_frame_rate": "30/1",
+                "r_frame_rate": "30/1",
+            }],
+            "format": {"duration": "11"},
+        },
+    )
+    monkeypatch.setattr(validator, "_freeze_durations", lambda *_args: [])
+
+    assert validator.main() == 1
+    audit = json.loads(
+        (tmp_path / "capture-audit.json").read_text(encoding="utf-8")
+    )
+    semantic = next(
+        item for item in audit["checks"]
+        if item["code"] == "CAPTURE-GAME-SEMANTIC"
+    )
+    assert semantic["status"] == "error"
 
 
 def test_game_capture_report_requires_atomic_action_clock_bracket(tmp_path):

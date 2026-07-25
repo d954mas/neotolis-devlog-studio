@@ -417,9 +417,10 @@ def build_automatic_plan(
 ) -> SpeechEditPlan:
     """Build a conservative baseline plan from signal and transcript facts.
 
-    This baseline removes only measured long silence, explicit filler tokens,
-    and exact adjacent phrase restarts.  Broader semantic deletions belong in
-    an agent-authored plan layered on top of this evidence.
+    This baseline removes only measured long silence and explicit filler
+    tokens. Exact repetition is surfaced in the transcript but is not
+    automatically deleted: it may be intentional rhetoric, so restart cuts
+    belong in an agent-authored semantic plan.
     """
 
     if not math.isfinite(source_duration) or source_duration <= 0:
@@ -445,8 +446,6 @@ def build_automatic_plan(
                 sources=("automatic_transcript",),
                 confidence=0.98,
             ))
-    candidates.extend(_repeat_cuts(words))
-
     for raw_start, raw_end in signal_silences:
         start = max(0.0, float(raw_start))
         end = min(source_duration, float(raw_end))
@@ -923,6 +922,7 @@ def execute_speech_edit(
     *,
     plan: SpeechEditPlan,
     output_audio_ref: str | None = None,
+    output_words_ref: str | None = None,
 ) -> SpeechEditResult:
     """Verify and execute a hash-bound plan into an auditable output bundle."""
 
@@ -995,7 +995,7 @@ def execute_speech_edit(
     audit["output"] = {
         "audio_path": output_audio_ref if output_audio_ref is not None else str(output_audio),
         "audio_sha256": sha256_file(output_audio),
-        "words_path": str(output_words),
+        "words_path": output_words_ref if output_words_ref is not None else str(output_words),
         "words_sha256": sha256_file(output_words),
         "duration": output_duration,
     }

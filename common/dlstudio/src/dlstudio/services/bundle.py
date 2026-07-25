@@ -181,7 +181,11 @@ def recover_bundle_transactions(root: str | Path) -> None:
             _recover_directory(directory)
 
 
-def promote_bundle(replacements: list[tuple[Path, Path]]) -> None:
+def promote_bundle(
+    replacements: list[tuple[Path, Path]],
+    *,
+    require_absent: bool = False,
+) -> None:
     """Publish staged files with a durable journal and crash recovery."""
 
     if not replacements:
@@ -205,6 +209,16 @@ def promote_bundle(replacements: list[tuple[Path, Path]]) -> None:
 
     with _bundle_transaction_lock(common):
         _recover_directory(common)
+        if require_absent:
+            existing = [
+                target
+                for target in target_paths
+                if target.exists() or target.is_symlink()
+            ]
+            if existing:
+                raise FileExistsError(
+                    f"immutable bundle target already exists: {existing[0]}"
+                )
         nonce = uuid.uuid4().hex
         journal = common / f"{_JOURNAL_PREFIX}{nonce}.json"
         entries = []

@@ -53,12 +53,14 @@ the exact scene/seed, applies the parameters, reads
 second status hash atomically into this same request. The two probe hashes must
 differ. During real-time recording the scene may advance between load and the
 action, so the recorder also captures a fresh `pre_action` status and requires
-the action response to change that live semantic hash. The recorder brackets
+the action response to change that live semantic hash **and** equal the locked
+`expected_action_semantic_hash`. The recorder brackets
 those two action RPCs with `time.pause`/`time.resume`, while the media stream
 continues, so an ordinary simulation tick cannot impersonate the action.
 The mandatory cadence audit blocks any visible freeze. This stable delta
-proves the action without expecting a time-varying scene to reproduce the
-probe's exact post-action hash five seconds later. A passive scene such as
+proves the action without expecting the later `after` status of a time-varying
+scene to retain the probe's exact action hash five seconds later. A passive
+scene such as
 `crowd.progression` uses
 `"action_id": null` and `"expected_action_semantic_hash": null`.
 

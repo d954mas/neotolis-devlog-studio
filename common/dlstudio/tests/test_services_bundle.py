@@ -28,6 +28,22 @@ def test_promote_bundle_publishes_all_files_and_removes_journal(tmp_path):
     assert not list(tmp_path.rglob(".dlstudio-bundle-*.json"))
 
 
+def test_promote_bundle_require_absent_never_replaces_immutable_target(tmp_path):
+    from dlstudio.services.bundle import promote_bundle
+
+    target = tmp_path / "data" / "capture.mp4"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"first-capture")
+    staged = target.with_name(".capture.staged.mp4")
+    staged.write_bytes(b"second-capture")
+
+    with pytest.raises(FileExistsError, match="immutable bundle target"):
+        promote_bundle([(staged, target)], require_absent=True)
+
+    assert target.read_bytes() == b"first-capture"
+    assert staged.read_bytes() == b"second-capture"
+
+
 def test_recovery_rolls_back_a_process_crash_mid_promotion(tmp_path):
     from dlstudio.services.bundle import recover_bundle_transactions
 

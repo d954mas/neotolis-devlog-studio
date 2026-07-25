@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 
 import pytest
 
@@ -186,6 +187,38 @@ def test_apply_rejects_a_copy_that_fails_post_copy_hash_verification(tmp_path, m
         apply_migration_plan(plan)
 
     assert (source / "asset.bin").read_bytes() == b"source"
+    assert not (target / "asset.bin").exists()
+
+
+def test_apply_late_failure_removes_all_destinations_created_by_that_attempt(
+    tmp_path, monkeypatch
+):
+    source = tmp_path / "legacy"
+    target = tmp_path / "product"
+    source.mkdir()
+    (source / "first.bin").write_bytes(b"first")
+    (source / "second.bin").write_bytes(b"second")
+    plan = plan_migration(source, target)
+    real_copy2 = migration.shutil.copy2
+    copies = 0
+
+    def fail_second_copy(source_path, destination):
+        nonlocal copies
+        copies += 1
+        if copies == 2:
+            Path(destination).write_bytes(b"partial")
+            raise OSError("disk full")
+        return real_copy2(source_path, destination)
+
+    monkeypatch.setattr(migration.shutil, "copy2", fail_second_copy)
+
+    with pytest.raises(OSError, match="disk full"):
+        apply_migration_plan(plan)
+
+    assert not (target / "first.bin").exists()
+    assert not (target / "second.bin").exists()
+    assert list(target.glob(".*.migration-*")) == []
+    assert not plan.rollback_manifest_path.exists()
 
 
 def test_product_asset_dedup_dry_run_is_read_only_and_reports_only_cross_production_duplicates(tmp_path):

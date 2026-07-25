@@ -512,6 +512,11 @@ def main() -> int:
                 before_status = game_report.get("before")
                 pre_action_status = game_report.get("pre_action")
                 action_status = game_report.get("action_result")
+                actual_action_hash = (
+                    action_status.get("semanticHash")
+                    if isinstance(action_status, dict)
+                    else None
+                )
                 audit.require(
                     isinstance(before_status, dict)
                     and before_status.get("semanticHash") == expected_initial
@@ -527,6 +532,8 @@ def main() -> int:
                             is not None
                             and action_status.get("semanticHash")
                             != pre_action_status.get("semanticHash")
+                            and str(actual_action_hash).casefold()
+                            == str(expected_action).casefold()
                             and expected_action != expected_initial
                             and game_report.get(
                                 "expected_action_semantic_hash"

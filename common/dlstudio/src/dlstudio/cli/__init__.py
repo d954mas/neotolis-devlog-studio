@@ -922,7 +922,28 @@ def cmd_speech_edit(args: argparse.Namespace) -> int:
     artifact_out = (
         Path(args.artifact) if args.artifact else _speech_edit_artifact_path(words_out)
     )
+    if services.sha256_file(audio_out) != plan.input_audio_sha256:
+        raise CliError("speech edit plan audio hash is stale")
+    if services.sha256_file(words_out) != plan.input_words_sha256:
+        raise CliError("speech edit plan words hash is stale")
+    # The public audio/words paths are replaced in place. Preserve immutable,
+    # hash-named inputs so speech_edit.json continues to reference evidence
+    # whose bytes match its recorded input hashes after promotion.
+    input_audio_snapshot = artifact_out.with_name(
+        f"{artifact_out.stem}.input-{plan.input_audio_sha256[:12]}"
+        f"{audio_out.suffix or '.wav'}"
+    )
+    input_words_snapshot = artifact_out.with_name(
+        f"{artifact_out.stem}.input-{plan.input_words_sha256[:12]}"
+        f"{words_out.suffix or '.json'}"
+    )
     nonce = uuid.uuid4().hex[:8]
+    snapshot_audio_stage = input_audio_snapshot.with_name(
+        f".{input_audio_snapshot.name}.{nonce}.snapshot"
+    )
+    snapshot_words_stage = input_words_snapshot.with_name(
+        f".{input_words_snapshot.name}.{nonce}.snapshot"
+    )
     tmp_audio = audio_out.with_name(
         f".{audio_out.stem}.speech-edit-{nonce}{audio_out.suffix or '.wav'}"
     )
@@ -933,14 +954,36 @@ def cmd_speech_edit(args: argparse.Namespace) -> int:
         f".{artifact_out.stem}.speech-edit-{nonce}{artifact_out.suffix or '.json'}"
     )
     try:
+        snapshots: list[tuple[Path, Path]] = []
+        if input_audio_snapshot.exists():
+            if services.sha256_file(input_audio_snapshot) != plan.input_audio_sha256:
+                raise CliError(f"speech edit input snapshot hash mismatch: {input_audio_snapshot}")
+        else:
+            input_audio_snapshot.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(audio_out, snapshot_audio_stage)
+            if services.sha256_file(snapshot_audio_stage) != plan.input_audio_sha256:
+                raise CliError("speech edit audio snapshot hash verification failed")
+            snapshots.append((snapshot_audio_stage, input_audio_snapshot))
+        if input_words_snapshot.exists():
+            if services.sha256_file(input_words_snapshot) != plan.input_words_sha256:
+                raise CliError(f"speech edit input snapshot hash mismatch: {input_words_snapshot}")
+        else:
+            input_words_snapshot.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(words_out, snapshot_words_stage)
+            if services.sha256_file(snapshot_words_stage) != plan.input_words_sha256:
+                raise CliError("speech edit words snapshot hash verification failed")
+            snapshots.append((snapshot_words_stage, input_words_snapshot))
+        if snapshots:
+            _promote_bundle(snapshots)
         result = services.execute_speech_edit(
-            audio_out,
-            words_out,
+            input_audio_snapshot,
+            input_words_snapshot,
             tmp_audio,
             tmp_words,
             tmp_artifact,
             plan=plan,
             output_audio_ref=str(beat.audio),
+            output_words_ref=str(beat.words),
         )
         _promote_bundle([
             (tmp_audio, audio_out),
@@ -948,6 +991,8 @@ def cmd_speech_edit(args: argparse.Namespace) -> int:
             (tmp_artifact, artifact_out),
         ])
     finally:
+        snapshot_audio_stage.unlink(missing_ok=True)
+        snapshot_words_stage.unlink(missing_ok=True)
         tmp_audio.unlink(missing_ok=True)
         tmp_words.unlink(missing_ok=True)
         tmp_artifact.unlink(missing_ok=True)

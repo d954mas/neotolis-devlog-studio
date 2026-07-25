@@ -10,6 +10,9 @@ import hashlib
 import json
 import os
 import shutil
+import tempfile
+import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Mapping
@@ -345,10 +348,138 @@ def _load_existing_rollback(plan: MigrationPlan) -> dict[str, object] | None:
         raise MigrationCollisionError(
             f"rollback manifest belongs to a different migration: {path}"
         )
+    pending = payload.get("pending")
+    if payload.get("state") == "running" and isinstance(pending, dict):
+        raw_path = pending.get("path")
+        entry = next(
+            (
+                item
+                for item in plan.files
+                if isinstance(raw_path, str)
+                and _path_key(item.destination) == _path_key(Path(raw_path))
+            ),
+            None,
+        )
+        if entry is None:
+            raise MigrationCollisionError(
+                f"rollback manifest has an unknown pending destination: {path}"
+            )
+        if entry.destination.exists() or entry.destination.is_symlink():
+            if not _destination_matches(entry):
+                raise MigrationCollisionError(
+                    f"pending migration destination contains different content: "
+                    f"{entry.destination}"
+                )
+            created = [
+                item for item in payload["created"] if isinstance(item, dict)
+            ]
+            if not any(
+                _path_key(Path(str(item.get("path", ""))))
+                == _path_key(entry.destination)
+                for item in created
+            ):
+                created.append(_rollback_entry(entry))
+            payload["created"] = created
+        payload["pending"] = None
+        _write_rollback_manifest(path, payload)
     return payload
 
 
-def apply_migration_plan(
+def _copy_migration_file(entry: MigrationFile) -> None:
+    """Copy through a verified same-directory staging file."""
+
+    destination = entry.destination
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    staged = destination.with_name(
+        f".{destination.name}.migration-{uuid.uuid4().hex}"
+    )
+    staged_entry = MigrationFile(
+        source=entry.source,
+        destination=staged,
+        size=entry.size,
+        sha256=entry.sha256,
+    )
+    try:
+        shutil.copy2(entry.source, staged)
+        if not _destination_matches(staged_entry):
+            raise MigrationIntegrityError(
+                f"post-copy hash verification failed: {destination}"
+            )
+        # Publish with create-if-absent semantics. ``os.replace`` would let a
+        # second plan overwrite evidence created after its preflight.
+        try:
+            os.link(staged, destination)
+        except FileExistsError as exc:
+            if _destination_matches(entry):
+                return
+            raise MigrationCollisionError(
+                f"destination appeared with different content: {destination}"
+            ) from exc
+        staged.unlink()
+    finally:
+        staged.unlink(missing_ok=True)
+
+
+def _write_rollback_manifest(path: Path, payload: dict[str, object]) -> None:
+    """Replace rollback evidence atomically so a failed update keeps the old file."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8", newline="\n") as stream:
+            json.dump(payload, stream, indent=2, sort_keys=True)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+@contextmanager
+def _migration_transaction_lock(plan: MigrationPlan):
+    """Serialize migrations that can target the same filesystem."""
+
+    lock_path = (
+        Path(tempfile.gettempdir())
+        / "dlstudio-migration-locks"
+        / "global.lock"
+    )
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = lock_path.open("a+b")
+    try:
+        if lock_path.stat().st_size == 0:
+            handle.write(b"\0")
+            handle.flush()
+        handle.seek(0)
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            handle.seek(0)
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
+
+
+def _apply_migration_plan_unlocked(
     plan: MigrationPlan | str | Path,
     *,
     dry_run: bool = False,
@@ -389,48 +520,67 @@ def apply_migration_plan(
         )
 
     existing_rollback = _load_existing_rollback(resolved_plan)
+    previous_rollback = (
+        json.loads(json.dumps(existing_rollback))
+        if existing_rollback is not None
+        else None
+    )
+    journal: dict[str, object] = existing_rollback or {
+        "version": 1,
+        "plan_sha256": _plan_digest(resolved_plan),
+        "created": [],
+    }
+    journal["state"] = "running"
+    journal["pending"] = None
+    _write_rollback_manifest(resolved_plan.rollback_manifest_path, journal)
     copied: list[Path] = []
     copied_entries: list[MigrationFile] = []
-    for entry in resolved_plan.files:
-        if entry.destination in skipped:
-            continue
-        # Recheck immediately before copying in case another process won the
-        # race between preflight and this operation.
-        if entry.destination.exists() or entry.destination.is_symlink():
-            if _destination_matches(entry):
-                skipped.append(entry.destination)
+    try:
+        for entry in resolved_plan.files:
+            if entry.destination in skipped:
                 continue
-            raise MigrationCollisionError(
-                f"destination contains different content: {entry.destination}"
-            )
-        entry.destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(entry.source, entry.destination)
-        if not _destination_matches(entry):
-            raise MigrationIntegrityError(
-                f"post-copy hash verification failed: {entry.destination}"
-            )
-        copied.append(entry.destination)
-        copied_entries.append(entry)
-
-    if existing_rollback is None or copied_entries:
-        created_by_path: dict[str, dict[str, object]] = {}
-        if existing_rollback is not None:
-            for item in existing_rollback["created"]:
-                if isinstance(item, dict) and isinstance(item.get("path"), str):
-                    created_by_path[_path_key(Path(item["path"]))] = item
-        for entry in copied_entries:
+            # Recheck immediately before copying in case another process won
+            # the race between preflight and this operation.
+            if entry.destination.exists() or entry.destination.is_symlink():
+                if _destination_matches(entry):
+                    skipped.append(entry.destination)
+                    continue
+                raise MigrationCollisionError(
+                    f"destination contains different content: {entry.destination}"
+                )
+            journal["pending"] = _rollback_entry(entry)
+            _write_rollback_manifest(resolved_plan.rollback_manifest_path, journal)
+            _copy_migration_file(entry)
+            copied.append(entry.destination)
+            copied_entries.append(entry)
+            created_by_path = {
+                _path_key(Path(str(item["path"]))): item
+                for item in journal["created"]
+                if isinstance(item, dict) and isinstance(item.get("path"), str)
+            }
             created_by_path[_path_key(entry.destination)] = _rollback_entry(entry)
-        payload = {
-            "version": 1,
-            "plan_sha256": _plan_digest(resolved_plan),
-            "created": [created_by_path[key] for key in sorted(created_by_path)],
-        }
-        rollback = resolved_plan.rollback_manifest_path
-        rollback.parent.mkdir(parents=True, exist_ok=True)
-        rollback.write_text(
-            json.dumps(payload, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+            journal["created"] = [
+                created_by_path[key] for key in sorted(created_by_path)
+            ]
+            journal["pending"] = None
+            _write_rollback_manifest(resolved_plan.rollback_manifest_path, journal)
+        journal["state"] = "committed"
+        journal["pending"] = None
+        _write_rollback_manifest(resolved_plan.rollback_manifest_path, journal)
+    except BaseException:
+        # Only remove destinations created by this invocation. Existing
+        # same-hash skips and every legacy source remain untouched.
+        for entry in reversed(copied_entries):
+            if _destination_matches(entry):
+                entry.destination.unlink(missing_ok=True)
+        if previous_rollback is None:
+            resolved_plan.rollback_manifest_path.unlink(missing_ok=True)
+        else:
+            _write_rollback_manifest(
+                resolved_plan.rollback_manifest_path,
+                previous_rollback,
+            )
+        raise
 
     return MigrationResult(
         dry_run=False,
@@ -439,6 +589,20 @@ def apply_migration_plan(
         skipped=tuple(skipped),
         rollback_manifest_path=resolved_plan.rollback_manifest_path,
     )
+
+
+def apply_migration_plan(
+    plan: MigrationPlan | str | Path,
+    *,
+    dry_run: bool = False,
+) -> MigrationResult:
+    """Apply one migration under a destination-scoped cross-process lock."""
+
+    resolved = load_migration_plan(plan) if isinstance(plan, (str, Path)) else plan
+    if not isinstance(resolved, MigrationPlan):
+        raise TypeError("plan must be a MigrationPlan or a JSON plan path")
+    with _migration_transaction_lock(resolved):
+        return _apply_migration_plan_unlocked(resolved, dry_run=dry_run)
 
 
 def _product_asset_candidates(product_root: Path) -> tuple[Path, ...]:

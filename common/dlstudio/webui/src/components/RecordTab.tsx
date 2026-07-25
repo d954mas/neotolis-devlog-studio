@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { ProjectBeat } from "../api/types";
+import type { JobStatus, ProjectBeat } from "../api/types";
 import { api, pollJob } from "../api/client";
 import { MicRecorder, fileExtForMime } from "../lib/recorder";
 import type { MeterLevels } from "../lib/recorder";
@@ -272,10 +272,37 @@ export function RecordTab({
         jobId = submitted.job_id;
         updateTake(t.id, { processJobId: jobId });
       }
-      const final = await pollJob(jobId, {
-        signal: ctrl.signal,
-        onStatus: (s) => updateTake(t.id, { processMessage: s.status }),
-      });
+      let final: JobStatus;
+      try {
+        final = await pollJob(jobId, {
+          signal: ctrl.signal,
+          onStatus: (s) => updateTake(t.id, { processMessage: s.status }),
+        });
+      } catch (e) {
+        // Job ids are intentionally in-memory on the server. After a Studio
+        // restart the uploaded take still exists, so transparently resubmit
+        // the same path once instead of discarding the persisted take.
+        if (
+          ctrl.signal.aborted
+          || !t.serverPath
+          || !(e as Error).message.includes("HTTP 404")
+        ) {
+          throw e;
+        }
+        const submitted = await api.processTake({
+          beat_id: t.beatId,
+          recording_path: t.serverPath,
+        });
+        jobId = submitted.job_id;
+        updateTake(t.id, {
+          processJobId: jobId,
+          processMessage: "server restarted · processing resumed",
+        });
+        final = await pollJob(jobId, {
+          signal: ctrl.signal,
+          onStatus: (s) => updateTake(t.id, { processMessage: s.status }),
+        });
+      }
       if (final.status === "done") {
         const result = takeProcessResult(final.result);
         const clean = result?.voice_take_status === "pass";

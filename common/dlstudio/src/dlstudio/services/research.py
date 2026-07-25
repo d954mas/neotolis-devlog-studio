@@ -24,6 +24,7 @@ WINDOWS = {"7d": 7, "30d": 30, "90d": 90, "all": None}
 SORTS = {"outlier", "velocity", "views", "newest"}
 MODES = {"inspiration", "adaptation", "remake"}
 VERDICTS = {"worked", "mixed", "did_not_work", "inconclusive"}
+_PROJECT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 
 
 class ResearchError(ValueError):
@@ -40,6 +41,41 @@ def _write_experiment_context(path: Path, content: str) -> None:
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def _resolve_experiment_context(
+    workspace_root: Path,
+    project_id: str,
+    value: str | Path,
+) -> Path:
+    """Resolve only project-owned experiment Markdown paths."""
+
+    relative = Path(value)
+    if relative.is_absolute() or relative.drive or ".." in relative.parts:
+        raise ResearchError(f"unsafe experiment context path: {value}")
+    root = workspace_root.resolve()
+    allowed_lexical = (
+        root / "data" / "research" / "projects" / project_id / "experiments"
+    )
+    current = root
+    for part in allowed_lexical.relative_to(root).parts:
+        current = current / part
+        is_junction = bool(
+            getattr(os.path, "isjunction", lambda _path: False)(current)
+        )
+        if current.exists() and (current.is_symlink() or is_junction):
+            raise ResearchError(
+                f"experiment context root contains a link/junction: {current}"
+            )
+    allowed = allowed_lexical.resolve()
+    resolved = (root / relative).resolve()
+    try:
+        resolved.relative_to(allowed)
+    except ValueError as exc:
+        raise ResearchError(f"unsafe experiment context path: {value}") from exc
+    if resolved.suffix.casefold() != ".md":
+        raise ResearchError(f"experiment context must be Markdown: {value}")
+    return resolved
 
 
 def store_path(workspace_root: Path) -> Path:
@@ -94,7 +130,31 @@ def _project(payload: dict[str, Any], project_id: str) -> dict[str, Any]:
 
 
 def _project_brief_path(project_id: str) -> Path:
+    if not _PROJECT_ID_RE.fullmatch(project_id):
+        raise ResearchError(f"unsafe research project id: {project_id}")
     return Path("data") / "research" / "projects" / project_id / "README.md"
+
+
+def _resolve_project_brief(workspace_root: Path, project_id: str) -> Path:
+    relative = _project_brief_path(project_id)
+    root = workspace_root.resolve()
+    current = root
+    for part in relative.parent.parts:
+        current = current / part
+        is_junction = bool(
+            getattr(os.path, "isjunction", lambda _path: False)(current)
+        )
+        if current.exists() and (current.is_symlink() or is_junction):
+            raise ResearchError(
+                f"research project brief root contains a link/junction: {current}"
+            )
+    resolved = (root / relative).resolve()
+    allowed = (root / "data" / "research" / "projects").resolve()
+    try:
+        resolved.relative_to(allowed)
+    except ValueError as exc:
+        raise ResearchError(f"unsafe research project id: {project_id}") from exc
+    return resolved
 
 
 def _write_project_brief(workspace_root: Path, project: dict[str, Any]) -> None:
@@ -150,9 +210,8 @@ pattern in the project's own style, and remake follows structure closely only
 when explicitly selected. Never treat a reference as a target to copy by
 default. Measured experiment results are evidence for the next iteration.
 """
-    path = workspace_root.resolve() / _project_brief_path(project["id"])
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(brief, encoding="utf-8", newline="\n")
+    path = _resolve_project_brief(workspace_root, str(project["id"]))
+    _write_experiment_context(path, brief)
 
 
 def list_projects(workspace_root: Path) -> list[dict[str, Any]]:
@@ -313,14 +372,18 @@ def remove_author(workspace_root: Path, project_id: str, author_id: str) -> dict
                 (project_id, author_id),
             )
         ]
+        context_paths = [
+            _resolve_experiment_context(workspace_root, project_id, context)
+            for context in contexts
+            if context
+        ]
         research_database.backup_before_write(workspace_root, connection)
         with connection:
             connection.execute(
                 "DELETE FROM authors WHERE project_id = ? AND id = ?", (project_id, author_id)
             )
-    for context in contexts:
-        if context:
-            (workspace_root.resolve() / context).unlink(missing_ok=True)
+    for context_path in context_paths:
+        context_path.unlink(missing_ok=True)
     snapshot = load_store(workspace_root)
     _write_project_brief(workspace_root, _project(snapshot, project_id))
     return {
@@ -349,10 +412,12 @@ def ingest_reel(
     metrics_captured_at: str | None = None,
     platform: str = "instagram",
 ) -> dict[str, Any]:
-    _parse_time(published_at)
-    if metrics_captured_at:
-        _parse_time(metrics_captured_at)
-    captured_at = metrics_captured_at or _now_iso()
+    published_at = _now_iso(_parse_time(published_at))
+    captured_at = (
+        _now_iso(_parse_time(metrics_captured_at))
+        if metrics_captured_at
+        else _now_iso()
+    )
     with research_database.connect(workspace_root) as connection:
         if connection.execute(
             "SELECT 1 FROM authors WHERE project_id = ? AND id = ?", (project_id, author_id)
@@ -423,7 +488,8 @@ def ingest_reel(
         history = [
             dict(row) for row in connection.execute(
                 """SELECT captured_at, views, likes, comments FROM reel_metrics
-                WHERE project_id = ? AND reel_id = ? ORDER BY captured_at""",
+                WHERE project_id = ? AND reel_id = ?
+                ORDER BY julianday(captured_at)""",
                 (project_id, reel_id),
             )
         ]
@@ -507,8 +573,12 @@ def get_project_feed(
             cursor_value = decoded["value"]
             cursor_id = str(decoded["id"])
             if sort == "newest":
-                if not isinstance(cursor_value, str):
-                    raise ValueError("cursor value must be a timestamp")
+                if (
+                    not isinstance(cursor_value, (int, float))
+                    or isinstance(cursor_value, bool)
+                    or not math.isfinite(float(cursor_value))
+                ):
+                    raise ValueError("cursor value must be a finite instant")
             elif (
                 not isinstance(cursor_value, (int, float))
                 or isinstance(cursor_value, bool)
@@ -650,7 +720,9 @@ def create_experiment(
             reel = dict(reel_row)
             author = dict(author_row)
             context = _experiment_markdown(project, author, reel, experiment)
-            context_path = workspace_root.resolve() / rel_context
+            context_path = _resolve_experiment_context(
+                workspace_root, project_id, rel_context
+            )
             _write_experiment_context(context_path, context)
     snapshot = load_store(workspace_root)
     _write_project_brief(workspace_root, _project(snapshot, project_id))
@@ -719,8 +791,10 @@ def record_experiment_result(
             project = dict(project_row)
             reel = dict(reel_row)
             author = dict(author_row)
-            context_path = (
-                workspace_root.resolve() / experiment["agent_context_path"]
+            context_path = _resolve_experiment_context(
+                workspace_root,
+                project_id,
+                experiment["agent_context_path"],
             )
             _write_experiment_context(
                 context_path,

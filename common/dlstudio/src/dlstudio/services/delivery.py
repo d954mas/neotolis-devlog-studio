@@ -14,6 +14,8 @@ import re
 import shutil
 import tempfile
 import unicodedata
+import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -289,7 +291,162 @@ def _file_bytes_match(path: Path, content: bytes) -> bool:
         return False
 
 
-def build_delivery_bundle(
+def _remove_transaction_path(path: Path) -> None:
+    """Remove one internally generated staging/backup path."""
+
+    if path.is_symlink() or path.is_file():
+        path.unlink(missing_ok=True)
+    elif path.is_dir():
+        shutil.rmtree(path)
+
+
+def _delivery_journal_path(delivery_dir: Path) -> Path:
+    return delivery_dir.parent / f".{delivery_dir.name}.delivery-transaction.json"
+
+
+@contextmanager
+def _delivery_transaction_lock(delivery_dir: Path):
+    """Serialize recovery and publication for one delivery directory."""
+
+    parent = delivery_dir.resolve().parent
+    parent.mkdir(parents=True, exist_ok=True)
+    path = parent / f".{delivery_dir.name}.delivery.lock"
+    handle = path.open("a+b")
+    try:
+        if path.stat().st_size == 0:
+            handle.write(b"\0")
+            handle.flush()
+        handle.seek(0)
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            handle.seek(0)
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
+
+
+def _write_delivery_journal(path: Path, payload: dict[str, object]) -> None:
+    content = (
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
+    _atomic_write(path, content)
+
+
+def _journal_child(
+    parent: Path, raw: object, *, prefix: str, journal: Path
+) -> Path:
+    candidate = Path(str(raw or "")).resolve()
+    if candidate.parent != parent or not candidate.name.startswith(prefix):
+        raise DeliveryIntegrityError(f"invalid delivery transaction path: {journal}")
+    return candidate
+
+
+def _recover_delivery_transaction(delivery_dir: Path) -> None:
+    """Roll back or finish cleanup for an interrupted directory swap."""
+
+    delivery_dir = delivery_dir.resolve()
+    journal = _delivery_journal_path(delivery_dir)
+    if not journal.is_file():
+        return
+    try:
+        payload = json.loads(journal.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise DeliveryIntegrityError(
+            f"invalid delivery transaction journal: {journal}"
+        ) from exc
+    if (
+        not isinstance(payload, dict)
+        or payload.get("schema") != "dlstudio.delivery_transaction"
+        or payload.get("version") != 1
+        or Path(str(payload.get("target", ""))).resolve() != delivery_dir
+    ):
+        raise DeliveryIntegrityError(
+            f"invalid delivery transaction journal: {journal}"
+        )
+
+    parent = delivery_dir.parent
+    stage = _journal_child(
+        parent,
+        payload.get("stage"),
+        prefix=f".{delivery_dir.name}.stage-",
+        journal=journal,
+    )
+    backup = _journal_child(
+        parent,
+        payload.get("backup"),
+        prefix=f".{delivery_dir.name}.backup-",
+        journal=journal,
+    )
+    committed = payload.get("state") == "committed"
+    had_target = payload.get("had_target") is True
+
+    if committed:
+        _remove_transaction_path(backup)
+        _remove_transaction_path(stage)
+        journal.unlink(missing_ok=True)
+        return
+
+    if backup.exists() or backup.is_symlink():
+        _remove_transaction_path(delivery_dir)
+        os.replace(backup, delivery_dir)
+    elif not had_target and (delivery_dir.exists() or delivery_dir.is_symlink()):
+        # A fresh stage was promoted before the committed journal update.
+        _remove_transaction_path(delivery_dir)
+    _remove_transaction_path(stage)
+    journal.unlink(missing_ok=True)
+
+
+def _promote_delivery_directory(delivery_dir: Path, stage: Path) -> None:
+    """Swap a fully verified staging directory into place with recovery."""
+
+    delivery_dir = delivery_dir.resolve()
+    parent = delivery_dir.parent
+    parent.mkdir(parents=True, exist_ok=True)
+    nonce = uuid.uuid4().hex
+    backup = parent / f".{delivery_dir.name}.backup-{nonce}"
+    journal = _delivery_journal_path(delivery_dir)
+    payload = {
+        "schema": "dlstudio.delivery_transaction",
+        "version": 1,
+        "state": "prepared",
+        "target": str(delivery_dir),
+        "stage": str(stage.resolve()),
+        "backup": str(backup.resolve()),
+        "had_target": delivery_dir.exists(),
+    }
+    _write_delivery_journal(journal, payload)
+    try:
+        if payload["had_target"]:
+            os.replace(delivery_dir, backup)
+            payload["state"] = "backed_up"
+            _write_delivery_journal(journal, payload)
+        os.replace(stage, delivery_dir)
+        payload["state"] = "committed"
+        _write_delivery_journal(journal, payload)
+    except BaseException:
+        _recover_delivery_transaction(delivery_dir)
+        raise
+    _remove_transaction_path(backup)
+    journal.unlink(missing_ok=True)
+
+
+def _build_delivery_bundle_unlocked(
     manifest: ProductionManifest,
     *,
     video_path: str | Path,
@@ -321,6 +478,8 @@ def build_delivery_bundle(
     parsed_metadata = parse_metadata(metadata_text)
 
     delivery_dir = manifest.delivery_dir.resolve()
+    delivery_dir.parent.mkdir(parents=True, exist_ok=True)
+    _recover_delivery_transaction(delivery_dir)
     image_name = "thumbnail.png" if manifest.kind == "devlog" else "cover.png"
     entries = (
         _DeliveryFile("video", video_source, delivery_dir / "video.mp4", video_size, video_hash),
@@ -354,48 +513,55 @@ def build_delivery_bundle(
                 f"destination contains different content: {manifest_path}"
             )
 
-    copied: list[Path] = []
-    skipped: list[Path] = []
-    for entry in entries:
-        if entry in skipped_entries:
-            skipped.append(entry.destination)
-            continue
-        # Recheck at the write boundary: another process may have populated
-        # the path after preflight, and overwrite=False is a hard guarantee.
-        if entry.destination.exists() or entry.destination.is_symlink():
-            if _destination_matches(entry):
-                skipped.append(entry.destination)
-                continue
-            if not overwrite:
-                raise DeliveryCollisionError(
-                    f"destination contains different content: {entry.destination}"
-                )
-        _atomic_copy(entry)
-        if not _destination_matches(entry):
-            raise DeliveryIntegrityError(
-                f"destination hash does not match source: {entry.destination}"
-            )
-        copied.append(entry.destination)
-
+    copied = [
+        entry.destination for entry in entries if entry not in skipped_entries
+    ]
+    skipped = [
+        entry.destination for entry in entries if entry in skipped_entries
+    ]
     if manifest_matches:
         skipped.append(manifest_path)
     else:
-        write_manifest = True
-        if manifest_path.exists() or manifest_path.is_symlink():
-            if _file_bytes_match(manifest_path, desired_manifest):
-                skipped.append(manifest_path)
-                write_manifest = False
-            elif not overwrite:
-                raise DeliveryCollisionError(
-                    f"destination contains different content: {manifest_path}"
+        copied.append(manifest_path)
+
+    if copied:
+        stage = Path(tempfile.mkdtemp(
+            prefix=f".{delivery_dir.name}.stage-",
+            dir=delivery_dir.parent,
+        ))
+        try:
+            if delivery_dir.is_dir():
+                shutil.copytree(
+                    delivery_dir,
+                    stage,
+                    dirs_exist_ok=True,
+                    symlinks=True,
                 )
-        if write_manifest:
-            _atomic_write(manifest_path, desired_manifest)
-            if not _file_bytes_match(manifest_path, desired_manifest):
+            stage_entries = tuple(
+                _DeliveryFile(
+                    entry.role,
+                    entry.source,
+                    stage / entry.destination.name,
+                    entry.size,
+                    entry.sha256,
+                )
+                for entry in entries
+            )
+            for entry in stage_entries:
+                _atomic_copy(entry)
+                if not _destination_matches(entry):
+                    raise DeliveryIntegrityError(
+                        f"staged hash does not match source: {entry.destination}"
+                    )
+            stage_manifest = stage / manifest_path.name
+            _atomic_write(stage_manifest, desired_manifest)
+            if not _file_bytes_match(stage_manifest, desired_manifest):
                 raise DeliveryIntegrityError(
-                    f"delivery manifest verification failed: {manifest_path}"
+                    f"staged delivery manifest verification failed: {stage_manifest}"
                 )
-            copied.append(manifest_path)
+            _promote_delivery_directory(delivery_dir, stage)
+        finally:
+            _remove_transaction_path(stage)
 
     return DeliveryResult(
         delivery_dir=delivery_dir,
@@ -407,6 +573,28 @@ def build_delivery_bundle(
         copied=tuple(copied),
         skipped=tuple(skipped),
     )
+
+
+def build_delivery_bundle(
+    manifest: ProductionManifest,
+    *,
+    video_path: str | Path,
+    metadata_path: str | Path,
+    image_path: str | Path,
+    overwrite: bool = False,
+) -> DeliveryResult:
+    """Build one delivery bundle under a production-scoped process lock."""
+
+    if not isinstance(manifest, ProductionManifest):
+        raise TypeError("manifest must be a ProductionManifest")
+    with _delivery_transaction_lock(manifest.delivery_dir):
+        return _build_delivery_bundle_unlocked(
+            manifest,
+            video_path=video_path,
+            metadata_path=metadata_path,
+            image_path=image_path,
+            overwrite=overwrite,
+        )
 
 
 __all__ = [

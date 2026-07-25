@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from dlstudio.services import research, research_media
 
 
@@ -61,6 +63,7 @@ def test_reel_media_cache_is_disposable_and_idempotent(tmp_path):
 
 def test_clear_removes_only_media_cache(tmp_path):
     project_id = _seed(tmp_path)
+    research_media._ensure_owned_cache_root(tmp_path)
     path = research_media.media_path(tmp_path, project_id, "reel-1")
     path.parent.mkdir(parents=True)
     path.write_bytes(b"video")
@@ -75,7 +78,7 @@ def test_clear_removes_only_media_cache(tmp_path):
 
 def test_custom_cache_root_is_supported(tmp_path):
     project_id = _seed(tmp_path)
-    custom = tmp_path / "external-cache"
+    custom = tmp_path.parent / f"{tmp_path.name}-external-cache"
     path = research_media.media_path(
         tmp_path,
         project_id,
@@ -83,3 +86,53 @@ def test_custom_cache_root_is_supported(tmp_path):
         environ={research_media.CACHE_ENV: str(custom)},
     )
     assert path.is_relative_to(custom)
+
+
+def test_cache_paths_are_collision_safe_for_distinct_reel_ids(tmp_path):
+    project_id = _seed(tmp_path)
+
+    first = research_media.media_path(tmp_path, project_id, "foo bar")
+    second = research_media.media_path(tmp_path, project_id, "foo+bar")
+
+    assert first != second
+
+
+def test_clear_refuses_workspace_root_even_if_it_contains_media(tmp_path):
+    media = tmp_path / "do-not-delete.mp4"
+    media.write_bytes(b"workspace-media")
+
+    with pytest.raises(research_media.ResearchMediaError, match="unsafe cache root"):
+        research_media.clear(
+            tmp_path,
+            environ={research_media.CACHE_ENV: str(tmp_path)},
+        )
+
+    assert media.read_bytes() == b"workspace-media"
+
+
+def test_clear_refuses_unowned_custom_cache(tmp_path):
+    custom = tmp_path.parent / f"{tmp_path.name}-external-cache"
+    custom.mkdir()
+    media = custom / "unrelated.mp4"
+    media.write_bytes(b"not-owned")
+
+    with pytest.raises(research_media.ResearchMediaError, match="not owned"):
+        research_media.clear(
+            tmp_path,
+            environ={research_media.CACHE_ENV: str(custom)},
+        )
+
+    assert media.read_bytes() == b"not-owned"
+
+
+def test_configured_cache_cannot_claim_production_data_directory(tmp_path):
+    footage = tmp_path / "data" / "footage"
+    footage.mkdir(parents=True)
+
+    with pytest.raises(research_media.ResearchMediaError, match="canonical path"):
+        research_media._ensure_owned_cache_root(
+            tmp_path,
+            environ={research_media.CACHE_ENV: str(footage)},
+        )
+
+    assert not (footage / research_media.OWNERSHIP_MARKER).exists()

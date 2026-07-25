@@ -321,6 +321,47 @@ def _validate_video_artifact(path: Path) -> None:
         raise AssetRegistryError(f"file asset has no usable video stream: {path}")
 
 
+def _validate_audio_artifact(path: Path) -> None:
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "a:0",
+                "-show_entries",
+                "stream=codec_type:format=duration",
+                "-of",
+                "json",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise AssetRegistryError(
+            "ffprobe is required to register a file audio asset"
+        ) from exc
+    if result.returncode != 0:
+        raise AssetRegistryError(
+            f"file asset is not readable audio: {path}: {result.stderr[-300:]}"
+        )
+    try:
+        payload = json.loads(result.stdout)
+        stream = payload["streams"][0]
+        duration = float(payload["format"]["duration"])
+    except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise AssetRegistryError(
+            f"file asset has incomplete audio metadata: {path}"
+        ) from exc
+    if stream.get("codec_type") != "audio" or duration <= 0:
+        raise AssetRegistryError(f"file asset has no usable audio stream: {path}")
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -567,7 +608,7 @@ def register_file_asset(
     license_name: str = "",
     credit: str = "",
 ) -> AssetRegistry:
-    """Register a non-gameplay video with hash-bound provenance."""
+    """Register non-gameplay video or audio with hash-bound provenance."""
 
     if re.fullmatch(r"[A-Za-z0-9_.:-]{1,160}", asset_id) is None:
         raise AssetRegistryError("file asset id contains unsafe characters")
@@ -592,14 +633,23 @@ def register_file_asset(
             "HyperFrames outputs cannot use generic asset registration; "
             "wire the render_manifest so final-quality evidence is enforced"
         )
-    _validate_video_artifact(artifact)
+    audio_extensions = {".aac", ".flac", ".m4a", ".mp3", ".ogg", ".opus", ".wav"}
+    media_kind = "audio" if artifact.suffix.casefold() in audio_extensions else "video"
+    if media_kind == "audio":
+        _validate_audio_artifact(artifact)
+    else:
+        _validate_video_artifact(artifact)
     artifact_sha = _sha256(artifact)
     provenance_name = hashlib.sha256(asset_id.encode("utf-8")).hexdigest()
     provenance = (
         root / "data" / "assets" / "provenance" / f"{provenance_name}.json"
     )
     provenance_payload = {
-        "schema": "devlog.video_provenance",
+        "schema": (
+            "devlog.audio_provenance"
+            if media_kind == "audio"
+            else "devlog.video_provenance"
+        ),
         "version": 1,
         "asset_id": asset_id,
         "artifact_path": normalized_artifact,
@@ -726,7 +776,8 @@ def _verify_registered_asset(root: Path, asset: RegisteredAsset) -> Path:
             ) from exc
         if (
             not isinstance(payload, dict)
-            or payload.get("schema") != "devlog.video_provenance"
+            or payload.get("schema")
+            not in {"devlog.video_provenance", "devlog.audio_provenance"}
             or payload.get("version") != 1
             or payload.get("artifact_path") != asset.artifact_path
             or payload.get("artifact_sha256") != asset.artifact_sha256

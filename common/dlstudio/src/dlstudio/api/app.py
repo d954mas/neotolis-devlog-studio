@@ -119,6 +119,7 @@ class ProductOverviewInfo(BaseModel):
 
 class ProjectInfo(BaseModel):
     edit_name: str
+    storage_identity: str
     output: str
     design: DesignInfo
     beats: list[BeatInfo]
@@ -133,6 +134,11 @@ class ScriptApprovalRequest(BaseModel):
 
 class AutopilotApprovalRequest(BaseModel):
     approved_by: str = Field(default="author", min_length=1, max_length=120)
+    expected_checkpoint_digest: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-fA-F]{64}$",
+    )
 
 
 class AutopilotChangeRequest(BaseModel):
@@ -585,8 +591,17 @@ def create_app(edit_module: str) -> FastAPI:
                     for item in overview.productions
                 ],
             )
+        storage_identity = (
+            f"{product_info.id}:{product_info.current_production_id}"
+            if product_info is not None
+            else "legacy:" + hashlib.sha256(
+                str(root.resolve()).casefold().encode("utf-8")
+            ).hexdigest()[:20]
+        )
         return ProjectInfo(
-            edit_name=edit.name, output=edit.output,
+            edit_name=edit.name,
+            storage_identity=storage_identity,
+            output=edit.output,
             design=DesignInfo(resolution=edit.design.resolution, fps=edit.design.fps),
             beats=beats,
             script_sha256=script_digest,
@@ -633,7 +648,11 @@ def create_app(edit_module: str) -> FastAPI:
         from dlstudio.services.autopilot_checkpoint import approve_all
 
         try:
-            return JSONResponse(approve_all(root, approved_by=body.approved_by))
+            return JSONResponse(approve_all(
+                root,
+                approved_by=body.approved_by,
+                expected_checkpoint_digest=body.expected_checkpoint_digest,
+            ))
         except ValueError as exc:
             # Approval with blockers is a state conflict, not an automatic fix.
             raise HTTPException(status_code=409, detail=str(exc)) from exc

@@ -75,7 +75,9 @@ Studio's prepared request and writes one isolated
 The semantic probe is a required preflight: it loads the declared seed, applies
 the parameters, verifies that the DevAPI listener belongs to the same PID, and
 atomically stores the game-reported initial/action hashes before the immutable
-capture batch is prepared.
+capture batch is prepared. The recorded action RPC must return that exact
+locked action semantic hash; merely returning a hash different from the live
+pre-action status is not sufficient proof.
 
 ## Validate Gameplay Before Ingest
 
