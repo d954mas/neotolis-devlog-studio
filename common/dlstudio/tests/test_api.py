@@ -417,6 +417,42 @@ def test_takes_upload_persists_validated_recording_markers(light_client):
     assert json.loads(metadata_path.read_text(encoding="utf-8")) == metadata
 
 
+def test_takes_upload_does_not_publish_raw_without_sidecar_bundle(
+    light_client,
+    monkeypatch,
+):
+    client, root, _ = light_client
+    metadata = {
+        "schema": "devlog.voice_take",
+        "version": 1,
+        "countdown_seconds": 3,
+        "room_tone_seconds": 2,
+        "speech_start_seconds": 5,
+        "stop_requested_seconds": 12.5,
+        "post_roll_end_seconds": 13.5,
+        "post_roll_target_seconds": 1,
+        "post_roll_completed": True,
+        "completed_lead_in": True,
+    }
+    monkeypatch.setattr(
+        "dlstudio.services.bundle.promote_bundle",
+        lambda _replacements: (_ for _ in ()).throw(
+            RuntimeError("promotion failed")
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="promotion failed"):
+        client.post(
+            "/api/takes/b01",
+            files={"file": ("take.webm", b"AUDIO-BYTES", "audio/webm")},
+            data={"metadata": json.dumps(metadata)},
+        )
+
+    recordings = root / "data" / "recordings"
+    assert not list(recordings.glob("b01_*"))
+    assert not list(recordings.glob(".*.upload"))
+
+
 def test_takes_upload_rejects_unordered_recording_markers(light_client):
     client, _, _ = light_client
     metadata = {
@@ -944,6 +980,59 @@ def test_script_approval_is_hash_bound_and_invalidates_after_vo_edit(light_clien
     changed = client.get("/api/project").json()
     assert changed["script_approved"] is False
     assert changed["script_sha256"] != initial["script_sha256"]
+
+
+def test_stale_script_approval_blocks_take_upload(light_client):
+    client, root, _ = light_client
+    assert client.post(
+        "/api/script/approve",
+        json={"approved_by": "author"},
+    ).status_code == 200
+    init_path = root / "edits" / "myedit" / "__init__.py"
+    init_path.write_text(
+        init_path.read_text(encoding="utf-8").replace(
+            "hi there world",
+            "hot edited script",
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.post(
+        "/api/takes/b01",
+        files={"file": ("take.webm", b"AUDIO-BYTES", "audio/webm")},
+    )
+
+    assert response.status_code == 409
+    assert "approval is stale" in response.json()["detail"]
+    recordings = root / "data" / "recordings"
+    assert not (recordings.exists() and list(recordings.glob("b01_*")))
+
+
+def test_stale_script_approval_blocks_take_processing(light_client):
+    client, root, _ = light_client
+    assert client.post(
+        "/api/script/approve",
+        json={"approved_by": "author"},
+    ).status_code == 200
+    recording = root / "data" / "recordings" / "take.webm"
+    recording.parent.mkdir(parents=True, exist_ok=True)
+    recording.write_bytes(b"raw")
+    init_path = root / "edits" / "myedit" / "__init__.py"
+    init_path.write_text(
+        init_path.read_text(encoding="utf-8").replace(
+            "hi there world",
+            "hot edited script",
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.post("/api/actions/process-take", json={
+        "beat_id": "b01",
+        "recording_path": "data/recordings/take.webm",
+    })
+
+    assert response.status_code == 409
+    assert "approval is stale" in response.json()["detail"]
 
 
 def test_project_hot_reloads_filesystem_production(tmp_path, monkeypatch):

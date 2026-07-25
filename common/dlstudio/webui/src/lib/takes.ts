@@ -32,6 +32,7 @@ export interface SessionTake {
   recordingMetadata?: VoiceTakeMetadata;
   processState: ProcessState;
   processMessage?: string;
+  processJobId?: string;
   qualityStatus?: "clean" | "unverified" | "re_record";
   qualityMessage?: string;
   verdictPath?: string;

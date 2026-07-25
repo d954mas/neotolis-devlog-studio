@@ -254,6 +254,84 @@ def test_experiment_defaults_to_adaptation_and_writes_agent_context(tmp_path):
     assert "measured experiment results are evidence" in brief_text.lower()
 
 
+def test_experiment_db_insert_rolls_back_when_agent_context_write_fails(
+    tmp_path,
+    monkeypatch,
+):
+    project_id = _seed(tmp_path)
+    research.ingest_reel(
+        tmp_path,
+        project_id,
+        reel_id="context-failure",
+        author_id="topdev",
+        url="https://www.instagram.com/reel/context-failure/",
+        published_at="2026-07-18T12:00:00Z",
+    )
+    monkeypatch.setattr(
+        research,
+        "_write_experiment_context",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk full")),
+    )
+
+    with pytest.raises(OSError, match="disk full"):
+        research.create_experiment(
+            tmp_path,
+            project_id,
+            reel_id="context-failure",
+        )
+
+    with sqlite3.connect(research.store_path(tmp_path)) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM experiments WHERE project_id = ?",
+            (project_id,),
+        ).fetchone()[0] == 0
+
+
+def test_experiment_result_rolls_back_when_context_refresh_fails(
+    tmp_path,
+    monkeypatch,
+):
+    project_id = _seed(tmp_path)
+    research.ingest_reel(
+        tmp_path,
+        project_id,
+        reel_id="result-context-failure",
+        author_id="topdev",
+        url="https://www.instagram.com/reel/result-context-failure/",
+        published_at="2026-07-18T12:00:00Z",
+    )
+    experiment = research.create_experiment(
+        tmp_path,
+        project_id,
+        reel_id="result-context-failure",
+    )
+    monkeypatch.setattr(
+        research,
+        "_write_experiment_context",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk full")),
+    )
+
+    with pytest.raises(OSError, match="disk full"):
+        research.record_experiment_result(
+            tmp_path,
+            project_id,
+            experiment["id"],
+            verdict="worked",
+        )
+
+    with sqlite3.connect(research.store_path(tmp_path)) as connection:
+        row = connection.execute(
+            "SELECT status FROM experiments WHERE id = ?",
+            (experiment["id"],),
+        ).fetchone()
+        result_count = connection.execute(
+            "SELECT COUNT(*) FROM experiment_results WHERE experiment_id = ?",
+            (experiment["id"],),
+        ).fetchone()[0]
+    assert row[0] == "idea"
+    assert result_count == 0
+
+
 def test_project_and_author_ids_are_stable_and_duplicates_rejected(tmp_path):
     first = research.create_project(tmp_path, title="Game Dev", now=NOW)
     second = research.create_project(tmp_path, title="Game Dev", now=NOW)

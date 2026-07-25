@@ -281,3 +281,68 @@ test("take card shows a clear re-record reason from machine QC", async () => {
     delete globalThis.__recordTabHooks;
   }
 });
+
+test("take card exposes recovery actions for interrupted jobs and uploads", async () => {
+  globalThis.__recordTabHooks = { states: [], refs: [], stateIndex: 0, refIndex: 0 };
+  globalThis.window = {
+    setInterval() { return 1; },
+    clearInterval() {},
+    setTimeout() { return 2; },
+    clearTimeout() {},
+  };
+  try {
+    const { RecordTab } = await loadRecordTab();
+    const tree = render(RecordTab, {
+      beat: {
+        id: "b01",
+        title: "Hook",
+        vo: "Voice over",
+        stage: null,
+        face: "none",
+        duration: null,
+        n_chunks: 0,
+        audio: null,
+        words: null,
+        rendered: false,
+      },
+      takes: [
+        {
+          id: "upload-failed",
+          beatId: "b01",
+          filename: "failed.webm",
+          url: "blob:failed",
+          size: 128,
+          createdAt: 2,
+          uploadState: "error",
+          uploadError: "script approval is stale",
+          processState: "idle",
+        },
+        {
+          id: "poll-paused",
+          beatId: "b01",
+          filename: "paused.webm",
+          url: "blob:paused",
+          size: 128,
+          createdAt: 1,
+          uploadState: "uploaded",
+          serverPath: "data/recordings/paused.webm",
+          processState: "idle",
+          processJobId: "job-123",
+          processMessage: "Polling paused · resume status",
+        },
+      ],
+      addTake() {},
+      updateTake() {},
+      onAfterProcess() {},
+      scriptApproved: true,
+    });
+
+    const text = textOf(tree);
+    assert.ok(text.includes("Retry upload"));
+    assert.ok(text.includes("Resume status"));
+    assert.ok(text.includes("Polling paused"));
+  } finally {
+    delete globalThis.window;
+    delete globalThis.__recordTabHooks;
+  }
+});

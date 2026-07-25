@@ -258,13 +258,21 @@ export function RecordTab({
     if (!t.serverPath) return;
     const ctrl = new AbortController();
     pollAborters.current.add(ctrl);
-    updateTake(t.id, { processState: "running", processMessage: "starting…" });
+    let jobId = t.processJobId;
+    updateTake(t.id, {
+      processState: "running",
+      processMessage: jobId ? "resuming status…" : "starting…",
+    });
     try {
-      const { job_id } = await api.processTake({
-        beat_id: t.beatId, // the take's own beat, pinned at record start (0.7)
-        recording_path: t.serverPath,
-      });
-      const final = await pollJob(job_id, {
+      if (!jobId) {
+        const submitted = await api.processTake({
+          beat_id: t.beatId, // the take's own beat, pinned at record start (0.7)
+          recording_path: t.serverPath,
+        });
+        jobId = submitted.job_id;
+        updateTake(t.id, { processJobId: jobId });
+      }
+      const final = await pollJob(jobId, {
         signal: ctrl.signal,
         onStatus: (s) => updateTake(t.id, { processMessage: s.status }),
       });
@@ -279,6 +287,7 @@ export function RecordTab({
             ? "Clean · marker-trimmed · boundary QC passed"
             : "Processed legacy take · markers unverified",
           verdictPath: result?.voice_take_verdict || undefined,
+          processJobId: undefined,
         });
         onAfterProcess();
       } else {
@@ -292,16 +301,53 @@ export function RecordTab({
           qualityMessage: qualityRejected
             ? "Click, clipping, or incomplete clean handles detected"
             : undefined,
+          processJobId: undefined,
         });
       }
     } catch (e) {
-      if (ctrl.signal.aborted) return; // beat switch / unmount — drop silently
+      if (ctrl.signal.aborted) {
+        updateTake(t.id, {
+          processState: "idle",
+          processMessage: "Polling paused · resume status",
+          processJobId: jobId,
+        });
+        return;
+      }
       updateTake(t.id, {
         processState: "error",
         processMessage: (e as Error).message,
+        processJobId: undefined,
       });
     } finally {
       pollAborters.current.delete(ctrl);
+    }
+  }
+
+  async function retryUpload(t: SessionTake) {
+    updateTake(t.id, {
+      uploadState: "uploading",
+      uploadError: undefined,
+    });
+    try {
+      const response = await fetch(t.url);
+      if (!response.ok) throw new Error("local recording blob is unavailable");
+      const blob = await response.blob();
+      const uploaded = await api.uploadTake(
+        t.beatId,
+        blob,
+        t.filename,
+        t.recordingMetadata,
+      );
+      updateTake(t.id, {
+        uploadState: "uploaded",
+        serverPath: uploaded.path,
+        metadataPath: uploaded.metadata_path,
+      });
+    } catch (e) {
+      updateTake(t.id, {
+        uploadState: "error",
+        uploadError: (e as Error).message,
+      });
     }
   }
 
@@ -485,6 +531,15 @@ export function RecordTab({
                   )}
                   <audio controls preload="none" src={t.url} />
                   <div class="take-actions">
+                    {t.uploadState === "error" && (
+                      <button
+                        class="btn secondary sm"
+                        disabled={!scriptApproved}
+                        onClick={() => retryUpload(t)}
+                      >
+                        Retry upload
+                      </button>
+                    )}
                     <button
                       class="btn secondary sm"
                       disabled={
@@ -495,7 +550,9 @@ export function RecordTab({
                     >
                       {t.processState === "running"
                         ? "Processing…"
-                        : "Process take"}
+                        : t.processJobId
+                          ? "Resume status"
+                          : "Process take"}
                     </button>
                     <span class="take-status">{t.processMessage || ""}</span>
                   </div>

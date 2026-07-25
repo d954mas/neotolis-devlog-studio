@@ -80,7 +80,12 @@ export const api = {
       method: "POST",
       body: fd,
     });
-    if (!r.ok) throw new Error(`POST /api/takes/${beatId} → HTTP ${r.status}`);
+    if (!r.ok) {
+      const payload = await r.json().catch(() => null) as { detail?: string } | null;
+      throw new Error(
+        payload?.detail || `POST /api/takes/${beatId} → HTTP ${r.status}`,
+      );
+    }
     return (await r.json()) as TakeUploadResult;
   },
 

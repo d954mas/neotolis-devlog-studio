@@ -530,6 +530,17 @@ def create_app(edit_module: str) -> FastAPI:
             return digest, False
         return digest, verified.ok
 
+    def _reject_stale_script_approval(current_edit) -> None:
+        """Reject a once-approved script after its source has changed."""
+
+        if _script_approval_path().is_file() and not _script_status(
+            current_edit
+        )[1]:
+            raise HTTPException(
+                status_code=409,
+                detail="script approval is stale; approve the current script",
+            )
+
     # ── GET /api/project ─────────────────────────────────────────────────────
     @app.get("/api/project", response_model=ProjectInfo)
     def get_project() -> ProjectInfo:
@@ -708,6 +719,10 @@ def create_app(edit_module: str) -> FastAPI:
         bid = safe_component(beat_id)
         if bid is None:
             raise HTTPException(status_code=400, detail="bad beat id")
+        current_edit = _current_edit()
+        if bid not in current_edit.beats:
+            raise HTTPException(status_code=404, detail=f"unknown beat: {bid}")
+        _reject_stale_script_approval(current_edit)
         metadata_payload: dict | None = None
         if metadata is not None:
             if len(metadata.encode("utf-8")) > 16 * 1024:
@@ -763,12 +778,13 @@ def create_app(edit_module: str) -> FastAPI:
         rec_dir = root / "data" / "recordings"
         rec_dir.mkdir(parents=True, exist_ok=True)
         dest = rec_dir / f"{bid}_{ts}{ext}"
+        upload_staging = rec_dir / f".{dest.name}.{uuid.uuid4().hex}.upload"
 
         # Stream to disk in bounded chunks: never hold the whole take in RAM,
         # enforce a hard size cap, and reject an empty upload.
         total = 0
         over_cap = False
-        with dest.open("wb") as fh:
+        with upload_staging.open("wb") as fh:
             while True:
                 chunk = await file.read(_UPLOAD_CHUNK_BYTES)
                 if not chunk:
@@ -779,18 +795,38 @@ def create_app(edit_module: str) -> FastAPI:
                     break
                 fh.write(chunk)
         if over_cap:
-            dest.unlink(missing_ok=True)
+            upload_staging.unlink(missing_ok=True)
             raise HTTPException(status_code=413, detail="upload exceeds 500MB limit")
         if total == 0:
-            dest.unlink(missing_ok=True)
+            upload_staging.unlink(missing_ok=True)
             raise HTTPException(status_code=400, detail="empty upload")
+        replacements = [(upload_staging, dest)]
+        metadata_dest: Path | None = None
+        metadata_staging: Path | None = None
+        try:
+            if metadata_payload is not None:
+                metadata_dest = dest.with_suffix(dest.suffix + ".recording.json")
+                metadata_staging = rec_dir / (
+                    f".{metadata_dest.name}.{uuid.uuid4().hex}.upload"
+                )
+                metadata_staging.write_text(
+                    json.dumps(
+                        metadata_payload,
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
+                replacements.append((metadata_staging, metadata_dest))
+            from dlstudio.services.bundle import promote_bundle
+
+            promote_bundle(replacements)
+        finally:
+            upload_staging.unlink(missing_ok=True)
+            if metadata_staging is not None:
+                metadata_staging.unlink(missing_ok=True)
         result = {"path": _rel(root, dest)}
-        if metadata_payload is not None:
-            metadata_dest = dest.with_suffix(dest.suffix + ".recording.json")
-            metadata_dest.write_text(
-                json.dumps(metadata_payload, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
+        if metadata_dest is not None:
             result["metadata_path"] = _rel(root, metadata_dest)
         return result
 
@@ -804,6 +840,7 @@ def create_app(edit_module: str) -> FastAPI:
         edit = _current_edit()
         if beat_id not in edit.beats:
             raise HTTPException(status_code=404, detail=f"unknown beat: {beat_id}")
+        _reject_stale_script_approval(edit)
         rec_rel = body.get("recording_path")
         if not rec_rel:
             raise HTTPException(status_code=400, detail="recording_path is required")

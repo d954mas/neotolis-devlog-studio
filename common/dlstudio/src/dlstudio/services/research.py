@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import json
 import math
+import os
 import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -27,6 +28,18 @@ VERDICTS = {"worked", "mixed", "did_not_work", "inconclusive"}
 
 class ResearchError(ValueError):
     """Raised for invalid research operations or missing records."""
+
+
+def _write_experiment_context(path: Path, content: str) -> None:
+    """Atomically replace mandatory agent context."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    try:
+        temporary.write_text(content, encoding="utf-8", newline="\n")
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def store_path(workspace_root: Path) -> Path:
@@ -633,13 +646,12 @@ def create_experiment(
                     "INSERT INTO experiment_items(experiment_id, kind, position, value) VALUES (?, ?, ?, ?)",
                     items,
                 )
-    project = dict(project_row)
-    reel = dict(reel_row)
-    author = dict(author_row)
-    context = _experiment_markdown(project, author, reel, experiment)
-    context_path = workspace_root.resolve() / rel_context
-    context_path.parent.mkdir(parents=True, exist_ok=True)
-    context_path.write_text(context, encoding="utf-8", newline="\n")
+            project = dict(project_row)
+            reel = dict(reel_row)
+            author = dict(author_row)
+            context = _experiment_markdown(project, author, reel, experiment)
+            context_path = workspace_root.resolve() / rel_context
+            _write_experiment_context(context_path, context)
     snapshot = load_store(workspace_root)
     _write_project_brief(workspace_root, _project(snapshot, project_id))
     return experiment
@@ -697,20 +709,23 @@ def record_experiment_result(
                     comments, notes.strip(), timestamp,
                 ),
             )
-        refreshed = connection.execute(
-            "SELECT * FROM experiments WHERE id = ?", (experiment_id,)
-        ).fetchone()
-        experiment = research_database.experiment_from_row(connection, refreshed)
-    project = dict(project_row)
-    reel = dict(reel_row)
-    author = dict(author_row)
-    context_path = workspace_root.resolve() / experiment["agent_context_path"]
-    context_path.parent.mkdir(parents=True, exist_ok=True)
-    context_path.write_text(
-        _experiment_markdown(project, author, reel, experiment),
-        encoding="utf-8",
-        newline="\n",
-    )
+            refreshed = connection.execute(
+                "SELECT * FROM experiments WHERE id = ?", (experiment_id,)
+            ).fetchone()
+            experiment = research_database.experiment_from_row(
+                connection,
+                refreshed,
+            )
+            project = dict(project_row)
+            reel = dict(reel_row)
+            author = dict(author_row)
+            context_path = (
+                workspace_root.resolve() / experiment["agent_context_path"]
+            )
+            _write_experiment_context(
+                context_path,
+                _experiment_markdown(project, author, reel, experiment),
+            )
     snapshot = load_store(workspace_root)
     _write_project_brief(workspace_root, _project(snapshot, project_id))
     return experiment

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import {
   researchApi,
   type ExperimentInput,
@@ -21,6 +21,7 @@ import { QuickAddSource } from "./QuickAddSource";
 import { ReelDateHeader } from "./ReelDateHeader";
 import { ResearchToolbar, type ResearchPanel } from "./ResearchToolbar";
 import { dateGroupLabel, groupReelsByDate } from "./research-feed-dates";
+import { LatestRequestGate } from "../../lib/latestRequest";
 
 function queryValue(name: string): string | null {
   return typeof location === "undefined" ? null : new URLSearchParams(location.search).get(name);
@@ -51,6 +52,7 @@ export function ResearchLab() {
   const [syncResult, setSyncResult] = useState<ResearchSyncResult | null>(null);
   const [mediaCache, setMediaCache] = useState<ResearchMediaCacheSummary | null>(null);
   const [panel, setPanel] = useState<ResearchPanel>(null);
+  const feedRequests = useRef(new LatestRequestGate());
 
   async function refreshMediaCache() {
     setMediaCache(await researchApi.mediaCache());
@@ -66,15 +68,26 @@ export function ResearchLab() {
   }
 
   async function loadFeed(projectId = activeId, cursor: string | null = null) {
+    const query = JSON.stringify([projectId, range, sort, authorId]);
     if (!projectId) {
+      feedRequests.current.invalidate(query);
       setFeed(null);
       setLoading(false);
+      setLoadingMore(false);
       return;
     }
+    if (cursor) {
+      if (loading) return;
+    } else {
+      setLoading(true);
+      setLoadingMore(false);
+    }
+    const request = feedRequests.current.begin(query, Boolean(cursor));
+    if (request === null) return;
     if (cursor) setLoadingMore(true);
-    else setLoading(true);
     try {
       const page = await researchApi.project(projectId, range, sort, authorId, cursor);
+      if (!feedRequests.current.isCurrent(request, query)) return;
       setFeed((current) => {
         if (!cursor || !current || current.id !== page.id) return page;
         const reelIds = new Set(current.reels.map((reel) => reel.id));
@@ -90,8 +103,10 @@ export function ResearchLab() {
       });
       setError(null);
     } catch (caught) {
+      if (!feedRequests.current.isCurrent(request, query)) return;
       setError((caught as Error).message);
     } finally {
+      if (!feedRequests.current.isCurrent(request, query)) return;
       if (cursor) setLoadingMore(false);
       else setLoading(false);
     }
@@ -378,7 +393,7 @@ export function ResearchLab() {
                 <div class="research-load-more">
                   <button
                     class="btn secondary"
-                    disabled={loadingMore || !feed.page.next_cursor}
+                    disabled={loading || loadingMore || !feed.page.next_cursor}
                     onClick={() => loadFeed(feed.id, feed.page.next_cursor)}
                   >
                     {loadingMore ? "Загружаю…" : `Показать ещё · ${feed.reels.length} из ${feed.page.total}`}

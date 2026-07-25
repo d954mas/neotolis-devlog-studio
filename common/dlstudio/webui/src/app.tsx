@@ -190,6 +190,18 @@ export function App() {
     return () => clearInterval(id);
   }, []);
 
+  // Script source can be hot-edited outside Studio. Refresh its hash-bound
+  // approval while the UI is open instead of leaving Record enabled forever.
+  useEffect(() => {
+    const refresh = () => { void loadProject(); };
+    const id = window.setInterval(refresh, 3000);
+    window.addEventListener("focus", refresh);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("focus", refresh);
+    };
+  }, []);
+
   // ── take state ─────────────────────────────────────────────────────────
   function addTake(t: SessionTake) {
     setTakesByBeat((m) => ({ ...m, [t.beatId]: [...(m[t.beatId] || []), t] }));
