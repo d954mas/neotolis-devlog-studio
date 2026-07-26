@@ -1,0 +1,6 @@
+{
+  "id": "harness-canonical-json-v1",
+  "schema_version": 1,
+  "expected_canonical_utf8": "{\"domain\":\"studio-v3.verify\",\"schema_version\":1}",
+  "expected_sha256": "8a6feef64486f68586bf52b9b3bb4d0e61e543d96f8b9464c64f77dd8f0c3774"
+}

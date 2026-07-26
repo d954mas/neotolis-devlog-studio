@@ -36,3 +36,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "canonical_vector: cross-platform canonical serialization vector",
+    "performance_smoke: behavioral performance regression contract",
+]

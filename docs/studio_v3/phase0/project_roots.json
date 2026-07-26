@@ -1,0 +1,41 @@
+{
+  "roots": [
+    {
+      "disposition": "MIGRATE_ACTIVE",
+      "name": "neotolis_diary",
+      "rule_id": "known_active_override"
+    },
+    {
+      "disposition": "MIGRATE_ACTIVE",
+      "name": "not_a_trolley_problem",
+      "rule_id": "known_active_override"
+    },
+    {
+      "disposition": "ARCHIVE_READ_ONLY",
+      "name": "trolley",
+      "rule_id": "known_source_archive"
+    },
+    {
+      "disposition": "ARCHIVE_READ_ONLY",
+      "name": "trolley3d",
+      "rule_id": "known_source_archive"
+    },
+    {
+      "disposition": "MIGRATE_ACTIVE",
+      "name": "trolley_devlog",
+      "rule_id": "known_active_override"
+    }
+  ],
+  "rules_sha256": "e81b7e9666223ea9a23cda57e77cd28d9115d3b573574813334a7f1462c9744a",
+  "schema_version": 1,
+  "summary": {
+    "ambiguous": 0,
+    "by_disposition": {
+      "ARCHIVE_READ_ONLY": 2,
+      "MIGRATE_ACTIVE": 3
+    },
+    "roots": 5,
+    "unmatched": 0
+  },
+  "workspace": "C:\\projects\\devlogs"
+}
