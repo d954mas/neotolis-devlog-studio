@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
 import math
 import os
@@ -246,73 +245,6 @@ def _atomic_copy_verified(
         temp.unlink(missing_ok=True)
 
 
-def _change_token(path: Path) -> int:
-    """Return the kernel change-time, which normal timestamp restore cannot reset."""
-
-    if os.name != "nt":
-        return path.stat().st_ctime_ns
-    import ctypes
-    import msvcrt
-
-    class FileBasicInfo(ctypes.Structure):
-        _fields_ = [
-            ("creation_time", ctypes.c_longlong),
-            ("last_access_time", ctypes.c_longlong),
-            ("last_write_time", ctypes.c_longlong),
-            ("change_time", ctypes.c_longlong),
-            ("file_attributes", ctypes.c_ulong),
-        ]
-
-    with path.open("rb") as handle:
-        info = FileBasicInfo()
-        success = ctypes.windll.kernel32.GetFileInformationByHandleEx(
-            msvcrt.get_osfhandle(handle.fileno()),
-            0,
-            ctypes.byref(info),
-            ctypes.sizeof(info),
-        )
-        if not success:
-            raise OSError(ctypes.get_last_error(), "cache change-time query failed")
-        return int(info.change_time)
-
-
-def _cache_auth_key(cache_root: Path) -> bytes:
-    """Return the cache-index key kept outside the untrusted object directory."""
-
-    key_path = cache_root.parent / f".{cache_root.name}.auth-key"
-    lock_path = key_path.with_name(f"{key_path.name}.lock")
-    with _CacheLease(lock_path):
-        try:
-            key = key_path.read_bytes()
-        except FileNotFoundError:
-            key = b""
-        if len(key) != 32:
-            replacement = key_path.with_name(
-                f".{key_path.name}.{uuid.uuid4().hex}.tmp"
-            )
-            try:
-                with replacement.open("xb") as handle:
-                    handle.write(os.urandom(32))
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                os.replace(replacement, key_path)
-            finally:
-                replacement.unlink(missing_ok=True)
-            if os.name != "nt":
-                key_path.chmod(0o600)
-            key = key_path.read_bytes()
-    if len(key) != 32:
-        raise RuntimeError("render cache authentication key is invalid")
-    return key
-
-
-def _manifest_auth(payload: dict[str, object], key: bytes) -> str:
-    raw = json.dumps(
-        payload, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
-    return hmac.new(key, raw, hashlib.sha256).hexdigest()
-
-
 def _load_cache_hit(
     cache_root: Path,
     cache_key: str,
@@ -323,15 +255,8 @@ def _load_cache_hit(
         return None
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        claimed_auth = str(manifest.pop("auth"))
-        if not hmac.compare_digest(
-            claimed_auth, _manifest_auth(manifest, _cache_auth_key(cache_root))
-        ):
-            return None
         sha256 = str(manifest["sha256"])
         size = int(manifest["size"])
-        mtime_ns = int(manifest["mtime_ns"])
-        change_token = int(manifest["change_token"])
         if (
             manifest.get("schema") != "dlstudio.render_cache"
             or manifest.get("version") != 1
@@ -340,13 +265,7 @@ def _load_cache_hit(
             return None
         artifact = BlobRef(sha256, size)
         cached = cache_root / "objects" / f"{sha256}.mp4"
-        stat = cached.stat()
-        if (
-            not cached.is_file()
-            or stat.st_size != size
-            or stat.st_mtime_ns != mtime_ns
-            or _change_token(cached) != change_token
-        ):
+        if not cached.is_file() or cached.stat().st_size != size:
             return None
         _atomic_copy_verified(cached, output, artifact)
         return RenderResult(artifact, output, cache_key, True, ())
@@ -366,8 +285,6 @@ def _publish_cache(
     manifests.mkdir(parents=True, exist_ok=True)
     cached = objects / f"{artifact.sha256}.mp4"
     if not cached.exists() or _hash_file(cached) != artifact:
-        if cached.exists():
-            cached.chmod(0o644)
         stage = objects / f".{artifact.sha256}.{uuid.uuid4().hex}.tmp"
         try:
             shutil.copyfile(source, stage)
@@ -376,20 +293,13 @@ def _publish_cache(
             os.replace(stage, cached)
         finally:
             stage.unlink(missing_ok=True)
-    cached.chmod(0o444)
-    stat = cached.stat()
     payload = {
         "schema": "dlstudio.render_cache",
         "version": 1,
         "cache_key": cache_key,
         "sha256": artifact.sha256,
         "size": artifact.size,
-        "mtime_ns": stat.st_mtime_ns,
-        "change_token": _change_token(cached),
     }
-    payload["auth"] = _manifest_auth(
-        payload, _cache_auth_key(cache_root)
-    )
     manifest = manifests / f"{cache_key}.json"
     stage_manifest = manifests / f".{cache_key}.{uuid.uuid4().hex}.tmp"
     try:
