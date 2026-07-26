@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import tomllib
+from pathlib import Path
+
 import pytest
 
 pytest.importorskip("fastapi")
@@ -9,6 +12,17 @@ from fastapi.testclient import TestClient
 
 from dlstudio.api.research import create_research_router
 from dlstudio.services import research_media, research_scrapecreators
+
+
+def test_studio_extra_installs_pattern_lab_http_dependency():
+    pyproject_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    pyproject = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+    studio_dependencies = pyproject["project"]["optional-dependencies"]["studio"]
+
+    assert any(
+        dependency.partition(">=")[0].strip().casefold() == "requests"
+        for dependency in studio_dependencies
+    )
 
 
 def test_research_api_vertical_slice(tmp_path):
