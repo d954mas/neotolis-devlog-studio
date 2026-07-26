@@ -12,6 +12,7 @@
 
 - `data/plan/script_approval.json`
 - `data/plan/shot_manifest.json`
+- `data/plan/story_map.json` (required for `kind=devlog`)
 - `data/assets/catalog.json`
 - `data/review/preflight.json`
 - `data/review/contact_sheet.jpg`
@@ -29,6 +30,13 @@ Each shot records `id`, `vo_range`, `purpose`, `src`, `source_role`, `t0`, `t1`,
 `min_readable_duration`, `reuse`, `motion`, `intent`, `presentation`, and
 `approved`. Use `presentation=inset|framed|contain|split` for an intentional
 opposite-orientation source; otherwise it is treated as full-bleed.
+
+For `kind=devlog`, each shot also records `arc_id`, `story_role`, and
+`visual_mode`. A shot longer than 8 seconds records
+`internal_changes_seconds`; no semantic gap may exceed 6 seconds. The story
+map is `devlog.longform_story_map/v1` and binds every arc to before, payoff,
+and failure/process evidence. Run `dl2 longform-check --strict` before final
+VO.
 
 ## Delivery metadata headings
 

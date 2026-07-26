@@ -22,6 +22,7 @@ targets and evidence bar for a change without re-reading three docs.
 | [VQ-TEMPORAL](VQ-TEMPORAL.md) | a rendered shot should move: gameplay, capture, animation, camera motion | declared static cards and deliberate ending holds |
 | [VQ-SILENT-REEL](VQ-SILENT-REEL.md) | a reel has no VO or must work with sound off | voiced tutorials and long-form instruction |
 | [VQ-HOOK](VQ-HOOK.md) | writing/reviewing the opening line of a reel/short or cold-open | mid-video build/climax beats after the hook already landed |
+| [VQ-LONGFORM](VQ-LONGFORM.md) | planning, scripting, reviewing, or shipping a 6–12 minute devlog | reels/shorts, tutorials, and release-note walkthroughs |
 | [VQ-SAFE](VQ-SAFE.md) | overlay/plate/subtitle position, size, or `bg_opacity` changes | full-bleed segments with no overlay text |
 | [VQ-END](VQ-END.md) | any full video or reel final/upload render | draft renders of individual beats mid-production |
 | [VQ-PROOF](VQ-PROOF.md) | an asset claims to show the real product/site/game, or thumbnail packaging | openly stylized b-roll/meme clips not claiming to be the real product |
@@ -37,8 +38,9 @@ Eight of these (`VQ-SYNC`, `VQ-RES`, `VQ-GEOMETRY`, `VQ-BOUNDARY`,
 `VQ-WORDS`, `VQ-ASSET`, `VQ-STANDALONE`, `VQ-EDITORIAL-LABEL`) have a mechanical part that is
 **enforced by engine** in `common/dlstudio` — see the core checks plus
 `services/editorial_preflight.py`. Their `.md` files also state the judgment
-part the code cannot see. The other six
-(`VQ-AUDIO`, `VQ-MOTION`, `VQ-HOOK`, `VQ-SAFE`, `VQ-END`, `VQ-PROOF`) have
+part the code cannot see. The other seven
+(`VQ-AUDIO`, `VQ-MOTION`, `VQ-HOOK`, `VQ-LONGFORM`, `VQ-SAFE`, `VQ-END`,
+`VQ-PROOF`) have
 no code gate at all — they are pure judgment, checked by reviewer agents or
 the orchestrator's regression checklist (`common/PIPELINE.md`).
 
@@ -58,12 +60,14 @@ compile clamps it automatically; there is nothing a human needs to decide.
 | Gameplay source/offset/day boundary | VQ-BOUNDARY (+ VQ-TEMPORAL post-render) |
 | VO take processed, music/mix touched | VQ-AUDIO |
 | Reel/short opening line or cold-open | VQ-HOOK |
+| Long-form devlog story, evidence plan, or final | VQ-LONGFORM (+ VQ-HOOK for the cold open) |
 | Overlay/plate/caption position, size, `bg_opacity` | VQ-SAFE |
 | Scene/background using a screenshot, any reel edit | VQ-MOTION |
 | Gameplay/screen capture or reported freeze/stutter | VQ-TEMPORAL on the exact rendered MP4 |
 | Silent reel or feedback that a reel is too fast to parse | VQ-SILENT-REEL |
 | Any beat/final/concat render | VQ-SYNC, VQ-RES (engine-mechanical part always runs via `dl check`/`dl2 check`) |
 | Full video or reel final/upload render | VQ-END, plus the full `PIPELINE.md` regression checklist |
+| Long-form devlog final/upload render | VQ-LONGFORM, VQ-END, plus `docs/CHECKLIST_LONG_DEVLOG.md` |
 
 **By ship stage** — hard-gating happens once, at ship time; earlier stages
 use the same rules advisorily:

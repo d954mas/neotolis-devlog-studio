@@ -20,6 +20,10 @@ def test_review_pack_is_exact_hash_bound_and_compact(tmp_path, monkeypatch):
     (plan / "story_contract.json").write_text(json.dumps({
         "standalone_story": {"premise": "p", "causal_turn": "t", "payoff": "x"}
     }), encoding="utf-8")
+    (plan / "story_map.json").write_text(json.dumps({
+        "schema": "devlog.longform_story_map/v1",
+        "macro_question": "Will it work?",
+    }), encoding="utf-8")
     hyper = tmp_path / "data/hyperframes/master"
     hyper.mkdir(parents=True)
     (hyper / "index.html").write_text(
@@ -43,6 +47,10 @@ def test_review_pack_is_exact_hash_bound_and_compact(tmp_path, monkeypatch):
     assert len(payload["artifact"]["sha256"]) == 64
     assert len(payload["compact_review"]["frames"]) <= 6
     assert payload["viewer_text"][0]["text"] == "Visible hook"
+    assert payload["story_map"]["macro_question"] == "Will it work?"
+    assert "arc_id" in payload["shots"][0]
+    assert "story_role" in payload["shots"][0]
+    assert "visual_mode" in payload["shots"][0]
     assert sheet.is_file()
     assert sheet.stat().st_size < 500_000
 

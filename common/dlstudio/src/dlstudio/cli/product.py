@@ -243,9 +243,29 @@ def cmd_new_production(args: argparse.Namespace) -> int:
             json.dumps(story_contract, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
+    else:
+        from dlstudio.services.longform_preflight import (
+            longform_shot_manifest_template,
+            longform_story_map_template,
+        )
+
+        for name, payload in (
+            ("story_map.json", longform_story_map_template()),
+            ("shot_manifest.json", longform_shot_manifest_template()),
+        ):
+            (root / "data" / "plan" / name).write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
 
     print(f"[dl2] created production {args.product}:{production_id}")
     print(f"[dl2] path: {root}")
+    if args.kind == "devlog":
+        print(
+            f"[dl2] next: fill data/plan/story_map.json and "
+            f"data/plan/shot_manifest.json, then run "
+            f"dl2 longform-check {args.product}:{production_id}"
+        )
     return 0
 
 

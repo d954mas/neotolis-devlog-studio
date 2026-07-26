@@ -163,6 +163,20 @@ def test_new_production_creates_manifest_tree_and_packaged_edit(
         assert set(payload["standalone_story"]) == {"premise", "causal_turn", "payoff"}
     else:
         assert not contract.exists()
+        story_map = json.loads(
+            (production_root / "data" / "plan" / "story_map.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        shot_manifest = json.loads(
+            (production_root / "data" / "plan" / "shot_manifest.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert story_map["schema"] == "devlog.longform_story_map/v1"
+        assert len(story_map["mini_arcs"]) == 6
+        assert shot_manifest["profile"] == "longform_devlog"
+        assert shot_manifest["target_semantic_change_seconds"] == [3, 6]
 
 
 def test_new_production_allocates_next_id_for_same_date_and_kind(tmp_path, monkeypatch):

@@ -15,6 +15,7 @@ dl2 doctor          # ffmpeg/ffprobe/python/pydantic — всё должно б�
 ```bash
 dl2 new-product not_a_trolley_problem --game-root C:/projects/game-67-idle
 dl2 new-production not_a_trolley_problem --kind reel --date 2026-07-18
+dl2 new-production not_a_trolley_problem --kind devlog --date 2026-07-26
 dl2 list-productions not_a_trolley_problem
 ```
 
@@ -28,6 +29,20 @@ product root. Точные дубликаты исходных assets можно
 dl2 dedupe-assets not_a_trolley_problem          # read-only план
 dl2 dedupe-assets not_a_trolley_problem --apply  # verified hardlinks + report
 ```
+
+Для `kind=devlog` scaffold также создаёт обязательные
+`data/plan/story_map.json` и `data/plan/shot_manifest.json`. Заполни их до
+сценария и проверь:
+
+```bash
+dl2 longform-check not_a_trolley_problem:2026_07_26_devlog_01
+# перед записью финального VO:
+dl2 longform-check not_a_trolley_problem:2026_07_26_devlog_01 --strict
+```
+
+Нормативный story/montage/presentation contract:
+`docs/LONGFORM_DEVLOG_SPEC.md`. Те же проверки автоматически входят в
+`preflight` и `autopilot-run`.
 
 ### Legacy scaffold
 
@@ -228,6 +243,7 @@ dl2 publish myreel.edits.main      # -> data/publish/youtube_package.md
 dl2 publish-evidence not_a_trolley_problem:2026_07_18_reel_01
 # -> data/publish/video.mp4 + exact hash/review evidence
 dl2 deliver not_a_trolley_problem:2026_07_18_reel_01
+py -3.12 tools/publish_archive.py --workspace . --destination C:\Users\ROG\YandexDisk\Devlogs\projects
 ```
 
 `publish-evidence` после exact preflight/review кладёт сам готовый MP4 рядом с
@@ -237,6 +253,12 @@ hardlink без удвоения места; fallback-копия всегда п
 `deliver` идемпотентно собирает exact MP4, `metadata.md`, cover/thumbnail и
 `delivery_manifest.json` в `product/delivery/<kind>/<production_id>/` и
 проверяет хэши/hashtags.
+
+`publish_archive.py` после delivery объединяет полный production
+`data/publish/` с immutable delivery bundle в
+`YandexDisk/Devlogs/projects/<product>/<kind>/<production>/publish/`.
+Архив append-only: совпадающие хэши пропускаются, отличающийся существующий
+файл блокирует запуск, удалений и silent overwrite нет.
 
 ## Пути вывода (сводка)
 
@@ -249,5 +271,6 @@ hardlink без удвоения места; fallback-копия всегда п
 | HyperFrames-ассеты | `data/infographics/<asset>.mp4` |
 | Feedback ревьюеров | `data/review/feedback.json` |
 | Publish-пакет | `data/publish/video.mp4`, `metadata.md`, cover/thumbnail, `publish.json` |
+| Внешний архив publish | `C:\Users\ROG\YandexDisk\Devlogs\projects\<product>\<kind>\<production>\publish\` |
 
 Тесты движка (при работе над самим Studio): `dl2 verify --changed`.

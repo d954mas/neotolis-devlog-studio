@@ -27,6 +27,14 @@ def test_parser_exposes_inventory_preflight_and_storyboard_commands():
     inventory = _parse(["inventory", "product:2026_07_18_reel_01"])
     assert inventory.func is autopilot.cmd_inventory
     assert _parse(["preflight", "production/path"]).func is autopilot.cmd_preflight
+    longform = _parse(["longform-check", "product:2026_07_18_devlog_01"])
+    assert longform.func is autopilot.cmd_longform_check
+    assert longform.strict is False
+    assert _parse([
+        "longform-check",
+        "product:2026_07_18_devlog_01",
+        "--strict",
+    ]).strict is True
     storyboard = _parse(["storyboard", "some.edit"])
     assert storyboard.func is autopilot.cmd_storyboard
     assert storyboard.jobs == 1
@@ -683,6 +691,128 @@ def test_preflight_without_optional_shot_files_reports_ir_only(tmp_path, monkeyp
         "render_artifact_sha256": None,
         "compiled_ir_sha256": None,
     }
+
+
+def test_preflight_includes_longform_gate_for_product_devlog(tmp_path, monkeypatch):
+    from dlstudio.cli import autopilot
+    from dlstudio.services import longform_preflight
+
+    production = tmp_path / "product" / "devlogs" / "2026_07_26_devlog_01"
+    plan = production / "data" / "plan"
+    plan.mkdir(parents=True)
+    (production / "production.toml").write_text("kind = 'devlog'\n", encoding="utf-8")
+    story_path = plan / "story_map.json"
+    story_path.write_text('{"schema":"devlog.longform_story_map/v1"}', encoding="utf-8")
+    timeline = SimpleNamespace(design=SimpleNamespace(resolution=(1920, 1080)))
+    monkeypatch.setattr(
+        autopilot,
+        "_load_target",
+        lambda ref: (SimpleNamespace(), production, str(production)),
+    )
+
+    import dlstudio.check as check_mod
+    import dlstudio.compile as compile_mod
+    import dlstudio.production as production_mod
+    import dlstudio.cli.telemetry as telemetry_mod
+    import dlstudio.services.editorial_preflight as editorial_mod
+    import dlstudio.services.visual_preflight as visual_mod
+
+    monkeypatch.setattr(compile_mod, "build_timeline", lambda edit: timeline)
+    monkeypatch.setattr(check_mod, "run_checks", lambda value, **kwargs: CheckReport())
+    monkeypatch.setattr(
+        production_mod,
+        "load_production_manifest",
+        lambda root: SimpleNamespace(kind="devlog"),
+    )
+    monkeypatch.setattr(
+        telemetry_mod,
+        "record_automatic_stage",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        visual_mod,
+        "run_visual_preflight",
+        lambda *args, **kwargs: CheckReport(),
+    )
+    monkeypatch.setattr(
+        editorial_mod,
+        "run_editorial_preflight",
+        lambda *args, **kwargs: CheckReport(),
+    )
+    monkeypatch.setattr(
+        longform_preflight,
+        "run_longform_preflight",
+        lambda root, *, strict: CheckReport(issues=[
+            CheckIssue(
+                severity="error",
+                code="VQ-LONGFORM-PROOF",
+                message="arc has no payoff",
+                where="arc_01",
+            )
+        ]),
+    )
+
+    assert autopilot.cmd_preflight(_parse(["preflight", str(production)])) == 1
+
+    payload = json.loads(
+        (production / "data" / "review" / "preflight.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert payload["issues"][0]["code"] == "VQ-LONGFORM-PROOF"
+    assert payload["inputs"]["story_map"] == "data/plan/story_map.json"
+    assert payload["inputs"]["story_map_sha256"] == hashlib.sha256(
+        story_path.read_bytes()
+    ).hexdigest()
+
+
+def test_longform_check_persists_hash_bound_report(tmp_path, monkeypatch):
+    from dlstudio.cli import autopilot
+    from dlstudio.services import longform_preflight
+
+    production = tmp_path / "product" / "devlogs" / "2026_07_26_devlog_01"
+    plan = production / "data" / "plan"
+    plan.mkdir(parents=True)
+    story_path = plan / "story_map.json"
+    shot_path = plan / "shot_manifest.json"
+    story_path.write_text("{}", encoding="utf-8")
+    shot_path.write_text('{"shots":[]}', encoding="utf-8")
+    monkeypatch.setattr(
+        autopilot,
+        "_load_target",
+        lambda ref: (SimpleNamespace(), production, "product:production"),
+    )
+
+    import dlstudio.production as production_mod
+
+    monkeypatch.setattr(
+        production_mod,
+        "load_production_manifest",
+        lambda root: SimpleNamespace(kind="devlog"),
+    )
+    monkeypatch.setattr(
+        longform_preflight,
+        "run_longform_preflight",
+        lambda root, *, strict: CheckReport(),
+    )
+
+    assert autopilot.cmd_longform_check(
+        _parse(["longform-check", "product:production", "--strict"])
+    ) == 0
+
+    payload = json.loads(
+        (production / "data" / "review" / "longform_preflight.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert payload["strict"] is True
+    assert payload["ok"] is True
+    assert payload["inputs"]["story_map_sha256"] == hashlib.sha256(
+        story_path.read_bytes()
+    ).hexdigest()
+    assert payload["inputs"]["shot_manifest_sha256"] == hashlib.sha256(
+        shot_path.read_bytes()
+    ).hexdigest()
 
 
 def test_script_vo_preflight_requires_hash_bound_approval(tmp_path):

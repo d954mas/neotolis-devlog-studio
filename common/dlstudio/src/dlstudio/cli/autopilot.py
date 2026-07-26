@@ -396,6 +396,61 @@ def cmd_inventory(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_longform_check(args: argparse.Namespace) -> int:
+    """Validate story and montage contracts without rendering or compiling."""
+    from dlstudio.cli import CliError
+    from dlstudio.production import ProductionError, load_production_manifest
+    from dlstudio.services.longform_preflight import (
+        SHOT_MANIFEST_PATH,
+        STORY_MAP_PATH,
+        run_longform_preflight,
+    )
+
+    _edit, root, canonical = _load_target(args.edit)
+    try:
+        manifest = load_production_manifest(root)
+    except ProductionError as exc:
+        raise CliError(
+            "longform-check requires a product-first production"
+        ) from exc
+    if manifest.kind != "devlog":
+        raise CliError(
+            f"longform-check applies to kind=devlog, got {manifest.kind!r}"
+        )
+
+    report = run_longform_preflight(root, strict=args.strict)
+    warnings = [issue for issue in report.issues if issue.severity == "warn"]
+    story_path = root / STORY_MAP_PATH
+    shot_path = root / SHOT_MANIFEST_PATH
+    payload = {
+        "version": 1,
+        "production": canonical,
+        "strict": bool(args.strict),
+        "ok": report.ok,
+        "errors": len(report.errors),
+        "warnings": len(warnings),
+        "issues": [issue.model_dump(mode="json") for issue in report.issues],
+        "inputs": {
+            "story_map": STORY_MAP_PATH.as_posix() if story_path.is_file() else None,
+            "story_map_sha256": _sha256(story_path) if story_path.is_file() else None,
+            "shot_manifest": (
+                SHOT_MANIFEST_PATH.as_posix() if shot_path.is_file() else None
+            ),
+            "shot_manifest_sha256": _sha256(shot_path) if shot_path.is_file() else None,
+        },
+    }
+    out = root / "data" / "review" / "longform_preflight.json"
+    _write_json(out, payload)
+    for issue in report.issues:
+        print(f"[{issue.severity.upper()}] {issue.code} {issue.where}: {issue.message}")
+    mode = "strict" if args.strict else "planning"
+    print(
+        f"[dl2] longform-check ({mode}): {len(report.errors)} errors, "
+        f"{len(warnings)} warnings -> {out}"
+    )
+    return 1 if report.errors else 0
+
+
 def cmd_asset_approve(args: argparse.Namespace) -> int:
     from dlstudio.cli import CliError
     from dlstudio.services.asset_registry import AssetRegistryError, approve_asset
@@ -764,6 +819,35 @@ def cmd_preflight(args: argparse.Namespace) -> int:
         require_story_contract=height > width and manifest_path.is_file(),
     )
     issues.extend(editorial_report.issues)
+    longform_inputs: dict[str, str | None] = {}
+    if (root / "production.toml").is_file():
+        from dlstudio.production import ProductionError, load_production_manifest
+
+        try:
+            production_manifest = load_production_manifest(root)
+        except ProductionError as exc:
+            raise CliError(f"invalid production manifest: {exc}") from exc
+        if production_manifest.kind == "devlog":
+            from dlstudio.services.longform_preflight import (
+                STORY_MAP_PATH,
+                run_longform_preflight,
+            )
+
+            longform_story_path = root / STORY_MAP_PATH
+            longform_report = run_longform_preflight(root, strict=args.final)
+            issues.extend(longform_report.issues)
+            longform_inputs = {
+                "story_map": (
+                    longform_story_path.relative_to(root).as_posix()
+                    if longform_story_path.is_file()
+                    else None
+                ),
+                "story_map_sha256": (
+                    _sha256(longform_story_path)
+                    if longform_story_path.is_file()
+                    else None
+                ),
+            }
 
     artifact_value = args.artifact or getattr(edit, "output", None)
     artifact_path: Path | None = None
@@ -814,6 +898,7 @@ def cmd_preflight(args: argparse.Namespace) -> int:
             "render_artifact": str(artifact_path) if artifact_path is not None else None,
             "render_artifact_sha256": artifact_sha256,
             "compiled_ir_sha256": compiled_ir_sha256,
+            **longform_inputs,
             **script_inputs,
         },
     }
@@ -1144,6 +1229,18 @@ def add_subparsers(sub: argparse._SubParsersAction) -> None:
     )
     inventory.add_argument("edit", help="dotted edit, production path, or product:id")
     inventory.set_defaults(func=cmd_inventory)
+
+    longform = sub.add_parser(
+        "longform-check",
+        help="validate a devlog story map and montage contract before rendering",
+    )
+    longform.add_argument("edit", help="product-first devlog production")
+    longform.add_argument(
+        "--strict",
+        action="store_true",
+        help="block unresolved captures/placeholders before final VO",
+    )
+    longform.set_defaults(func=cmd_longform_check)
 
     register = sub.add_parser(
         "asset-register",

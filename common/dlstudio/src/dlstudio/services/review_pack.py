@@ -290,6 +290,7 @@ def build_review_pack(
             "clip": clip_path.relative_to(base).as_posix(),
         })
     story = _read_object(base / "data/plan/story_contract.json", {})
+    story_map = _read_object(base / "data/plan/story_map.json", {})
     viewer_text = []
     from dlstudio.services.editorial_preflight import viewer_html_paths, visible_html_text
     for html in viewer_html_paths(base):
@@ -315,10 +316,18 @@ def build_review_pack(
             "open_full_resolution_only_when_anomaly_found": True,
         },
         "shots": [{
-            "id": shot.get("id"), "purpose": shot.get("purpose"),
-            "src": shot.get("src"), "t0": shot.get("t0"), "t1": shot.get("t1"),
+            "id": shot.get("id"),
+            "arc_id": shot.get("arc_id"),
+            "story_role": shot.get("story_role"),
+            "visual_mode": shot.get("visual_mode"),
+            "purpose": shot.get("purpose"),
+            "src": shot.get("src"),
+            "t0": shot.get("t0"),
+            "t1": shot.get("t1"),
+            "internal_changes_seconds": shot.get("internal_changes_seconds"),
         } for shot in shots],
         "story_contract": story,
+        "story_map": story_map,
         "viewer_text": viewer_text,
         "preflight": {
             "ok": preflight.get("ok"), "errors": preflight.get("errors"),

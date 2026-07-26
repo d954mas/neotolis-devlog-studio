@@ -50,10 +50,12 @@ the `RESOLUTION` tuple in `design.py` — there is no separate format field.
 | Motion / infographic asset | `dl2 gen-html <asset> --init`, edit HTML, render to `data/infographics/` |
 | Stock b-roll | `dl2 stock search` / `dl2 stock download` |
 | YouTube package | `dl2 publish <edit>` → `data/publish/youtube_package.md` |
+| Archive a completed publish package | After `dl2 deliver`, run `py -3.12 tools/publish_archive.py --workspace . --destination C:\Users\ROG\YandexDisk\Devlogs\projects`; this is append-only, SHA-verified, and archives only final publish/delivery files |
 | Completed or interrupted production run | Spawn `devlog-reflector` once; persist a timestamped report under `data/review/reflections/` |
 | Environment triage | `dl2 doctor` |
 | Engine-work verification | `dl2 verify --changed` |
 | Vertical reel, before any `dl2 final` | Run `docs/CHECKLIST_VERTICAL_REEL.md` section A in full — no deadline exception |
+| Long-form devlog | Read `docs/LONGFORM_DEVLOG_AUDIT_2026-07-26.md` and normative `docs/LONGFORM_DEVLOG_SPEC.md`; fill `story_map.json` + enriched `shot_manifest.json`; run `dl2 longform-check <product:production>` during planning and `--strict` before final VO; run `docs/CHECKLIST_LONG_DEVLOG.md` before `dl2 final` |
 
 Agent routing:
 
@@ -275,8 +277,9 @@ can't be substituted; reviewer demands a 6th iteration.
 
 ## Quality rules
 
-`common/quality/` holds the VQ-* catalog (sync, audio, motion, hook, safe
-zones, ending, real-product proof, resolution, word indices, assets).
+`common/quality/` holds the VQ-* catalog (sync, audio, motion, hook,
+long-form story, safe zones, ending, real-product proof, resolution, word
+indices, assets).
 Mechanical parts of VQ-SYNC/VQ-RES/VQ-WORDS/VQ-ASSET are enforced in code
 (`common/dlstudio/src/dlstudio/check/`); the rest is judgment, checked
 against the rule files — never assumed from "looks fine". Unverified ≠ pass.
@@ -301,5 +304,8 @@ against the rule files — never assumed from "looks fine". Unverified ≠ pass.
 - `docs/QUICKSTART_V2.md` — full draft path (commands + output paths)
 - `docs/ARCHITECTURE_V2.md` — engine contract and phase status
 - `docs/PLAN_STUDIO_V2.md` — production plan, safe-fix/stop rules
+- `docs/LONGFORM_DEVLOG_SPEC.md` — mandatory story, montage, presentation, and review contract for `kind=devlog`
+- `docs/LONGFORM_DEVLOG_AUDIT_2026-07-26.md` — current-state critique, competitor comparison, and evidence-backed acceptance bar
+- `docs/PLAN_NEXT_LONGFORM_DEVLOG.md` — phased plan and exit criteria for the next Not a Trolley Problem episode
 - `.claude/agents/` — canonical workspace agent templates
 - `<project>/.claude/agents/` — project-local copies/overrides
