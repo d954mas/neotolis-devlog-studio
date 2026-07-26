@@ -356,13 +356,14 @@ class ProductionRepository:
     def pending_recovery_markers(self) -> tuple[Path, ...]:
         """Return durable recovery markers without interpreting domain payloads."""
 
-        if not self.staging_root.is_dir():
+        recovery_root = self.staging_root / "recovery"
+        if not recovery_root.is_dir():
             return ()
         return tuple(
             sorted(
                 (
                     path
-                    for path in self.staging_root.glob("*/recovery.json")
+                    for path in recovery_root.glob("*/recovery.json")
                     if path.is_file()
                 ),
                 key=lambda path: path.as_posix(),
@@ -632,7 +633,7 @@ class MutationSession:
         self.operation_id = operation_id
         self.expected_revision = expected_revision
         self.allow_recovery = allow_recovery
-        self.stage = repository.staging_root / operation_id
+        self.stage = repository.staging_root / "recovery" / operation_id
         self.recovery_path = self.stage / "recovery.json"
         self._lease = repository.writer_lease(timeout=timeout)
         self._head: HeadRef | None = None
@@ -669,11 +670,13 @@ class MutationSession:
                 )
             self._head = self.repository.read_head()
             actual = 0 if self._head is None else self._head.revision
-            if actual != self.expected_revision:
+            if not self.allow_recovery and actual != self.expected_revision:
                 raise CasConflict(
                     f"expected head revision {self.expected_revision}, "
                     f"got {actual}"
                 )
+            if self.allow_recovery:
+                self.expected_revision = actual
             self._root = self.repository.read_root(self._head)
             return self
         except BaseException:
@@ -719,7 +722,7 @@ class MutationSession:
             not isinstance(payload, dict)
             or payload.get("operation_id") != self.operation_id
             or payload.get("production_id") != self.repository.production_id
-            or payload.get("expected_revision") != self.expected_revision
+            or not isinstance(payload.get("expected_revision"), int)
         ):
             raise CorruptObject("recovery marker identity mismatch")
         return MappingProxyType(dict(payload["payload"]))
@@ -740,15 +743,27 @@ class MutationSession:
     def commit_records(
         self,
         records: Mapping[str, BlobRef],
+    ) -> HeadRef:
+        """Commit only unowned records; domain repositories use private owner API."""
+
+        if any(_reserved_record(key) for key in records):
+            raise ValueError("reserved record namespace is owned")
+        return self._commit_owned_records(
+            records, owned_record_keys=frozenset()
+        )
+
+    def _commit_owned_records(
+        self,
+        records: Mapping[str, BlobRef],
         *,
-        allowed_reserved_keys: frozenset[str],
+        owned_record_keys: frozenset[str],
     ) -> HeadRef:
         if not self.held:
             raise RuntimeError("mutation session is not open")
         head = self.repository._update_records_under_lease(
             records,
             expected_revision=self.expected_revision,
-            allowed_reserved_keys=allowed_reserved_keys,
+            allowed_reserved_keys=owned_record_keys,
         )
         self.expected_revision = head.revision
         self._head = head
@@ -837,6 +852,16 @@ class OperationTransaction:
             return self.stage
         self._lease.acquire()
         try:
+            recovery_path = (
+                self.repository.staging_root
+                / "recovery"
+                / self.operation_id
+                / "recovery.json"
+            )
+            if recovery_path.is_file():
+                raise RecoveryRequired(
+                    "operation is blocked by its unresolved recovery marker"
+                )
             current_root = self.repository.read_root()
             committed_ref = current_root.records.get(self.root_record_key)
             if committed_ref is not None:
