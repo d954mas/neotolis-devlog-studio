@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[4]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from tools.studio_v3_verify.gates import (
     GateStatus,
@@ -135,7 +140,6 @@ def test_cutover_scan_requires_legacy_paths_to_be_absent(tmp_path: Path) -> None
     assert any("legacy path still exists" in detail for detail in result.details)
 
 
-@pytest.mark.canonical_vector
 def test_canonical_vector_hook_rejects_hash_mismatch(tmp_path: Path) -> None:
     vector = tmp_path / "bad.vector.json"
     vector.write_text(
@@ -156,7 +160,6 @@ def test_canonical_vector_hook_rejects_hash_mismatch(tmp_path: Path) -> None:
     assert any("hash mismatch" in detail for detail in result.details)
 
 
-@pytest.mark.canonical_vector
 def test_repository_canonical_vectors_are_valid() -> None:
     vectors = Path(__file__).with_name("vectors")
 
@@ -166,7 +169,6 @@ def test_repository_canonical_vectors_are_valid() -> None:
     assert result.metrics["vectors"] >= 1
 
 
-@pytest.mark.performance_smoke
 def test_performance_contract_requires_all_behavior_hooks() -> None:
     config_path = Path(__file__).parents[4] / "tools" / "studio_v3_verify" / "config.json"
     config = json.loads(config_path.read_text(encoding="utf-8"))
