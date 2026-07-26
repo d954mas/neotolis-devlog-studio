@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "production_id": "2026_07_19_reel_01",
+  "standalone_story": "A nominal 30 fps gameplay capture is shown to repeat every second frame, then a verified smooth re-capture proves the fix.",
+  "shots": [
+    {
+      "id": "nominal_30fps_hook",
+      "vo_range": null,
+      "purpose": "Show the real stuttering capture and establish the 30 fps contradiction.",
+      "src": "data/footage/before_gameplay.mp4",
+      "source_role": "real_product",
+      "t0": 0.0,
+      "t1": 3.0,
+      "min_readable_duration": 2.0,
+      "reuse": "callback",
+      "motion": "native",
+      "intent": "deliberate_low_fps_demo",
+      "presentation": "framed",
+      "approved": true
+    },
+    {
+      "id": "duplicate_frame_evidence",
+      "vo_range": null,
+      "purpose": "Show six real adjacent frames as three repeated pairs and state the measured ratio.",
+      "src": "data/footage/before_gameplay.mp4",
+      "source_role": "real_product",
+      "t0": 3.0,
+      "t1": 6.8,
+      "min_readable_duration": 2.5,
+      "reuse": "callback",
+      "motion": "static",
+      "intent": "deliberate_hold",
+      "presentation": "framed",
+      "approved": true
+    },
+    {
+      "id": "smooth_recapture_proof",
+      "vo_range": null,
+      "purpose": "Show the real smooth re-capture in matching framing and hold the resolved result.",
+      "src": "data/footage/after_gameplay.mp4",
+      "source_role": "real_product",
+      "t0": 6.8,
+      "t1": 10.5,
+      "min_readable_duration": 2.5,
+      "reuse": "new",
+      "motion": "native",
+      "intent": "payoff",
+      "presentation": "framed",
+      "approved": true
+    }
+  ]
+}

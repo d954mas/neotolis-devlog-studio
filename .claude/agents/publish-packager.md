@@ -63,8 +63,11 @@ gates weren't actually checked.
    Never invent a URL.
 5. **Tags:** derive from actual content — engine, genre, jam name, tools,
    topics covered. No generic filler tags ("gamedev, indie, fun").
-6. **Thumbnail slot:** reference where `thumbnail-designer`'s output lives
-   (e.g. `data/publish/thumbnail*.png`); confirm it exists, flag if missing.
+6. **A/B package hypotheses:** pair each title archetype with the matching
+   `thumbnail_curiosity.png`, `thumbnail_number.png`, or
+   `thumbnail_outcome.png`. The three pairs must express different promises,
+   not cosmetic variants. Mark one default. Preserve all three for YouTube's
+   native long-form A/B test, whose winner is watch time rather than CTR alone.
    Never generate or edit the thumbnail image yourself.
 7. **Fill the skeleton in place:** `Read` the file generated in step 1, then
    `Write` it back to that SAME path — filling in the judgment sections

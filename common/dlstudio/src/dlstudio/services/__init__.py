@@ -7,6 +7,7 @@ Implemented so far (record -> process -> render loop, Phase 3 Studio):
   tts.py         scratch_tts()   — throwaway VO for pacing checks
                   (sapi implemented; piper | silero are documented slots,
                   see docs/issues/local-russian-tts-research.md).
+  speech_edit.py agent plan + deterministic FFmpeg cuts + words remapping.
 
 Phase 4 additions:
   stock.py       search()/download() — thin Pexels/Pixabay b-roll wrapper,
@@ -36,10 +37,40 @@ provider functions are the only place that imports requests, same rule.
 """
 from __future__ import annotations
 
-from .audio import AudioStageError, ProcessResult, process_take
-from .hyperframes import init_project, render_html
+from .audio import (
+    AudioStageError,
+    ProcessResult,
+    VoiceTakeMarkers,
+    VoiceTakeQualityError,
+    load_voice_take_markers,
+    process_take,
+    recording_metadata_path,
+    write_voice_take_verdict,
+)
+from .boundary_report import build_boundary_report, write_boundary_report
+from .bundle import bundle_read_lock, promote_bundle, recover_bundle_transactions
+from .geometry_report import (
+    build_geometry_report,
+    timeline_for_design,
+    timeline_geometry_sha256,
+    write_geometry_report,
+)
+from .hyperframes import init_project, render_html, validate_hyperframes_render_manifest
 from .publish import generate_youtube_package
 from .review import extract_keyframes, make_contact_sheet
+from .speech_edit import (
+    SpeechCut,
+    SpeechEditPlan,
+    SpeechEditResult,
+    SpeechEditStageError,
+    ResolvedSpeechCuts,
+    build_automatic_plan,
+    build_automatic_plan_from_files,
+    detect_silences,
+    execute_speech_edit,
+    resolve_safe_cuts,
+    sha256_file,
+)
 from .stock import StockConfigError, StockResult, download, search
 from .transcribe import transcribe
 from .tts import UnknownTTSBackendError, list_sapi_voices, scratch_tts
@@ -47,11 +78,37 @@ from .tts import UnknownTTSBackendError, list_sapi_voices, scratch_tts
 __all__ = [
     "AudioStageError",
     "ProcessResult",
+    "VoiceTakeMarkers",
+    "VoiceTakeQualityError",
+    "load_voice_take_markers",
     "process_take",
+    "recording_metadata_path",
+    "write_voice_take_verdict",
+    "promote_bundle",
+    "bundle_read_lock",
+    "recover_bundle_transactions",
+    "build_boundary_report",
+    "write_boundary_report",
+    "build_geometry_report",
+    "timeline_for_design",
+    "timeline_geometry_sha256",
+    "write_geometry_report",
     "init_project",
     "render_html",
+    "validate_hyperframes_render_manifest",
     "extract_keyframes",
     "make_contact_sheet",
+    "SpeechCut",
+    "SpeechEditPlan",
+    "SpeechEditResult",
+    "SpeechEditStageError",
+    "ResolvedSpeechCuts",
+    "build_automatic_plan",
+    "build_automatic_plan_from_files",
+    "detect_silences",
+    "execute_speech_edit",
+    "resolve_safe_cuts",
+    "sha256_file",
     "generate_youtube_package",
     "StockConfigError",
     "StockResult",

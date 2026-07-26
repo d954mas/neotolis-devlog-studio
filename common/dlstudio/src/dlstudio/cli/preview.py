@@ -25,6 +25,7 @@ def cmd_preview(args: argparse.Namespace) -> int:
         _iterate_render,
         _load_edit,
         _load_v2_config,
+        _resize_design,
         _resolve_edit_arg,
     )
 
@@ -33,9 +34,14 @@ def cmd_preview(args: argparse.Namespace) -> int:
     edit = _load_edit(dotted)
 
     timeline = dl_compile.build_timeline(edit)
+    width_spec = args.width or "540p"
+    effective_design = _resize_design(timeline.design, width_spec)
+    effective_timeline = services.timeline_for_design(timeline, effective_design)
+    geometry_report = services.write_geometry_report(effective_timeline)
+    boundary_report = services.write_boundary_report(effective_timeline)
     rc = _iterate_render(
         edit, timeline,
-        width_spec=args.width or "540p", quality=args.quality or "draft",
+        width_spec=width_spec, quality=args.quality or "draft",
         gpu=False, no_cache=False, stale=True, jobs=args.jobs,
     )
     if rc:
@@ -48,6 +54,8 @@ def cmd_preview(args: argparse.Namespace) -> int:
         output, Path("data/review/keyframes"), count=args.keyframes)
 
     print(f"[dl2] preview: draft   -> {output}")
+    print(f"[dl2] preview: geometry-> {geometry_report}")
+    print(f"[dl2] preview: boundary-> {boundary_report}")
     print(f"[dl2] preview: sheet   -> {sheet}")
     print(f"[dl2] preview: frames  -> {frames[0].parent} ({len(frames)} files)")
     return 0

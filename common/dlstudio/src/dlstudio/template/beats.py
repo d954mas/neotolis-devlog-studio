@@ -36,7 +36,17 @@ BEATS = {
         vo="Привет! Это новый девлог про мою игру: что нового за неделю.",
         # Beat-level scene: фоновое видео под всеми plate/overlay чанками
         # бита (chunk.scene, если задан, перекрывает его).
-        scene=Scene(kind="video", src="data/footage/gameplay_01.mp4", loop=True),
+        scene=Scene(
+            kind="video",
+            src="data/footage/gameplay_01.mp4",
+            asset_id="capture:gameplay_01",
+            editorial_role="gameplay",
+            expected_state_id="replace-with-game-state-id",
+            expected_build_id="exe-sha256:" + "0" * 64,
+            expected_action_id="replace-with-visible-action-id",
+            offset=5.0,
+            loop=False,
+        ),
         chunks=[
             # Plate: полноэкранный центрированный текст; transition на
             # чанке — переход ВНУТРЬ чанка.
@@ -73,14 +83,28 @@ BEATS = {
             # VideoShot: видеофрагмент как собственный визуал чанка.
             Chunk(
                 words=(4, 7),
-                content=VideoShot(src="data/footage/feature_demo.mp4"),
+                content=VideoShot(
+                    src="data/footage/feature_demo.mp4",
+                    asset_id="capture:feature_demo",
+                    editorial_role="gameplay",
+                    expected_state_id="replace-with-game-state-id",
+                    expected_build_id="exe-sha256:" + "0" * 64,
+                    expected_action_id="replace-with-visible-action-id",
+                    offset=5.0,
+                ),
             ),
             # Инфографика: MP4, отрендеренный из HTML-исходника
             # (data/hyperframes/) командой `dl2 gen-html` — подключается
             # как обычное видео.
             Chunk(
                 words=(8, 17),
-                content=VideoShot(src="data/infographics/wishlist_chart.mp4"),
+                content=VideoShot(
+                    src="data/infographics/wishlist_chart.mp4",
+                    render_manifest=(
+                        "data/infographics/wishlist_chart.mp4.render.json"
+                    ),
+                    editorial_role="presentation",
+                ),
             ),
         ],
     ),

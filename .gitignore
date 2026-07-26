@@ -61,6 +61,15 @@ __pycache__/
 **/data/infographics/.build_cache.json
 **/data/infographics/*.hyperframes_error.txt
 .asset_cache/
+.runtime/research-media/
+
+# Pattern Lab workspace data is personal and backed up/exported separately.
+data/research/
+
+# Local secrets and machine-specific settings.
+.env
+.env.*
+!.env.example
 
 # ─── Stray temp files in project root ──────────────────────
 **/tmp_*

@@ -15,7 +15,7 @@ Two levels of check:
 """
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 _MAX_NAME = 200
 
@@ -63,9 +63,16 @@ def safe_join(root: Path, rel: str) -> Path | None:
     if not rel or "\x00" in rel:
         return None
     p = Path(rel)
+    windows_path = PureWindowsPath(rel)
     # Absolute, drive-letter (C:\...), or UNC (\\host\share) paths are never
     # "under root" — reject before any resolution.
-    if p.is_absolute() or p.drive or p.anchor not in ("", "/", "\\"):
+    if (
+        p.is_absolute()
+        or p.drive
+        or p.anchor not in ("", "/", "\\")
+        or windows_path.drive
+        or windows_path.root
+    ):
         return None
     root_r = _strip_extended_prefix(root.resolve())
     # Two attempts: under concurrent create/delete churn Windows can also

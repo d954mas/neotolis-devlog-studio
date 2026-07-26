@@ -1,0 +1,64 @@
+{
+  "schema": "devlog.longform_story_map/v1",
+  "title": "<viewer-facing working title>",
+  "macro_question": "<one question the ending can answer>",
+  "target_duration_seconds": 540,
+  "cold_open": {
+    "anomaly": "<real failure, surprising behavior, or costly decision shown by 0:08>",
+    "result_glimpse": "<one brief shot of the eventual payoff>",
+    "episode_promise": "<what the viewer will understand or see by the end>",
+    "sources": [
+      {
+        "role": "failure",
+        "path": "data/footage/<cold-open-failure>.mp4",
+        "status": "needs_capture"
+      },
+      {
+        "role": "payoff",
+        "path": "data/footage/<cold-open-payoff>.mp4",
+        "status": "needs_capture"
+      }
+    ]
+  },
+  "mini_arcs": [
+    {
+      "id": "arc_01",
+      "planned_start_seconds": 20,
+      "planned_end_seconds": 90,
+      "viewer_question": "<what can go wrong here?>",
+      "goal": "<specific intended outcome>",
+      "failure": "<first bad version or obstacle>",
+      "cause": "<concrete reason, in viewer language>",
+      "solution": "<decision or experiment>",
+      "proof": "<visible result that answers the viewer question>",
+      "reaction": "<your honest reaction, opinion, or self-ironic observation>",
+      "sources": [
+        {
+          "role": "before",
+          "path": "data/footage/<before>.mp4",
+          "status": "needs_capture"
+        },
+        {
+          "role": "failure",
+          "path": "data/footage/<failure>.mp4",
+          "status": "needs_capture"
+        },
+        {
+          "role": "process",
+          "path": "data/footage/<process>.mp4",
+          "status": "needs_capture"
+        },
+        {
+          "role": "payoff",
+          "path": "data/footage/<payoff>.mp4",
+          "status": "needs_capture"
+        }
+      ]
+    }
+  ],
+  "ending": {
+    "resolved_question": "<direct answer to macro_question>",
+    "honest_status": "<what remains broken or unfinished>",
+    "next_open_loop": "<one concrete question for the next episode>"
+  }
+}

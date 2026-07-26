@@ -10,7 +10,8 @@ missing an entry (fix it) or the caller should fall back to `--full`.
 
 Domain table (source-relative to common/dlstudio/src/dlstudio/):
 
-    model/ | ir.py      -> the FULL suite (["tests"]). IR/model is a shared
+    model/ | ir.py | production.py
+                         -> the FULL suite (["tests"]). These are shared
                             contract imported by cache, check, cli, compile,
                             render/assemble, render/beat, and services/publish
                             -- narrowing to a fixed test-stem list keeps
@@ -75,6 +76,7 @@ import argparse
 import shutil
 import subprocess
 import sys
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -117,6 +119,7 @@ _SRC_PREFIX_DOMAINS: tuple[tuple[str, str], ...] = (
     ("render/", "render"),
     ("model/", "model_ir"),
     ("ir.py", "model_ir"),
+    ("production.py", "model_ir"),
     ("compile/", "compile_check"),
     ("check/", "compile_check"),
     ("cache/", "cache"),
@@ -257,7 +260,23 @@ def run_pytest(file_args: list[str], *, cwd: Path) -> subprocess.CompletedProces
     interpreter's pytest session. Tests monkeypatch this function directly
     to assert on the collected file list without paying for a real (nested)
     pytest run."""
-    cmd = [sys.executable, "-m", "pytest", *file_args, "-q"]
+    # Keep pytest's transient state inside the repository. On managed
+    # Windows workstations the ambient %TEMP% can be readable but not
+    # writable, which made the verification facade fail before collecting
+    # a single test. A unique path also makes consecutive/nested verify
+    # runs independent (pytest owns and may clear --basetemp).
+    temp_parent = cwd / "tmp" / "verify"
+    temp_parent.mkdir(parents=True, exist_ok=True)
+    basetemp = temp_parent / f"pytest-{uuid.uuid4().hex}"
+    cmd = [
+        sys.executable,
+        "-m",
+        "pytest",
+        *file_args,
+        "-q",
+        "--basetemp",
+        str(basetemp),
+    ]
     return subprocess.run(cmd, cwd=cwd)
 
 

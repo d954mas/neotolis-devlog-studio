@@ -153,6 +153,13 @@ def test_classify_path_unmapped_src_path_under_dlstudio():
     assert c.kind == "unmapped"
 
 
+def test_classify_path_production_contract_runs_full_suite():
+    c = verify.classify_path("common/dlstudio/src/dlstudio/production.py")
+    assert c.kind == "full_suite"
+    assert c.domain == "model_ir"
+    assert c.tests == verify.FULL_SUITE_TESTS
+
+
 def test_classify_path_bare_package_init_is_unmapped():
     c = verify.classify_path("common/dlstudio/src/dlstudio/__init__.py")
     assert c.kind == "unmapped"
@@ -261,6 +268,29 @@ def test_resolve_test_files_expands_and_dedups(tmp_path):
 
 def test_resolve_test_files_missing_pattern_yields_nothing(tmp_path):
     assert verify.resolve_test_files({"test_totally_nonexistent_*"}, tmp_path) == []
+
+
+def test_run_pytest_uses_repository_local_unique_basetemp(monkeypatch, tmp_path):
+    captured = {}
+
+    class _FixedUuid:
+        hex = "fixed"
+
+    monkeypatch.setattr(verify.uuid, "uuid4", lambda: _FixedUuid())
+
+    def fake_run(cmd, cwd):
+        captured["cmd"] = cmd
+        captured["cwd"] = cwd
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(verify.subprocess, "run", fake_run)
+    result = verify.run_pytest(["tests/test_cli.py"], cwd=tmp_path)
+
+    assert result.returncode == 0
+    assert captured["cwd"] == tmp_path
+    basetemp_index = captured["cmd"].index("--basetemp") + 1
+    assert Path(captured["cmd"][basetemp_index]) == tmp_path / "tmp" / "verify" / "pytest-fixed"
+    assert (tmp_path / "tmp" / "verify").is_dir()
 
 
 def test_resolve_test_files_against_the_real_tests_dir_finds_new_phase4_files():

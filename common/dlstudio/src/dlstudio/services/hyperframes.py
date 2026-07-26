@@ -32,11 +32,20 @@ is probed at call time inside `render_html()`, never at import time.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
+
+from dlstudio.production import ProductionError, load_production_manifest
+
+from .visual_blocks import ORIENTATIONS, VISUAL_BLOCK_TEMPLATES, render_visual_block_html
+from .visual_block_evidence import validate_visual_evidence
 
 # Ported from the legacy bridge (common/devlog/hyperframes.py), kept thin on
 # purpose: scaffold + render only; every other knob (fps, resolution,
@@ -50,6 +59,8 @@ _PACKAGE = "hyperframes"
 # knows draft/standard/high; "final" buys its best encode).
 _QUALITY_MAP: dict[str, str] = {"draft": "draft", "final": "high"}
 
+_IMAGE_VARIABLES = {"before_image", "after_image", "image", "background_image"}
+
 
 def _npx() -> str:
     exe = shutil.which("npx.cmd") or shutil.which("npx")
@@ -61,17 +72,365 @@ def _npx() -> str:
     return exe
 
 
-def init_project(project_dir: Path, *, force: bool = False,
-                 title: str = "273 COMMITS") -> Path:
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _json_object(path: Path, *, label: str) -> dict[str, object]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"{label} is not valid UTF-8 JSON: {path}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise RuntimeError(f"{label} must contain one JSON object: {path}")
+    return value
+
+
+def _validate_visual_block_values(
+    project: Path,
+    variables_path: Path | None,
+    *,
+    production_root: Path | None = None,
+) -> dict[str, object] | None:
+    """Fail closed for built-in production blocks before invoking npx."""
+    meta_path = project / "meta.json"
+    if not meta_path.is_file():
+        return None
+    meta = _json_object(meta_path, label="HyperFrames project metadata")
+    template = meta.get("template")
+    if template in (None, "starter"):
+        return None
+    if not isinstance(template, str) or template not in VISUAL_BLOCK_TEMPLATES:
+        raise RuntimeError(f"unknown visual-block template in {meta_path}: {template!r}")
+    if variables_path is None:
+        raise RuntimeError(
+            f"visual-block template {template!r} requires --variables-file for render; "
+            "declared defaults are preview placeholders, not release copy."
+        )
+    values = _json_object(variables_path, label="HyperFrames variables file")
+    required = VISUAL_BLOCK_TEMPLATES[template].required_variables
+    missing = [
+        key for key in required
+        if key not in values or (
+            isinstance(values.get(key), str) and not str(values[key]).strip()
+        )
+    ]
+    if missing:
+        raise RuntimeError(
+            f"visual-block template {template!r} is missing required variables: "
+            + ", ".join(missing)
+        )
+    from .editorial_preflight import public_copy_issues
+
+    public_issues = public_copy_issues(
+        production_root or project,
+        [
+            (f"{variables_path.name}:{key}", value)
+            for key, value in values.items()
+            if isinstance(value, str) and key not in _IMAGE_VARIABLES
+        ],
+    )
+    if public_issues:
+        raise RuntimeError(public_issues[0].message)
+
+    for key in _IMAGE_VARIABLES.intersection(values):
+        raw = values[key]
+        if not isinstance(raw, str):
+            continue  # HyperFrames --strict-variables reports the type.
+        asset = (project / raw).resolve()
+        try:
+            asset.relative_to(project)
+        except ValueError as exc:
+            raise RuntimeError(
+                f"visual-block asset must stay inside its project: {key}={raw!r}"
+            ) from exc
+        if not asset.is_file():
+            raise RuntimeError(f"visual-block asset not found: {key}={asset}")
+
+    if template == "before-after":
+        before = (project / str(values["before_image"])).resolve()
+        after = (project / str(values["after_image"])).resolve()
+        if before.is_file() and after.is_file() and _sha256(before) == _sha256(after):
+            raise RuntimeError(
+                "before-after proof uses identical inputs; provide two registered states."
+            )
+    if template == "cta-endcard":
+        title = str(values["game_title"]).strip()
+        public_copy = " ".join(
+            str(values[key]) for key in ("game_title", "eyebrow", "cta", "episode")
+        ).casefold()
+        cta = str(values["cta"]).casefold()
+        url = str(values["steam_url"]).strip()
+        if title.casefold() == "your game":
+            raise RuntimeError("CTA game_title is still the preview placeholder.")
+        if "следующая остановка" in public_copy or "next stop" in public_copy:
+            raise RuntimeError(
+                "CTA must not claim Steam is a future stop when the page already exists."
+            )
+        if not any(token in cta for token in ("вишлист", "желаем", "wishlist")):
+            raise RuntimeError("CTA must explicitly ask viewers to wishlist the game.")
+        parsed = urlparse(url)
+        canonical_path = re.fullmatch(r"/app/\d+(?:/[^/?#]+)?/?", parsed.path)
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname != "store.steampowered.com"
+            or parsed.port is not None
+            or canonical_path is None
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise RuntimeError("CTA steam_url must be a canonical Steam app URL.")
+        if production_root is not None:
+            try:
+                production = load_production_manifest(production_root)
+            except ProductionError as exc:
+                raise RuntimeError(f"CTA cannot load canonical product metadata: {exc}") from exc
+            canonical_steam = production.product.sources.get("steam")
+            if canonical_steam is None:
+                raise RuntimeError(
+                    "CTA requires canonical [sources].steam in product.toml."
+                )
+            if title != production.product.title:
+                raise RuntimeError(
+                    "CTA game_title does not match canonical product.toml title."
+                )
+            if url.rstrip("/") != canonical_steam.rstrip("/"):
+                raise RuntimeError(
+                    "CTA steam_url does not match canonical product.toml [sources].steam."
+                )
+    return values
+
+
+def _find_production_root(project: Path, explicit: Path | None) -> Path | None:
+    if explicit is not None:
+        return explicit.resolve()
+    for candidate in (project, *project.parents):
+        if (candidate / "production.toml").is_file():
+            try:
+                return load_production_manifest(candidate).root
+            except ProductionError as exc:
+                raise RuntimeError(f"invalid production root: {exc}") from exc
+        try:
+            relative = project.relative_to(candidate)
+        except ValueError:
+            continue
+        # Legacy projects have no production.toml. Infer their root only
+        # from the canonical data/hyperframes layout; merely encountering a
+        # devlog.toml farther up (for example the workspace root in tests)
+        # must not capture an unrelated project.
+        if relative.parts[:2] == ("data", "hyperframes"):
+            return candidate.resolve()
+    return None
+
+
+def _relative_bound(root: Path, path: Path, *, label: str) -> str:
+    resolved = path.resolve()
+    try:
+        return resolved.relative_to(root.resolve()).as_posix()
+    except ValueError as exc:
+        raise RuntimeError(f"{label} must stay inside the production root: {resolved}") from exc
+
+
+def _write_render_manifest(
+    *,
+    project: Path,
+    out: Path,
+    quality: str,
+    variables: Path | None,
+    evidence: Path | None,
+    production_root: Path | None,
+) -> Path | None:
+    if not out.is_file():
+        return None
+    meta_path = project / "meta.json"
+    meta = (
+        _json_object(meta_path, label="HyperFrames project metadata")
+        if meta_path.is_file()
+        else {}
+    )
+    root = production_root or Path(
+        os.path.commonpath(
+            [str(path.resolve()) for path in (project, out.parent)]
+        )
+    )
+    payload: dict[str, object] = {
+        "schema": "devlog.hyperframes_render/v2",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "artifact": {
+            "path": _relative_bound(root, out, label="HyperFrames artifact"),
+            "sha256": _sha256(out),
+        },
+        "project": {
+            "path": _relative_bound(root, project, label="HyperFrames project"),
+            "entry_sha256": _sha256(project / ENTRY_FILE),
+            "meta_sha256": _sha256(meta_path) if meta_path.is_file() else None,
+        },
+        "quality": quality,
+        "template": meta.get("template"),
+        "orientation": meta.get("orientation"),
+    }
+    if variables is not None:
+        payload["variables"] = {
+            "path": _relative_bound(root, variables, label="HyperFrames variables"),
+            "sha256": _sha256(variables),
+        }
+    if evidence is not None:
+        payload["evidence"] = {
+            "path": _relative_bound(root, evidence, label="HyperFrames evidence"),
+            "sha256": _sha256(evidence),
+        }
+    manifest = out.with_suffix(out.suffix + ".render.json")
+    manifest.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return manifest
+
+
+def _manifest_file(
+    root: Path,
+    value: object,
+    *,
+    label: str,
+    required: bool = True,
+) -> Path | None:
+    if value is None and not required:
+        return None
+    if not isinstance(value, dict):
+        raise RuntimeError(f"{label} record is missing from render manifest.")
+    raw_path = value.get("path")
+    expected_hash = value.get("sha256")
+    if not isinstance(raw_path, str) or not raw_path or not isinstance(expected_hash, str):
+        raise RuntimeError(f"{label} record requires path and sha256.")
+    path = (root / raw_path).resolve()
+    try:
+        path.relative_to(root)
+    except ValueError as exc:
+        raise RuntimeError(f"{label} path escapes the production root.") from exc
+    if not path.is_file() or _sha256(path) != expected_hash.casefold():
+        raise RuntimeError(f"{label} file is missing or stale: {raw_path}")
+    return path
+
+
+def validate_hyperframes_render_manifest(
+    artifact: str | Path,
+    manifest_path: str | Path,
+    production_root: str | Path,
+    *,
+    require_final: bool = False,
+    expected_timeline_sha256: str | None = None,
+) -> None:
+    """Revalidate a generated video and every release input at final-check time."""
+    root = Path(production_root).resolve()
+    manifest_file = Path(manifest_path)
+    if not manifest_file.is_absolute():
+        manifest_file = root / manifest_file
+    manifest_file = manifest_file.resolve()
+    try:
+        manifest_file.relative_to(root)
+    except ValueError as exc:
+        raise RuntimeError("HyperFrames render manifest escapes the production root.") from exc
+    manifest = _json_object(manifest_file, label="HyperFrames render manifest")
+    if manifest.get("schema") != "devlog.hyperframes_render/v2":
+        raise RuntimeError("HyperFrames render manifest has an unsupported schema.")
+    if require_final and manifest.get("quality") != "final":
+        raise RuntimeError(
+            "shipping requires a HyperFrames manifest rendered at quality=final."
+        )
+
+    artifact_path = _manifest_file(root, manifest.get("artifact"), label="artifact")
+    expected_artifact = Path(artifact)
+    if not expected_artifact.is_absolute():
+        expected_artifact = root / expected_artifact
+    if artifact_path != expected_artifact.resolve():
+        raise RuntimeError("HyperFrames render manifest points to a different artifact.")
+
+    project_record = manifest.get("project")
+    if not isinstance(project_record, dict) or not isinstance(project_record.get("path"), str):
+        raise RuntimeError("HyperFrames render manifest requires a project record.")
+    project = (root / str(project_record["path"])).resolve()
+    try:
+        project.relative_to(root)
+    except ValueError as exc:
+        raise RuntimeError("HyperFrames project escapes the production root.") from exc
+    entry = project / ENTRY_FILE
+    meta_path = project / "meta.json"
+    if (
+        not entry.is_file()
+        or _sha256(entry) != str(project_record.get("entry_sha256", "")).casefold()
+        or not meta_path.is_file()
+        or _sha256(meta_path) != str(project_record.get("meta_sha256", "")).casefold()
+    ):
+        raise RuntimeError("HyperFrames project source changed after render.")
+
+    variables = _manifest_file(
+        root,
+        manifest.get("variables"),
+        label="variables",
+        required=False,
+    )
+    evidence = _manifest_file(
+        root,
+        manifest.get("evidence"),
+        label="evidence",
+        required=False,
+    )
+    values = _validate_visual_block_values(
+        project,
+        variables,
+        production_root=root,
+    )
+    meta = _json_object(meta_path, label="HyperFrames project metadata")
+    template = meta.get("template")
+    orientation = meta.get("orientation")
+    if manifest.get("template") != template or manifest.get("orientation") != orientation:
+        raise RuntimeError("HyperFrames project metadata no longer matches render manifest.")
+    validate_visual_evidence(
+        project,
+        production_root=root,
+        template=template if isinstance(template, str) else None,
+        values=values,
+        evidence_path=evidence,
+        expected_timeline_sha256=expected_timeline_sha256,
+    )
+
+
+def init_project(
+    project_dir: Path,
+    *,
+    force: bool = False,
+    title: str = "273 COMMITS",
+    template: str | None = None,
+    orientation: str = "landscape",
+) -> Path:
     """Scaffold a starter HyperFrames project into `project_dir`.
 
     Writes `index.html` (a small bar-chart composition demonstrating the
     paused-timeline `window.__timelines` contract), `meta.json`, and empty
     `compositions/` + `assets/` directories. Refuses a non-empty existing
-    directory unless `force=True`; `title` is the headline text baked into
-    the starter composition.
+    directory unless `force=True`. When `template` names a built-in visual
+    block, writes that parametrized production scaffold instead of the
+    legacy bar-chart starter.
     """
     root = Path(project_dir)
+    if template is not None and template not in VISUAL_BLOCK_TEMPLATES:
+        raise ValueError(
+            f"unknown visual-block template: {template!r}. "
+            f"Use one of {sorted(VISUAL_BLOCK_TEMPLATES)}."
+        )
+    if orientation not in ORIENTATIONS:
+        raise ValueError(
+            f"unknown orientation: {orientation!r}. Use one of {sorted(ORIENTATIONS)}."
+        )
+    if template is None and orientation != "landscape":
+        raise ValueError(
+            "orientation applies to a visual-block template. Pass --template "
+            "or use the legacy starter's landscape orientation."
+        )
     if root.exists() and any(root.iterdir()) and not force:
         raise FileExistsError(
             f"{root} already exists and is not empty. Pass force=True to "
@@ -80,16 +439,37 @@ def init_project(project_dir: Path, *, force: bool = False,
     root.mkdir(parents=True, exist_ok=True)
     (root / "compositions").mkdir(parents=True, exist_ok=True)
     (root / "assets").mkdir(parents=True, exist_ok=True)
-    (root / "meta.json").write_text(json.dumps({
+    meta = {
         "name": root.name,
         "id": root.name,
         "createdBy": "dl2 gen-html --init",
-    }, indent=2), encoding="utf-8")
-    (root / ENTRY_FILE).write_text(_starter_index_html(title), encoding="utf-8")
+        "template": template or "starter",
+        "orientation": orientation,
+    }
+    if template is not None:
+        definition = VISUAL_BLOCK_TEMPLATES[template]
+        meta["label"] = definition.label
+        meta["purpose"] = definition.purpose
+        meta["requiredVariables"] = list(definition.required_variables)
+    (root / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    source = (
+        render_visual_block_html(template, orientation=orientation)
+        if template is not None
+        else _starter_index_html(title)
+    )
+    (root / ENTRY_FILE).write_text(source, encoding="utf-8")
     return root
 
 
-def render_html(project_dir: Path, out_mp4: Path, *, quality: str = "draft") -> Path:
+def render_html(
+    project_dir: Path,
+    out_mp4: Path,
+    *,
+    quality: str = "draft",
+    variables_file: Path | None = None,
+    evidence_file: Path | None = None,
+    production_root: Path | None = None,
+) -> Path:
     """Render a HyperFrames project directory to `out_mp4` via
     `npx hyperframes render`.
 
@@ -111,12 +491,64 @@ def render_html(project_dir: Path, out_mp4: Path, *, quality: str = "draft") -> 
             f"HyperFrames project entry file not found: {entry}. "
             "Scaffold a starter project with `dl2 gen-html <dir> --init`."
         )
-    npx = _npx()
     out = Path(out_mp4).resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
 
+    variables: Path | None = None
+    if variables_file is not None:
+        variables = Path(variables_file).resolve()
+        if not variables.is_file():
+            raise RuntimeError(f"HyperFrames variables file not found: {variables}")
+    resolved_production_root = _find_production_root(
+        project,
+        Path(production_root) if production_root is not None else None,
+    )
+    if resolved_production_root is not None:
+        canonical_projects = resolved_production_root / "data" / "hyperframes"
+        try:
+            project.relative_to(canonical_projects.resolve())
+        except ValueError:
+            pass
+        else:
+            canonical_outputs = (
+                resolved_production_root / "data" / "infographics"
+            ).resolve()
+            try:
+                out.relative_to(canonical_outputs)
+            except ValueError as exc:
+                raise RuntimeError(
+                    "production HyperFrames output must stay under "
+                    "data/infographics/."
+                ) from exc
+    values = _validate_visual_block_values(
+        project,
+        variables,
+        production_root=resolved_production_root,
+    )
+    meta_path = project / "meta.json"
+    meta = (
+        _json_object(meta_path, label="HyperFrames project metadata")
+        if meta_path.is_file()
+        else {}
+    )
+    evidence: Path | None = None
+    if evidence_file is not None:
+        evidence = Path(evidence_file).resolve()
+        if not evidence.is_file():
+            raise RuntimeError(f"visual-block evidence file not found: {evidence}")
+    validate_visual_evidence(
+        project,
+        production_root=resolved_production_root,
+        template=meta.get("template") if isinstance(meta.get("template"), str) else None,
+        values=values,
+        evidence_path=evidence,
+    )
+
+    npx = _npx()
     cmd = [npx, "-y", _PACKAGE, "render", str(project),
            "--output", str(out), "--quality", _QUALITY_MAP[quality]]
+    if variables is not None:
+        cmd.extend(["--variables-file", str(variables), "--strict-variables"])
 
     env = os.environ.copy()
     env.setdefault("NO_COLOR", "1")
@@ -142,6 +574,14 @@ def render_html(project_dir: Path, out_mp4: Path, *, quality: str = "draft") -> 
             f"HyperFrames render failed (rc={proc.returncode}). "
             f"Full log: {debug}\nstderr tail:\n{tail}"
         )
+    _write_render_manifest(
+        project=project,
+        out=out,
+        quality=quality,
+        variables=variables,
+        evidence=evidence,
+        production_root=resolved_production_root,
+    )
     return out
 
 

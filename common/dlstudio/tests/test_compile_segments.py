@@ -122,6 +122,181 @@ def test_videoshot_content_is_video_segment():
     assert (segs[0].kind, segs[0].src, segs[0].offset) == ("video", "clip.mp4", 3.0)
 
 
+def test_videoshot_preserves_asset_identity_and_editorial_role_in_ir():
+    chunks = [Chunk(
+        words=(0, 0),
+        content=VideoShot(
+            src="data/footage/day5.mp4",
+            asset_id="capture:day5_station",
+            render_manifest="data/footage/day5.mp4.render.json",
+            editorial_role="gameplay",
+            expected_state_id="day5.station.new_visual",
+            expected_build_id="exe-sha256:" + "a" * 64,
+            expected_action_id="station_queue_and_tram_pass",
+        ),
+    )]
+
+    segs, _, _diags = build_segments(
+        chunks,
+        [(0.0, 5.0)],
+        None,
+        5.0,
+        D,
+        {},
+    )
+
+    assert segs[0].asset_id == "capture:day5_station"
+    assert segs[0].render_manifest == "data/footage/day5.mp4.render.json"
+    assert segs[0].editorial_role == "gameplay"
+    assert segs[0].expected_state_id == "day5.station.new_visual"
+    assert segs[0].expected_build_id == "exe-sha256:" + "a" * 64
+    assert segs[0].expected_action_id == "station_queue_and_tram_pass"
+
+
+def test_same_source_with_conflicting_expected_identity_is_not_merged():
+    common = {
+        "src": "data/footage/day5.mp4",
+        "asset_id": "capture:day5_station",
+        "editorial_role": "gameplay",
+        "expected_build_id": "exe-sha256:" + "a" * 64,
+        "expected_action_id": "station_queue_and_tram_pass",
+    }
+    chunks = [
+        Chunk(words=(0, 0), content=VideoShot(
+            **common,
+            expected_state_id="day5.station.before",
+        )),
+        Chunk(words=(0, 0), content=VideoShot(
+            **common,
+            expected_state_id="day5.station.after",
+        )),
+    ]
+
+    segs, _, _diags = build_segments(
+        chunks,
+        [(0.0, 2.0), (2.0, 4.0)],
+        None,
+        4.0,
+        D,
+        {},
+    )
+
+    assert [segment.expected_state_id for segment in segs] == [
+        "day5.station.before",
+        "day5.station.after",
+    ]
+
+
+def test_videoshot_resolves_centered_cover_geometry_into_ir():
+    design = mk_design(resolution=(100, 100))
+    chunks = [Chunk(
+        words=(0, 0),
+        content=VideoShot(
+            src="wide.mp4",
+            fit="cover",
+            anchor_x=0.5,
+            anchor_y=0.5,
+        ),
+    )]
+
+    segs, _, _diags = build_segments(
+        chunks,
+        [(0.0, 5.0)],
+        None,
+        5.0,
+        design,
+        {"wide.mp4": probe("wide.mp4", "video", width=200, height=100)},
+    )
+
+    geometry = segs[0].geometry
+    assert geometry is not None
+    assert (geometry.source_width, geometry.source_height) == (200, 100)
+    assert (geometry.scaled_width, geometry.scaled_height) == (200, 100)
+    assert (geometry.crop_x, geometry.crop_y) == (50, 0)
+    assert (geometry.output_width, geometry.output_height) == (100, 100)
+
+
+def test_videoshot_anchor_moves_resolved_cover_crop_deterministically():
+    design = mk_design(resolution=(100, 100))
+    shot = VideoShot(src="wide.mp4", fit="cover", anchor_x=1.0)
+    chunks = [Chunk(words=(0, 0), content=shot)]
+
+    segs, _, _diags = build_segments(
+        chunks,
+        [(0.0, 5.0)],
+        None,
+        5.0,
+        design,
+        {"wide.mp4": probe("wide.mp4", "video", width=200, height=100)},
+    )
+
+    assert segs[0].geometry is not None
+    assert segs[0].geometry.crop_x == 100
+
+
+def test_same_source_with_different_anchor_does_not_merge():
+    chunks = [
+        Chunk(words=(0, 0), content=VideoShot(src="wide.mp4", anchor_x=0.0)),
+        Chunk(words=(0, 0), content=VideoShot(src="wide.mp4", anchor_x=1.0)),
+    ]
+    assets = {"wide.mp4": probe("wide.mp4", "video", width=200, height=100)}
+
+    segs, _, _diags = build_segments(
+        chunks,
+        [(0.0, 2.0), (2.0, 4.0)],
+        None,
+        4.0,
+        mk_design(resolution=(100, 100)),
+        assets,
+    )
+
+    assert len(segs) == 2
+    assert [segment.geometry.crop_x for segment in segs] == [0, 100]
+
+
+def test_transition_intent_opens_boundary_and_is_preserved_in_ir():
+    chunks = [
+        Chunk(words=(0, 0), content=VideoShot(src="take.mp4", offset=0.0)),
+        Chunk(
+            words=(0, 0),
+            content=VideoShot(src="take.mp4", offset=2.0),
+            transition_intent="continuous_same_take",
+        ),
+    ]
+
+    segs, _, _diags = build_segments(
+        chunks,
+        [(0.0, 2.0), (2.0, 4.0)],
+        None,
+        4.0,
+        mk_design(resolution=(100, 100)),
+        {"take.mp4": probe("take.mp4", "video", width=100, height=100)},
+    )
+
+    assert len(segs) == 2
+    assert segs[1].transition_intent == "continuous_same_take"
+    assert segs[1].offset == 2.0
+
+
+def test_contain_geometry_resolves_padding_from_anchor():
+    shot = VideoShot(src="wide.mp4", fit="contain", anchor_y=1.0)
+    chunks = [Chunk(words=(0, 0), content=shot)]
+
+    segs, _, _diags = build_segments(
+        chunks,
+        [(0.0, 4.0)],
+        None,
+        4.0,
+        mk_design(resolution=(100, 100)),
+        {"wide.mp4": probe("wide.mp4", "video", width=200, height=100)},
+    )
+
+    geometry = segs[0].geometry
+    assert geometry is not None
+    assert (geometry.scaled_width, geometry.scaled_height) == (100, 50)
+    assert (geometry.pad_x, geometry.pad_y) == (0, 50)
+
+
 # ── crossfade transitions between segments ───────────────────────────────────
 
 def test_segment_boundaries_get_default_crossfade():

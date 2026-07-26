@@ -1,0 +1,7 @@
+id = "2026_07_19_reel_01"
+kind = "reel"
+date = "2026-07-19"
+orientation = "vertical"
+edit_path = "edit"
+data_root = "data"
+delivery_root = "../../delivery/reels/2026_07_19_reel_01"

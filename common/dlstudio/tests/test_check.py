@@ -19,10 +19,11 @@ from dlstudio.ir import (
     IRMix,
     IROverlayItem,
     IRSegment,
+    IRSegmentGeometry,
     Timeline,
     WordSpan,
 )
-from dlstudio.model import Beat, Chunk, Edit, Scene
+from dlstudio.model import Beat, Chunk, Edit, Scene, Transition
 from dlstudio.model.content import Overlay
 
 
@@ -37,18 +38,52 @@ def mk_beat(*, beat_id="b1", duration=4.0, segments=None, overlays=None):
 
 
 def mk_timeline(*, beats=None, assets=None, warnings=None, diagnostics=None,
-                resolution=(1080, 1920)):
+                resolution=(1080, 1920), asset_policy="compatibility"):
     beats = beats or [mk_beat()]
     return Timeline(
         edit_name="e", design=mk_design(resolution=resolution), beats=beats,
         placements=[BeatPlacement(beat_id=b.id, t0=0.0) for b in beats],
         mix=IRMix(), assets=assets or {}, output="out.mp4",
+        asset_policy=asset_policy,
         warnings=warnings or [], diagnostics=diagnostics or [],
     )
 
 
-def seg(src, kind="image", t0=0.0, t1=4.0):
-    return IRSegment(kind=kind, src=src, offset=0.0, t0=t0, t1=t1)
+def seg(
+    src,
+    kind="image",
+    t0=0.0,
+    t1=4.0,
+    *,
+    asset_id=None,
+    render_manifest=None,
+    editorial_role=None,
+    transition_intent=None,
+    offset=0.0,
+    loop=False,
+    expected_state_id=None,
+    expected_build_id=None,
+    expected_action_id=None,
+    fit="cover",
+    geometry=None,
+):
+    return IRSegment(
+        kind=kind,
+        src=src,
+        offset=offset,
+        t0=t0,
+        t1=t1,
+        asset_id=asset_id,
+        render_manifest=render_manifest,
+        editorial_role=editorial_role,
+        transition_intent=transition_intent,
+        loop=loop,
+        fit=fit,
+        geometry=geometry,
+        expected_state_id=expected_state_id,
+        expected_build_id=expected_build_id,
+        expected_action_id=expected_action_id,
+    )
 
 
 def ov(chunk_index, z, t0, t1):
@@ -72,6 +107,282 @@ def test_vq_asset_all_present_passes():
     assert not any(i.code == "VQ-ASSET" for i in rep.issues)
 
 
+def test_vq_asset_id_requires_binding_for_declared_gameplay():
+    shot = seg(
+        "data/footage/day5.mp4",
+        kind="video",
+        editorial_role="gameplay",
+    )
+
+    rep = run_checks(mk_timeline(
+        beats=[mk_beat(segments=[shot])],
+        asset_policy="production",
+    ))
+
+    assert any(issue.code == "VQ-ASSET-ID" for issue in rep.errors)
+
+
+def test_draft_allows_unapproved_gameplay_placeholder():
+    shot = seg(
+        "data/footage/day5.mp4",
+        kind="video",
+        editorial_role="gameplay",
+    )
+
+    rep = run_checks(
+        mk_timeline(beats=[mk_beat(segments=[shot])]),
+        strict_assets=False,
+    )
+
+    assert not any(issue.code == "VQ-ASSET-ID" for issue in rep.errors)
+
+
+def test_vq_asset_id_passes_exact_approved_binding(tmp_path, monkeypatch):
+    artifact = tmp_path / "data" / "footage" / "day5.mp4"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_bytes(b"approved-gameplay")
+    import hashlib
+
+    digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+    metadata = tmp_path / "data" / "footage" / "day5.mp4.capture.json"
+    metadata.write_bytes(b"metadata")
+    game_report = tmp_path / "data" / "footage" / "day5.mp4.game.json"
+    game_report.write_bytes(b"game-report")
+    batch = tmp_path / "data" / "plan" / "capture_batch.json"
+    batch.parent.mkdir(parents=True)
+    batch.write_bytes(b"batch")
+    results = tmp_path / "data" / "plan" / "capture_results.json"
+    results.write_bytes(b"results")
+    from dlstudio.services.asset_registry import (
+        _register_ingested_captures,
+        approve_asset,
+    )
+
+    registry = _register_ingested_captures(tmp_path, [{
+        "request_id": "day5_station",
+        "artifact_path": "data/footage/day5.mp4",
+        "artifact_sha256": digest,
+        "metadata_path": "data/footage/day5.mp4.capture.json",
+        "metadata_sha256": hashlib.sha256(metadata.read_bytes()).hexdigest(),
+        "game_report_path": "data/footage/day5.mp4.game.json",
+        "game_report_sha256": hashlib.sha256(game_report.read_bytes()).hexdigest(),
+        "capture_batch_path": "data/plan/capture_batch.json",
+        "capture_batch_sha256": hashlib.sha256(batch.read_bytes()).hexdigest(),
+        "capture_results_path": "data/plan/capture_results.json",
+        "capture_results_sha256": hashlib.sha256(results.read_bytes()).hexdigest(),
+        "editorial_role": "gameplay",
+        "capture_method": "realtime_window",
+        "state_id": "day5.station.new_visual",
+        "build_id": "exe-sha256:" + "a" * 64,
+        "action_id": "station_queue_and_tram_pass",
+        "seed": 42,
+        "parameters": {},
+        "initial_semantic_hash": "00000001",
+        "action_semantic_hash": "00000002",
+        "actual_duration": 11,
+        "simulation_rate": 1.0,
+        "continuous": True,
+        "clean_ui": True,
+        "client_area": True,
+        "cursor_visible": False,
+        "content_seconds": 1,
+        "head_handle_seconds": 5,
+        "tail_handle_seconds": 5,
+        "frame_audit_passed": True,
+            "game_elapsed_seconds": 11,
+            "measured_playback_rate": 1.0,
+            "presentation": {
+                "output_width": 1080,
+                "output_height": 1920,
+                "fit": "contain",
+                "scale": 1.0,
+            },
+        }])
+    current = registry.assets[0]
+    approve_asset(
+        tmp_path,
+        "capture:day5_station",
+        expected_sha256=digest,
+        expected_revision=current.revision,
+        expected_validation_sha256=current.validation_sha256,
+        approved_by="author",
+    )
+    monkeypatch.chdir(tmp_path)
+    shot = seg(
+        "data/footage/day5.mp4",
+        kind="video",
+        asset_id="capture:day5_station",
+        editorial_role="gameplay",
+        t1=1,
+        offset=5,
+        expected_state_id="day5.station.new_visual",
+        expected_build_id="exe-sha256:" + "a" * 64,
+        expected_action_id="station_queue_and_tram_pass",
+        fit="contain",
+        geometry=IRSegmentGeometry.resolve(
+            fit="contain",
+            anchor_x=0.5,
+            anchor_y=0.5,
+            source_width=1080,
+            source_height=1920,
+            output_width=1080,
+            output_height=1920,
+        ),
+    )
+
+    rep = run_checks(mk_timeline(
+        beats=[mk_beat(duration=1, segments=[shot])],
+        asset_policy="production",
+    ))
+
+    assert not any(
+        issue.code in {"VQ-ASSET-ID", "VQ-SOURCE-WINDOW"}
+        for issue in rep.issues
+    )
+
+    following = seg("still.png", t0=1, t1=2)
+    rep = run_checks(mk_timeline(
+        beats=[mk_beat(duration=2, segments=[shot, following])],
+        asset_policy="production",
+    ))
+    assert any(issue.code == "VQ-SOURCE-WINDOW" for issue in rep.errors)
+
+    shot.xfade = Transition(kind="cut", dur=0.3)
+    rep = run_checks(mk_timeline(
+        beats=[mk_beat(duration=2, segments=[shot, following])],
+        asset_policy="production",
+    ))
+    assert not any(issue.code == "VQ-SOURCE-WINDOW" for issue in rep.errors)
+    shot.xfade = None
+
+    shot.fit = "cover"
+    shot.geometry = IRSegmentGeometry.resolve(
+        fit="cover",
+        anchor_x=0.5,
+        anchor_y=0.5,
+        source_width=1080,
+        source_height=1920,
+        output_width=1080,
+        output_height=1920,
+    )
+    rep = run_checks(mk_timeline(
+        beats=[mk_beat(duration=1, segments=[shot])],
+        asset_policy="production",
+    ))
+    assert any(
+        issue.code == "VQ-ASSET-PRESENTATION"
+        for issue in rep.errors
+    )
+
+    shot.fit = "contain"
+    shot.geometry = IRSegmentGeometry.resolve(
+        fit="contain",
+        anchor_x=0.5,
+        anchor_y=0.5,
+        source_width=1080,
+        source_height=1920,
+        output_width=1080,
+        output_height=1920,
+    )
+    shot.offset = 0
+    rep = run_checks(mk_timeline(
+        beats=[mk_beat(duration=1, segments=[shot])],
+        asset_policy="production",
+    ))
+    assert any(issue.code == "VQ-SOURCE-WINDOW" for issue in rep.errors)
+
+
+def test_production_policy_rejects_unclassified_video():
+    shot = seg("data/infographics/chart.mp4", kind="video")
+
+    report = run_checks(mk_timeline(
+        beats=[mk_beat(segments=[shot])],
+        asset_policy="production",
+    ))
+
+    assert any(issue.code == "VQ-ASSET-CLASS" for issue in report.errors)
+
+
+def test_production_generated_video_requires_hash_bound_render_manifest():
+    shot = seg(
+        "data/infographics/chart.mp4",
+        kind="video",
+        editorial_role="presentation",
+    )
+
+    report = run_checks(mk_timeline(
+        beats=[mk_beat(segments=[shot])],
+        asset_policy="production",
+    ))
+
+    assert any(
+        issue.code == "VQ-ASSET-ID" and "render_manifest" in issue.message
+        for issue in report.errors
+    )
+
+
+def test_production_generated_video_revalidates_render_manifest(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "dlstudio.services.hyperframes.validate_hyperframes_render_manifest",
+        lambda artifact, manifest, root, **kwargs: calls.append(
+            (artifact, manifest, root, kwargs)
+        ),
+    )
+    shot = seg(
+        "data/infographics/chart.mp4",
+        kind="video",
+        render_manifest="data/infographics/chart.mp4.render.json",
+        editorial_role="presentation",
+    )
+
+    report = run_checks(mk_timeline(
+        beats=[mk_beat(segments=[shot])],
+        asset_policy="production",
+    ))
+
+    assert not any(issue.code == "VQ-ASSET-ID" for issue in report.errors)
+    assert calls and calls[0][:2] == (
+        "data/infographics/chart.mp4",
+        "data/infographics/chart.mp4.render.json",
+    )
+    assert calls[0][3]["require_final"] is True
+    assert len(calls[0][3]["expected_timeline_sha256"]) == 64
+
+
+def test_production_policy_rejects_gameplay_loop_and_missing_expectations():
+    shot = seg(
+        "data/footage/day5.mp4",
+        kind="video",
+        asset_id="capture:day5",
+        editorial_role="gameplay",
+        loop=True,
+    )
+
+    report = run_checks(mk_timeline(
+        beats=[mk_beat(segments=[shot])],
+        asset_policy="production",
+    ))
+
+    codes = {issue.code for issue in report.errors}
+    assert "VQ-GAMEPLAY-LOOP" in codes
+    assert "VQ-ASSET-EXPECTATION" in codes
+
+
+def test_production_policy_checks_exact_overlay_public_copy():
+    overlay = ov(0, 0, 0.0, 4.0)
+    overlay.public_text = ["VERSION 12", "Следующая остановка — Steam"]
+
+    report = run_checks(mk_timeline(
+        beats=[mk_beat(overlays=[overlay])],
+        asset_policy="production",
+    ))
+
+    codes = {issue.code for issue in report.errors}
+    assert "VQ-EDITORIAL-LABEL" in codes
+    assert "VQ-PUBLIC-CLAIM" in codes
+
+
 def test_vq_asset_present_but_unreadable_errors():
     assets = {"corrupt.mp4": probe("corrupt.mp4", "video", readable=False)}
     rep = run_checks(mk_timeline(assets=assets))
@@ -93,6 +404,104 @@ def test_vq_asset_readable_undetermined_passes():
     assets = {"font.ttf": probe("font.ttf", "font", readable=None)}
     rep = run_checks(mk_timeline(assets=assets))
     assert not any(i.code == "VQ-ASSET" for i in rep.issues)
+
+
+# ── VQ-GEOMETRY ─────────────────────────────────────────────────────────────
+
+def test_vq_geometry_rejects_non_centered_coordinates_for_center_anchor():
+    geometry = IRSegmentGeometry(
+        fit="cover",
+        anchor_x=0.5,
+        anchor_y=0.5,
+        source_width=200,
+        source_height=100,
+        scaled_width=200,
+        scaled_height=100,
+        output_width=100,
+        output_height=100,
+        crop_x=0,
+        crop_y=0,
+        crop_width=100,
+        crop_height=100,
+    )
+    shot = seg("wide.mp4")
+    shot.geometry = geometry
+    timeline = mk_timeline(
+        beats=[mk_beat(segments=[shot])],
+        assets={"wide.mp4": probe("wide.mp4", "video", width=200, height=100)},
+        resolution=(100, 100),
+    )
+
+    report = run_checks(timeline)
+
+    assert any(issue.code == "VQ-GEOMETRY" for issue in report.errors)
+
+
+# ── VQ-BOUNDARY / VQ-RESTART ────────────────────────────────────────────────
+
+def test_gameplay_source_change_requires_transition_intent():
+    first = seg("day4.mp4", kind="video", t0=0.0, t1=2.0,
+                editorial_role="gameplay")
+    second = seg("day5.mp4", kind="video", t0=2.0, t1=4.0,
+                 editorial_role="gameplay")
+
+    report = run_checks(mk_timeline(
+        beats=[mk_beat(segments=[first, second])],
+    ))
+
+    assert any(issue.code == "VQ-BOUNDARY" for issue in report.errors)
+
+
+def test_continuous_same_take_requires_monotonic_source_offset():
+    first = seg("take.mp4", kind="video", t0=0.0, t1=2.0,
+                editorial_role="gameplay")
+    second = seg("take.mp4", kind="video", t0=2.0, t1=4.0,
+                 editorial_role="gameplay",
+                 transition_intent="continuous_same_take")
+    second.offset = 0.0
+
+    report = run_checks(mk_timeline(
+        beats=[mk_beat(segments=[first, second])],
+    ))
+
+    assert any(issue.code == "VQ-RESTART" for issue in report.errors)
+
+
+def test_continuous_same_take_accepts_expected_source_offset():
+    first = seg("take.mp4", kind="video", t0=0.0, t1=2.0,
+                editorial_role="gameplay")
+    second = seg("take.mp4", kind="video", t0=2.0, t1=4.0,
+                 editorial_role="gameplay",
+                 transition_intent="continuous_same_take")
+    second.offset = 2.0
+
+    report = run_checks(mk_timeline(
+        beats=[mk_beat(segments=[first, second])],
+    ))
+
+    assert not any(
+        issue.code in {"VQ-BOUNDARY", "VQ-RESTART"}
+        for issue in report.issues
+    )
+
+
+def test_motivated_cut_allows_explicit_source_restart():
+    first = seg("take.mp4", kind="video", t0=0.0, t1=2.0,
+                editorial_role="gameplay")
+    first.offset = 8.0
+    second = seg("take.mp4", kind="video", t0=2.0, t1=4.0,
+                 editorial_role="gameplay",
+                 transition_intent="motivated_cut")
+    second.offset = 0.0
+
+    report = run_checks(mk_timeline(
+        beats=[mk_beat(segments=[first, second])],
+    ))
+
+    assert not any(
+        issue.code in {"VQ-BOUNDARY", "VQ-RESTART"}
+        for issue in report.issues
+    )
 
 
 # ── VQ-WORDS ─────────────────────────────────────────────────────────────────

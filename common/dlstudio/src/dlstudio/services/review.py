@@ -11,7 +11,10 @@ Conventions (what `dl2 preview` uses):
 from __future__ import annotations
 
 import subprocess
+import tempfile
 from pathlib import Path
+
+from PIL import Image
 
 
 def _probe_duration(video: Path) -> float:
@@ -47,8 +50,13 @@ def make_contact_sheet(
 ) -> Path:
     """Tile `cols x rows` evenly-sampled frames of `video` into one JPEG.
 
-    Sampling uses an fps filter tuned so exactly cols*rows frames span the
-    whole duration (first frame near 0, last near the end)."""
+    Frames are extracted first and then composed with Pillow. Doing the tile
+    inside one FFmpeg filter graph is tempting but incorrect for real edits:
+    FFmpeg reinitialises the tile filter when colour-range metadata changes at
+    a beat boundary, discarding the samples collected before that boundary and
+    producing a mostly-black partial sheet. Independent JPEG extraction is
+    stable across those stream-parameter transitions.
+    """
     video = Path(video)
     if not video.exists():
         raise RuntimeError(f"contact sheet: video does not exist: {video}")
@@ -58,12 +66,45 @@ def make_contact_sheet(
     n = cols * rows
     duration = max(_probe_duration(video), 0.001)
     sample_fps = n / duration
-    vf = (f"fps={sample_fps:.6f},scale={cell_width}:-2,"
-          f"tile={cols}x{rows}:padding=4:margin=4")
-    _run_ffmpeg(
-        ["ffmpeg", "-y", "-i", str(video), "-vf", vf,
-         "-frames:v", "1", "-q:v", "3", str(out_jpg)],
-        "contact sheet")
+    padding = 4
+    margin = 4
+
+    with tempfile.TemporaryDirectory(
+        prefix=".contact-sheet-", dir=out_jpg.parent
+    ) as temp_name:
+        temp_dir = Path(temp_name)
+        _run_ffmpeg(
+            ["ffmpeg", "-y", "-i", str(video),
+             "-vf", f"fps={sample_fps:.9f},scale={cell_width}:-2",
+             "-frames:v", str(n), "-q:v", "3",
+             str(temp_dir / "frame_%03d.jpg")],
+            "contact sheet frames")
+        frames = sorted(temp_dir.glob("frame_*.jpg"))
+        if len(frames) != n:
+            raise RuntimeError(
+                f"contact sheet: expected {n} samples from {video}, "
+                f"FFmpeg produced {len(frames)}"
+            )
+
+        with Image.open(frames[0]) as first:
+            cell_height = first.height
+        sheet_width = 2 * margin + cols * cell_width + (cols - 1) * padding
+        sheet_height = 2 * margin + rows * cell_height + (rows - 1) * padding
+        sheet = Image.new("RGB", (sheet_width, sheet_height), "black")
+        for index, frame_path in enumerate(frames):
+            with Image.open(frame_path) as frame:
+                rgb = frame.convert("RGB")
+                if rgb.size != (cell_width, cell_height):
+                    raise RuntimeError(
+                        f"contact sheet: inconsistent sample size {rgb.size}; "
+                        f"expected {(cell_width, cell_height)}"
+                    )
+                row, col = divmod(index, cols)
+                x = margin + col * (cell_width + padding)
+                y = margin + row * (cell_height + padding)
+                sheet.paste(rgb, (x, y))
+        sheet.save(out_jpg, format="JPEG", quality=90)
+
     if not out_jpg.exists():
         raise RuntimeError(f"contact sheet: ffmpeg produced no file at {out_jpg}")
     return out_jpg

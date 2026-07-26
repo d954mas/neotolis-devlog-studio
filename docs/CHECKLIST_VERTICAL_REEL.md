@@ -31,6 +31,14 @@ this section is "actually look at the output," not "do more rendering."
    `data/review/contact_sheet.jpg` (4×4 grid) and `data/review/keyframes/`.
    If `data/review/` does not exist or is stale (older than the current
    `beats.py`/asset changes) after this step, you have not done step 3.
+3a. **Temporal motion gate.** Run
+   `dl2 preflight <edit> --final --artifact <exact-mp4>` and then
+   `dl2 review-pack <edit> --artifact <exact-mp4>`. Inspect every short MP4
+   listed under `compact_review.freeze_candidates` and
+   `compact_review.cadence_candidates`. `VQ-FREEZE` catches whole-frame stops;
+   `VQ-CADENCE` catches files that claim 30 fps but repeat frames at a regular
+   cadence. A contact sheet is not evidence for this check; see
+   `common/quality/VQ-TEMPORAL.md`.
 4. **Look at the contact sheet** (Read the image) and check, against
    `AGENTS.md` "Platform-safe zones" and "Text placement":
    - Every overlay/caption sits with its vertical center in the
@@ -51,6 +59,11 @@ this section is "actually look at the output," not "do more rendering."
    transcription and hope. (Evidence: `trolley3d` — the game's English
    title came back as noise in `b01_words.json` and had to be patched by
    index before final.)
+5a. **Silent-first readability.** If there is no recorded VO, apply
+   `common/quality/VQ-SILENT-REEL.md`: 3–4 shots around one idea, one focal
+   object and one short message at a time, at most three audience-facing
+   messages, and a deliberate final-result hold. Do not repair overload by
+   assuming the author will record narration.
 6. **Music license gate (lead directive, 2026-07-17).** Prefer CC0 /
    public-domain / purchased-no-attribution tracks when choosing music.
    If ANY track in the mix requires attribution (CC-BY / CC-BY-SA / free

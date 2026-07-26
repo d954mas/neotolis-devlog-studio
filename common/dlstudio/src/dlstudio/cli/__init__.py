@@ -16,6 +16,7 @@ Phase 2 commands (full mix assemble — music/ducking/SFX/transitions/loudnorm):
 
 Phase 3 commands (services + Studio backend):
   dl2 audio <edit> <beat> <rec>    process a take -> beat VO wav + words.json
+  dl2 speech-edit <edit> <beat>    apply agent plan -> edited WAV + remapped words
   dl2 transcribe <wav> <out.json>  standalone word-level transcription
   dl2 scratch-tts <edit> <beat>    scratch VO from beat.vo -> data/scratch/
   dl2 studio [edit] [--port]       serve the FastAPI Studio backend (127.0.0.1)
@@ -43,20 +44,28 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import importlib
+import json
 import os
 import shutil
 import subprocess
 import sys
+import time
 import tomllib
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
 from dlstudio.ir import IRBeat
 from dlstudio.model import Design, Edit
 
+from . import autopilot as dl_autopilot
+from . import delivery as dl_delivery
 from . import genhtml as dl_genhtml
+from . import migration as dl_migration
 from . import newvideo as dl_newvideo
 from . import preview as dl_preview
+from . import product as dl_product
+from . import telemetry as dl_telemetry
 from . import verify as dl_verify
 
 CONFIG_NAME = "devlog.toml"
@@ -154,18 +163,43 @@ def _project_root_for_module(module_file: Path, workspace_root: Path | None) -> 
     return module_dir.parent.parent
 
 
+_LOADED_EDIT_MODULES: dict[str, str] = {}
+
+
+def loaded_edit_module_name(edit_ref: str) -> str:
+    """Return the actual module name used for a previously loaded edit ref."""
+    return _LOADED_EDIT_MODULES.get(edit_ref, edit_ref)
+
+
 def load_edit(dotted: str) -> tuple[Edit, Path]:
-    """Import `dotted`, read its EDIT attribute, validate it, find the
+    """Import a dotted module or filesystem production, read its EDIT, find the
     project root (mirrors legacy loader semantics), and os.chdir there so
     beats.py paths stay relative. Returns (edit, project_root).
 
     Shared by the CLI handlers (via `_load_edit`) and the API app factory
     (`dlstudio.api.create_app`), which also needs the resolved project root
     for its file-serving/recording endpoints."""
+    from dlstudio.production import (
+        ProductionError,
+        is_filesystem_edit_ref,
+        load_production_edit_module,
+    )
+
+    workspace_root = _find_workspace_root()
+    production_root: Path | None = None
+    filesystem_ref = is_filesystem_edit_ref(dotted)
     try:
-        mod = importlib.import_module(dotted)
-    except ImportError as e:
-        raise CliError(f"cannot import edit module {dotted!r}: {e}") from e
+        if filesystem_ref:
+            mod, manifest, module_name = load_production_edit_module(
+                dotted, workspace_root=workspace_root, force_reload=True
+            )
+            production_root = manifest.root
+        else:
+            mod = importlib.import_module(dotted)
+            module_name = dotted
+    except (ImportError, ProductionError) as e:
+        prefix = "cannot load production edit" if filesystem_ref else "cannot import edit module"
+        raise CliError(f"{prefix} {dotted!r}: {e}") from e
     if not hasattr(mod, "EDIT"):
         raise CliError(
             f"module {dotted!r} has no EDIT object — expected `EDIT = Edit(...)`"
@@ -173,12 +207,39 @@ def load_edit(dotted: str) -> tuple[Edit, Path]:
     edit = mod.EDIT
     if not isinstance(edit, Edit):
         raise CliError(f"{dotted}.EDIT is a {type(edit).__name__}, not dlstudio.model.Edit")
+    if production_root is not None:
+        output = Path(edit.output)
+        resolved_output = (production_root / output).resolve() if not output.is_absolute() else output.resolve()
+        try:
+            resolved_output.relative_to(manifest.finalize_dir)
+        except ValueError as exc:
+            raise CliError(
+                f"production edit output must stay inside data/finalize: {edit.output!r}"
+            ) from exc
+        for beat_id, beat in edit.beats.items():
+            for label, declared in (("audio", beat.audio), ("words", beat.words)):
+                value = Path(declared)
+                resolved = (
+                    (production_root / value).resolve()
+                    if not value.is_absolute()
+                    else value.resolve()
+                )
+                try:
+                    resolved.relative_to(manifest.data_dir)
+                except ValueError as exc:
+                    raise CliError(
+                        f"production beat {beat_id!r} {label} must stay inside "
+                        f"data/: {declared!r}"
+                    ) from exc
     module_file = getattr(mod, "__file__", None)
     if not module_file:
         raise CliError(f"module {dotted!r} has no __file__ (namespace package?)")
-    workspace_root = _find_workspace_root()
-    project_root = _project_root_for_module(Path(module_file), workspace_root)
+    project_root = production_root or _project_root_for_module(Path(module_file), workspace_root)
+    _LOADED_EDIT_MODULES[dotted] = module_name
     os.chdir(project_root)
+    from dlstudio.services.bundle import recover_bundle_transactions
+
+    recover_bundle_transactions(project_root)
     print(f"[dl2] cwd -> {project_root}")
     return edit, project_root
 
@@ -232,7 +293,12 @@ def _add_render_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--no-cache", action="store_true", help="bypass the render cache")
 
 
-def gate_pre_render_checks(timeline, design: Design) -> None:
+def gate_pre_render_checks(
+    timeline,
+    design: Design,
+    *,
+    strict_assets: bool = False,
+) -> None:
     """Defect 0.4: the mechanical gate every render path MUST pass first —
     `resolve profile -> compile -> run checks -> render -> verify output`.
 
@@ -243,8 +309,13 @@ def gate_pre_render_checks(timeline, design: Design) -> None:
     are printed and never block. Shared with the Studio API render job."""
     from dlstudio import check as dl_check
 
-    effective = timeline.model_copy(update={"design": design})
-    report = dl_check.run_checks(effective)
+    from dlstudio.services.geometry_report import timeline_for_design
+
+    effective = timeline_for_design(timeline, design)
+    report = dl_check.run_checks(
+        effective,
+        strict_assets=strict_assets,
+    )
     for issue in report.issues:
         print(f"[dl2] [{issue.severity.upper()}] {issue.code} {issue.where}: {issue.message}")
     errors = report.errors
@@ -492,6 +563,7 @@ def _iterate_render(
     no_cache: bool,
     stale: bool,
     jobs: int | None,
+    strict_assets: bool = False,
 ) -> int:
     """Shared render+assemble machinery behind `iter`/`render`/`final`.
 
@@ -504,7 +576,7 @@ def _iterate_render(
     from dlstudio import render as dl_render
 
     design = _resize_design(timeline.design, width_spec)
-    gate_pre_render_checks(timeline, design)
+    gate_pre_render_checks(timeline, design, strict_assets=strict_assets)
     width_px = design.resolution[0]
 
     all_beats = list(timeline.beats)
@@ -588,6 +660,7 @@ def cmd_final(args: argparse.Namespace) -> int:
     """Shipping render: same machinery as `render`, but defaults come from the
     workspace `[v2.final]` table (width/quality) when present, else 1080p/upload.
     Explicit --width/--quality still win."""
+    started = time.perf_counter_ns()
     workspace_root = _find_workspace_root()
     v2_config = _load_v2_config(workspace_root)
     final_cfg = _load_v2_final_config(workspace_root)
@@ -599,11 +672,20 @@ def cmd_final(args: argparse.Namespace) -> int:
     timeline = dl_compile.build_timeline(edit)
     width_spec = args.width or final_cfg.get("width") or "1080p"
     quality = args.quality or final_cfg.get("quality") or "upload"
-    return _iterate_render(
+    result = _iterate_render(
         edit, timeline,
         width_spec=width_spec, quality=quality,
         gpu=args.gpu, no_cache=args.no_cache, stale=args.stale, jobs=args.jobs,
+        strict_assets=True,
     )
+    if result == 0:
+        from dlstudio.cli.telemetry import record_automatic_stage
+
+        record_automatic_stage(
+            Path.cwd(), stage="final_render", agent_role="renderer",
+            started_ns=started, artifact_paths=((Path.cwd() / edit.output).resolve(),),
+        )
+    return result
 
 
 def _format_beats_table(rows: list[tuple[str, float, int, bool]]) -> str:
@@ -729,12 +811,204 @@ def cmd_audio(args: argparse.Namespace) -> int:
 
     audio_out = Path(beat.audio)
     words_out = Path(beat.words)
-    result = services.process_take(recording, audio_out)
-    services.transcribe(audio_out, words_out, language=args.language, model=args.model)
+    verdict_out = (
+        Path("data") / "review" / "voice_takes" / f"{recording.stem}.json"
+    )
+    nonce = uuid.uuid4().hex[:8]
+    audio_out.parent.mkdir(parents=True, exist_ok=True)
+    words_out.parent.mkdir(parents=True, exist_ok=True)
+    verdict_out.parent.mkdir(parents=True, exist_ok=True)
+    tmp_audio = audio_out.with_name(
+        f".{audio_out.stem}.tmp-{nonce}{audio_out.suffix or '.wav'}"
+    )
+    tmp_words = words_out.with_name(
+        f".{words_out.stem}.tmp-{nonce}{words_out.suffix or '.json'}"
+    )
+    tmp_verdict = verdict_out.with_name(
+        f".{verdict_out.stem}.tmp-{nonce}{verdict_out.suffix or '.json'}"
+    )
+    try:
+        try:
+            result = services.process_take(recording, tmp_audio)
+        except services.VoiceTakeQualityError as exc:
+            rejected_out = verdict_out.with_name(f"{verdict_out.stem}.rejected.json")
+            services.write_voice_take_verdict(exc.verdict, rejected_out)
+            raise
+        services.transcribe(
+            tmp_audio,
+            tmp_words,
+            language=args.language,
+            model=args.model,
+        )
+        result_verdict = getattr(result, "verdict", None)
+        replacements = [(tmp_audio, audio_out), (tmp_words, words_out)]
+        if result_verdict is not None:
+            services.write_voice_take_verdict(result_verdict, tmp_verdict)
+            replacements.append((tmp_verdict, verdict_out))
+        _promote_bundle(replacements)
+    finally:
+        tmp_audio.unlink(missing_ok=True)
+        tmp_words.unlink(missing_ok=True)
+        tmp_verdict.unlink(missing_ok=True)
     print(f"[dl2] audio: {recording} -> {audio_out}")
     print(f"[dl2]   measured input loudness: {result.input_i:.2f} LUFS")
     print(f"[dl2]   duration: {result.duration:.2f}s")
     print(f"[dl2]   words -> {words_out}")
+    verdict = result_verdict or {}
+    print(f"[dl2]   take verdict -> {verdict_out} ({verdict.get('verdict', 'unknown')})")
+    return 0
+
+
+def _speech_edit_artifact_path(words_path: Path) -> Path:
+    stem = words_path.stem
+    base = stem[:-6] if stem.endswith("_words") else stem
+    return words_path.with_name(f"{base}_speech_edit.json")
+
+
+def _promote_bundle(replacements: list[tuple[Path, Path]]) -> None:
+    """Backward-compatible CLI seam for the shared transaction helper."""
+
+    from dlstudio.services import promote_bundle
+
+    promote_bundle(replacements)
+
+
+def cmd_speech_edit(args: argparse.Namespace) -> int:
+    """Apply an agent-authored (or conservative automatic) speech edit."""
+
+    v2_config = _load_v2_config(_find_workspace_root())
+    dotted = _resolve_edit_arg(args.edit, v2_config)
+    edit = _load_edit(dotted)
+    if args.beat_id not in edit.beats:
+        raise CliError(
+            f"beat {args.beat_id!r} not in edit {edit.name!r}; "
+            f"available: {list(edit.beats)}"
+        )
+    beat = edit.beats[args.beat_id]
+    audio_out = Path(beat.audio)
+    words_out = Path(beat.words)
+    if not audio_out.exists():
+        raise CliError(f"beat audio not found: {audio_out}")
+    if not words_out.exists():
+        raise CliError(f"beat words not found: {words_out}")
+
+    from dlstudio import services
+
+    if args.plan and args.prepare_plan:
+        raise CliError("pass either an existing plan or --prepare-plan, not both")
+    if args.plan:
+        plan_path = Path(args.plan)
+        if not plan_path.exists():
+            raise CliError(f"speech edit plan not found: {plan_path}")
+        raw_plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        if not isinstance(raw_plan, dict):
+            raise CliError("speech edit plan must contain a JSON object")
+        plan = services.SpeechEditPlan.from_dict(raw_plan)
+        plan_source = str(plan_path)
+    else:
+        plan = services.build_automatic_plan_from_files(audio_out, words_out)
+        plan_source = "automatic baseline"
+
+    if args.prepare_plan:
+        prepared_path = Path(args.prepare_plan)
+        prepared_path.parent.mkdir(parents=True, exist_ok=True)
+        prepared_path.write_text(
+            json.dumps(plan.to_dict(), ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        print(f"[dl2] speech-edit: prepared agent plan -> {prepared_path}")
+        return 0
+
+    artifact_out = (
+        Path(args.artifact) if args.artifact else _speech_edit_artifact_path(words_out)
+    )
+    if services.sha256_file(audio_out) != plan.input_audio_sha256:
+        raise CliError("speech edit plan audio hash is stale")
+    if services.sha256_file(words_out) != plan.input_words_sha256:
+        raise CliError("speech edit plan words hash is stale")
+    # The public audio/words paths are replaced in place. Preserve immutable,
+    # hash-named inputs so speech_edit.json continues to reference evidence
+    # whose bytes match its recorded input hashes after promotion.
+    input_audio_snapshot = artifact_out.with_name(
+        f"{artifact_out.stem}.input-{plan.input_audio_sha256[:12]}"
+        f"{audio_out.suffix or '.wav'}"
+    )
+    input_words_snapshot = artifact_out.with_name(
+        f"{artifact_out.stem}.input-{plan.input_words_sha256[:12]}"
+        f"{words_out.suffix or '.json'}"
+    )
+    nonce = uuid.uuid4().hex[:8]
+    snapshot_audio_stage = input_audio_snapshot.with_name(
+        f".{input_audio_snapshot.name}.{nonce}.snapshot"
+    )
+    snapshot_words_stage = input_words_snapshot.with_name(
+        f".{input_words_snapshot.name}.{nonce}.snapshot"
+    )
+    tmp_audio = audio_out.with_name(
+        f".{audio_out.stem}.speech-edit-{nonce}{audio_out.suffix or '.wav'}"
+    )
+    tmp_words = words_out.with_name(
+        f".{words_out.stem}.speech-edit-{nonce}{words_out.suffix or '.json'}"
+    )
+    tmp_artifact = artifact_out.with_name(
+        f".{artifact_out.stem}.speech-edit-{nonce}{artifact_out.suffix or '.json'}"
+    )
+    try:
+        snapshots: list[tuple[Path, Path]] = []
+        if input_audio_snapshot.exists():
+            if services.sha256_file(input_audio_snapshot) != plan.input_audio_sha256:
+                raise CliError(f"speech edit input snapshot hash mismatch: {input_audio_snapshot}")
+        else:
+            input_audio_snapshot.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(audio_out, snapshot_audio_stage)
+            if services.sha256_file(snapshot_audio_stage) != plan.input_audio_sha256:
+                raise CliError("speech edit audio snapshot hash verification failed")
+            snapshots.append((snapshot_audio_stage, input_audio_snapshot))
+        if input_words_snapshot.exists():
+            if services.sha256_file(input_words_snapshot) != plan.input_words_sha256:
+                raise CliError(f"speech edit input snapshot hash mismatch: {input_words_snapshot}")
+        else:
+            input_words_snapshot.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(words_out, snapshot_words_stage)
+            if services.sha256_file(snapshot_words_stage) != plan.input_words_sha256:
+                raise CliError("speech edit words snapshot hash verification failed")
+            snapshots.append((snapshot_words_stage, input_words_snapshot))
+        if snapshots:
+            _promote_bundle(snapshots)
+        result = services.execute_speech_edit(
+            input_audio_snapshot,
+            input_words_snapshot,
+            tmp_audio,
+            tmp_words,
+            tmp_artifact,
+            plan=plan,
+            output_audio_ref=str(beat.audio),
+            output_words_ref=str(beat.words),
+        )
+        _promote_bundle([
+            (tmp_audio, audio_out),
+            (tmp_words, words_out),
+            (tmp_artifact, artifact_out),
+        ])
+    finally:
+        snapshot_audio_stage.unlink(missing_ok=True)
+        snapshot_words_stage.unlink(missing_ok=True)
+        tmp_audio.unlink(missing_ok=True)
+        tmp_words.unlink(missing_ok=True)
+        tmp_artifact.unlink(missing_ok=True)
+
+    print(f"[dl2] speech-edit: {args.beat_id} ({plan_source})")
+    print(
+        f"[dl2]   {result.source_duration:.2f}s -> {result.duration:.2f}s; "
+        f"removed {result.removed_duration:.2f}s in {result.cut_count} cut(s)"
+    )
+    skipped = getattr(result, "skipped_cut_count", 0)
+    if skipped:
+        print(
+            f"[dl2]   retained {skipped} unsafe/uncertain cut(s); "
+            "see artifact resolution.skipped_cuts"
+        )
+    print(f"[dl2]   artifact -> {artifact_out}")
     return 0
 
 
@@ -815,6 +1089,7 @@ def cmd_publish(args: argparse.Namespace) -> int:
     placeholders + chapters derived from the compiled Timeline's beat
     placements + beat titles). See services.publish.generate_youtube_package
     for the section shape; this handler only wires CLI args through to it."""
+    started = time.perf_counter_ns()
     v2_config = _load_v2_config(_find_workspace_root())
     dotted = _resolve_edit_arg(args.edit, v2_config)
     edit = _load_edit(dotted)
@@ -826,6 +1101,12 @@ def cmd_publish(args: argparse.Namespace) -> int:
     out_path = Path(args.out) if args.out else Path("data/publish/youtube_package.md")
     result = services.generate_youtube_package(
         edit, out_path=out_path, chapters_from_timeline=timeline,
+    )
+    from dlstudio.cli.telemetry import record_automatic_stage
+
+    record_automatic_stage(
+        Path.cwd(), stage="publish", agent_role="packager", started_ns=started,
+        artifact_paths=(result,),
     )
     print(f"[dl2] youtube package -> {result}")
     return 0
@@ -928,6 +1209,26 @@ def _build_parser() -> argparse.ArgumentParser:
     p_audio.add_argument("--model", default="medium", help="whisper model size (default: medium)")
     p_audio.set_defaults(func=cmd_audio)
 
+    p_speech_edit = sub.add_parser(
+        "speech-edit",
+        help="apply an agent-authored speech edit to a beat WAV + words.json",
+    )
+    p_speech_edit.add_argument("edit", help="dotted edit module path")
+    p_speech_edit.add_argument("beat_id", help="beat whose audio/words to edit")
+    p_speech_edit.add_argument(
+        "plan", nargs="?",
+        help="agent-authored speech_edit.json; omit for conservative automatic cuts",
+    )
+    p_speech_edit.add_argument(
+        "--artifact",
+        help="resolved audit artifact path (default: beside beat words.json)",
+    )
+    p_speech_edit.add_argument(
+        "--prepare-plan",
+        help="write a hash-bound automatic baseline for the agent, without applying it",
+    )
+    p_speech_edit.set_defaults(func=cmd_speech_edit)
+
     p_transcribe = sub.add_parser(
         "transcribe", help="standalone word-level transcription of a wav")
     p_transcribe.add_argument("wav", help="input wav")
@@ -984,6 +1285,11 @@ def _build_parser() -> argparse.ArgumentParser:
     dl_genhtml.add_subparser(sub)
     dl_newvideo.add_subparser(sub)
     dl_preview.add_subparser(sub)
+    dl_product.add_subparsers(sub)
+    dl_migration.add_subparser(sub)
+    dl_autopilot.add_subparsers(sub)
+    dl_telemetry.add_subparser(sub)
+    dl_delivery.add_subparser(sub)
     dl_verify.add_subparser(sub)
 
     return parser

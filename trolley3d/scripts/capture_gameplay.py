@@ -1,8 +1,14 @@
-"""Reel gameplay capture bot for game-not-a-trolley-problem (Studio copy).
+"""Debug/presentation capture bot for game-not-a-trolley-problem.
 
 Deterministic frame-stepped capture: MANUAL lockstep mode + a PIPELINED
 [capture.frame, time.step{count:2}] pair per frame -> PNG sequence ->
 ffmpeg assembles at 30 fps (step_dt is fixed 1/60; count=2 == real time).
+
+This is NOT ordinary gameplay footage. ``capture_method=deterministic_devapi``
+is valid only with ``editorial_role=debug_proof`` or ``presentation``. The
+Studio gameplay ingest gate requires a continuous ``realtime_window`` stream
+and will reject output from this script. For editorial gameplay, use
+``record_window_realtime.py`` from the devlog-record-media skill.
 
 Hard-won rules (2026-07-17 session, reel #1):
   * ORIENTATION MATCHES THE REEL (lead feedback): vertical reel => PORTRAIT
@@ -27,7 +33,7 @@ Run with the game repo venv:
   C:/projects/game-67-idle/.venv/Scripts/python.exe capture_gameplay.py walker
   C:/projects/game-67-idle/.venv/Scripts/python.exe capture_gameplay.py game
 
-Assemble (supersampled downscale to delivery):
+Assemble for debug/presentation use only (supersampled downscale):
   ffmpeg -framerate 30 -i f_%04d.png -vf "scale=1080:1920:flags=lanczos"          -pix_fmt yuv420p -crf 17 out.mp4
 """
 import json
@@ -41,7 +47,9 @@ from devapi_client import DevApiError, running_game, write_engine_capture_payloa
 
 GAME = REPO_ROOT / "games" / "private" / "game-not-a-trolley-problem"
 EXE = GAME / "build" / "devapi-debug" / "bin" / "game.exe"
-OUTROOT = GAME / "tmp" / "captures" / "reel"
+OUTROOT = GAME / "tmp" / "captures" / "debug_proof" / "reel"
+EDITORIAL_ROLE = "debug_proof"
+CAPTURE_METHOD = "deterministic_devapi"
 
 FPS = 30
 # Launch small, then SetWindowPos with SWP_NOSENDCHANGING resizes the window
@@ -125,6 +133,24 @@ def step_and_capture(g, out_path, count=2):
 def capture_seq(g, name, frames, on_frame=None):
     outdir = OUTROOT / name
     outdir.mkdir(parents=True, exist_ok=True)
+    (outdir / "capture_classification.json").write_text(
+        json.dumps(
+            {
+                "schema": "devlog.capture_classification",
+                "version": 1,
+                "editorial_role": EDITORIAL_ROLE,
+                "capture_method": CAPTURE_METHOD,
+                "ingest_eligible_as_gameplay": False,
+                "reason": (
+                    "frame-stepped DevAPI output is debug/presentation evidence, "
+                    "not a real-time client-area stream"
+                ),
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     t0 = time.time()
     for i in range(frames):
         if on_frame is not None:
@@ -160,8 +186,16 @@ def zoom_in(g, i, dy=-0.12):
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else "smoke"
     OUTROOT.mkdir(parents=True, exist_ok=True)
+    print(
+        "DEBUG_PROOF_ONLY capture_method=deterministic_devapi "
+        "editorial_role=debug_proof; ordinary gameplay ingest is forbidden",
+        flush=True,
+    )
 
-    with running_game(exe=str(EXE), cwd=str(GAME), window_size=LAUNCH_SIZE) as g:
+    with running_game(
+        exe=str(EXE), cwd=str(GAME), window_size=LAUNCH_SIZE,
+        extra_args=["--capture-clean"],
+    ) as g:
         g.file.close()
         g.file = FastFile(g.sock)  # buffered reads (see FastFile docstring)
         # Park the window off-screen IMMEDIATELY and WITHOUT activating it:
@@ -195,6 +229,15 @@ def main():
         g.wait_frames(30)
         key_tap(g, "F1")  # hide testbed menu
         g.wait_frames(5)
+        # The debug build can keep the testbed panel visible after the F1
+        # shortcut. Close the panel through its stable UI node before capture;
+        # this keeps portrait footage product-facing instead of shipping the
+        # developer overlay.
+        try:
+            g.click_ui("testbed/close", wait_frames=2, observe=None)
+            g.wait_frames(5)
+        except Exception:
+            pass
 
         if mode == "smoke":
             enter_scene_clean(g, "1", 30)

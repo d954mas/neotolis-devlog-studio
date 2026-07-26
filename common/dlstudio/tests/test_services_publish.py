@@ -92,6 +92,11 @@ def test_generate_package_writes_all_sections(tmp_path):
         edit,
         out_path=out_path,
         title_variants=["Title A", "Title B", "Title C"],
+        thumbnail_variants=[
+            "thumbnail_curiosity.png",
+            "thumbnail_number.png",
+            "thumbnail_outcome.png",
+        ],
         description="A short description of the video.",
         tags=["devlog", "gamedev", "python"],
         chapters_from_timeline=timeline,
@@ -105,6 +110,11 @@ def test_generate_package_writes_all_sections(tmp_path):
     assert "1. Title A" in text
     assert "2. Title B" in text
     assert "3. Title C" in text
+    assert "## A/B test plan" in text
+    assert "thumbnail_curiosity.png" in text
+    assert "thumbnail_number.png" in text
+    assert "thumbnail_outcome.png" in text
+    assert "watch time" in text
     assert "## Description" in text
     assert "A short description of the video." in text
     assert "## Tags" in text
@@ -144,6 +154,7 @@ def test_generate_package_without_optional_args_has_placeholders(tmp_path):
     text = out_path.read_text(encoding="utf-8")
 
     assert "_no title variants supplied_" in text
+    assert "_no thumbnail variants supplied_" in text
     assert "_no description supplied_" in text
     assert "_no tags supplied_" in text
     assert "_no timeline supplied" in text
