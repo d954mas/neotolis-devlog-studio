@@ -243,7 +243,7 @@ def test_canonical_ir_cannot_rebind_revision_ref_to_other_blob(
 
 
 @pytest.mark.performance_smoke
-def test_cache_hit_no_ffmpeg_full_read(tmp_path: Path) -> None:
+def test_cache_hit_skips_ffmpeg_and_returns_verified_bytes(tmp_path: Path) -> None:
     timeline = compile_edit(_edit())
     fingerprint = ExecutionFingerprint.detect()
     options = RenderOptions(crf=28, preset="ultrafast")
@@ -268,6 +268,10 @@ def test_cache_hit_no_ffmpeg_full_read(tmp_path: Path) -> None:
     assert second.cache_hit
     assert second.command == ()
     assert first.artifact == second.artifact
+    assert hashlib.sha256((tmp_path / "second.mp4").read_bytes()).hexdigest() == (
+        second.artifact.sha256
+    )
+    assert not (tmp_path / ".cache.auth-key").exists()
 
 
 def test_cache_hit_rejects_changed_executor(tmp_path: Path) -> None:
@@ -308,7 +312,6 @@ def test_poisoned_cache_is_rebuilt_not_trusted(tmp_path: Path) -> None:
         cache_root=cache,
     )
     cached = cache / "objects" / f"{first.artifact.sha256}.mp4"
-    cached.chmod(0o644)
     with cached.open("r+b") as handle:
         handle.seek(max(0, first.artifact.size // 2))
         handle.write(b"POISON")
@@ -339,7 +342,6 @@ def test_same_size_poison_with_restored_mtime_is_rebuilt(tmp_path: Path) -> None
     )
     cached = cache / "objects" / f"{first.artifact.sha256}.mp4"
     original = cached.stat()
-    cached.chmod(0o644)
     with cached.open("r+b") as handle:
         handle.seek(first.artifact.size // 2)
         original_byte = handle.read(1)
@@ -358,7 +360,7 @@ def test_same_size_poison_with_restored_mtime_is_rebuilt(tmp_path: Path) -> None
     assert second.artifact == first.artifact
 
 
-def test_poisoned_object_and_manifest_cannot_forge_cache_hit(
+def test_manifest_cannot_redirect_to_mutated_object_under_original_hash(
     tmp_path: Path,
 ) -> None:
     timeline = compile_edit(_edit())
@@ -374,18 +376,45 @@ def test_poisoned_object_and_manifest_cannot_forge_cache_hit(
         cache_root=cache,
     )
     cached = cache / "objects" / f"{first.artifact.sha256}.mp4"
-    original = cached.stat()
-    cached.chmod(0o644)
     with cached.open("r+b") as handle:
         handle.seek(first.artifact.size // 2)
         byte = handle.read(1)
         handle.seek(first.artifact.size // 2)
         handle.write(bytes([byte[0] ^ 0xFF]))
-    os.utime(cached, ns=(original.st_atime_ns, original.st_mtime_ns))
     manifest_path = cache / "manifests" / f"{first.cache_key}.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["change_token"] = rendering_api._change_token(cached)
+    manifest["size"] = cached.stat().st_size
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    second = render(
+        timeline,
+        fingerprint,
+        options,
+        EmptyResolver(),
+        output=tmp_path / "second.mp4",
+        cache_root=cache,
+    )
+    assert not second.cache_hit
+    assert second.artifact == first.artifact
+
+
+def test_manifest_for_another_cache_key_is_rebuilt(tmp_path: Path) -> None:
+    timeline = compile_edit(_edit())
+    fingerprint = ExecutionFingerprint.detect()
+    options = RenderOptions(preset="ultrafast")
+    cache = tmp_path / "cache"
+    first = render(
+        timeline,
+        fingerprint,
+        options,
+        EmptyResolver(),
+        output=tmp_path / "first.mp4",
+        cache_root=cache,
+    )
+    manifest_path = cache / "manifests" / f"{first.cache_key}.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["cache_key"] = "0" * 64
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
     second = render(
         timeline,
         fingerprint,
@@ -418,19 +447,6 @@ def test_same_key_concurrent_render_has_one_writer(tmp_path: Path) -> None:
         results = list(pool.map(run, range(2)))
     assert sorted(item.cache_hit for item in results) == [False, True]
     assert results[0].artifact == results[1].artifact
-
-
-def test_cache_auth_key_publication_is_atomic_and_repairs_partial_file(
-    tmp_path: Path,
-) -> None:
-    cache = tmp_path / "cache"
-    key_path = tmp_path / ".cache.auth-key"
-    key_path.write_bytes(b"partial")
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        keys = list(pool.map(lambda _item: rendering_api._cache_auth_key(cache), range(8)))
-    assert len(set(keys)) == 1
-    assert len(keys[0]) == 32
-    assert key_path.read_bytes() == keys[0]
 
 
 def test_full_track_boundary_fade_is_interval_scoped(tmp_path: Path) -> None:
