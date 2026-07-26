@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .budget import build_disk_budget
+from .asset_translation import AssetTranslationError, translate_asset_schemas
 from .inventory import (
     DispositionRules,
     InventoryError,
@@ -67,12 +68,21 @@ def _parser() -> argparse.ArgumentParser:
     restore.add_argument("--backup", type=Path, required=True)
     restore.add_argument("--destination", type=Path, required=True)
     restore.add_argument("--report", type=Path, required=True)
+
+    assets = subparsers.add_parser("translate-assets")
+    assets.add_argument("--production", type=Path, required=True)
+    assets.add_argument("--report", type=Path, required=True)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
+        if args.command == "translate-assets":
+            report = translate_asset_schemas(args.production)
+            _write_json(args.report, report)
+            print(json.dumps(report["summary"], sort_keys=True))
+            return 0
         if args.command in {"roots", "inventory", "dry-run"}:
             rules = (
                 DispositionRules.load(args.rules)
@@ -113,7 +123,12 @@ def main(argv: list[str] | None = None) -> int:
             raise AssertionError(args.command)
         print(json.dumps(report, sort_keys=True))
         return 0
-    except (InventoryError, RecoveryError, OSError) as exc:
+    except (
+        AssetTranslationError,
+        InventoryError,
+        RecoveryError,
+        OSError,
+    ) as exc:
         print(f"BLOCKED: {exc}", file=sys.stderr)
         return 2
 

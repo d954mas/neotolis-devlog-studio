@@ -1,0 +1,51 @@
+"""Asset ingest application use cases shared by all adapters."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from collections.abc import Callable
+from pathlib import Path
+
+from dlstudio.assets.api import (
+    Approval,
+    AssetIngestPort,
+    AssetIngestResult,
+    License,
+    MediaFacts,
+    Provenance,
+)
+
+from .context import ProductionContext
+
+
+@dataclass(frozen=True, slots=True)
+class IngestAssetCommand:
+    source: Path
+    asset_id: str
+    provenance: Provenance
+    approval: Approval
+    license: License
+    expected_revision: int
+
+
+def ingest_asset(
+    context: ProductionContext,
+    repository: AssetIngestPort,
+    command: IngestAssetCommand,
+    *,
+    inspect_media: Callable[[Path], MediaFacts],
+) -> AssetIngestResult:
+    media = inspect_media(command.source)
+    return repository.ingest(
+        command.source,
+        asset_id=command.asset_id,
+        media=media,
+        provenance=command.provenance,
+        approval=command.approval,
+        license=command.license,
+        expected_revision=command.expected_revision,
+        inspect_media=inspect_media,
+        toolchain=context.machine_bindings.values.get(
+            "ffprobe_fingerprint", context.machine_bindings.ffprobe
+        ),
+    )

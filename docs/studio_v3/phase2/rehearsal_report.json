@@ -1,0 +1,45 @@
+{
+  "schema": "studio_v3.asset_rehearsal_report",
+  "version": 1,
+  "scope": "isolated pytest clone with immutable source fixture",
+  "matrix": {
+    "dry_run": {
+      "result": "PASS",
+      "evidence": "translator output is deterministic and fail-closed"
+    },
+    "apply": {
+      "result": "PASS",
+      "evidence": "blob, AssetRevision, immutable index and production head committed atomically"
+    },
+    "rerun": {
+      "result": "PASS",
+      "evidence": "same source/spec returns the exact existing revision and does not advance head"
+    },
+    "interrupted_or_stale_apply": {
+      "result": "PASS",
+      "evidence": "no head/revision is published; orphan objects are explicit GC candidates"
+    },
+    "projection_rebuild": {
+      "result": "PASS",
+      "evidence": "revision-chain rebuild equals the canonical immutable index"
+    },
+    "backup_materialization": {
+      "result": "PASS",
+      "evidence": "clone preflight selects hardlink on the same volume and verified copy cross-volume; mutable exports always use an isolated verified copy so they cannot alias the immutable store"
+    }
+  },
+  "commands": [
+    "python -m pytest tests/test_v3_foundation.py tests/test_v3_assets.py",
+    "python -m pytest tools/studio_v3_migrate/tests"
+  ],
+  "results": {
+    "foundation_and_assets": "42 passed",
+    "migration_tooling": "15 passed",
+    "architecture_gates": "17 passed",
+    "real_ffprobe_probe": "PASS: 1080x1920 h264, 30/1 fps, 12s"
+  },
+  "real_workspace_cutover": {
+    "result": "BLOCKED",
+    "reason": "Phase 0 full manifest/verified backup remains fail-closed on 14 unreadable WAV sources; no destructive apply was attempted"
+  }
+}

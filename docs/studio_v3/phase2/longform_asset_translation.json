@@ -1,0 +1,2743 @@
+{
+  "production_root": "C:/projects/devlogs/not_a_trolley_problem/devlogs/2026_07_22_devlog_01",
+  "records": [
+    {
+      "artifact_path": "data/footage/labeled/day4_before_after_split.mp4",
+      "artifact_sha256": "20830bb2e07094c84a42a586bfecd018cf659ca243c5d9b13a379ad8e6166f3c",
+      "asset_id": "capture-a5_day4_controlled_pair",
+      "blockers": [
+        "approval_evidence_missing",
+        "capture_proof_chain_incomplete",
+        "license_evidence_incomplete"
+      ],
+      "capture": {
+        "build_id": "uat:2026-07-24",
+        "method": "deterministic_devapi",
+        "state_id": "day4.paper_graphite.controlled_pair"
+      },
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_approval": "approved",
+      "legacy_asset_id": "capture:a5_day4_controlled_pair",
+      "legacy_license": null,
+      "legacy_schema": "asset_registry.v1",
+      "media": {
+        "duration_seconds": 9.2,
+        "fps": 30.0,
+        "height": 1080,
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/historical/day4_render_before_after_live.mp4",
+      "artifact_sha256": "dfc8e53b28cc9e1cc07f8cdd3a807c8d21fdcc48bdfba779d5cdba5b77298a32",
+      "asset_id": "capture-a5_day4_sequential_pair",
+      "blockers": [
+        "approval_evidence_missing",
+        "capture_proof_chain_incomplete",
+        "gameplay_handles_below_contract",
+        "license_evidence_incomplete"
+      ],
+      "capture": {
+        "build_id": "legacy-source:dfc8e53b28cc9e1c",
+        "method": "realtime_window",
+        "state_id": "day4.render.before_after_sequence"
+      },
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_approval": "approved",
+      "legacy_asset_id": "capture:a5_day4_sequential_pair",
+      "legacy_license": null,
+      "legacy_schema": "asset_registry.v1",
+      "media": {
+        "duration_seconds": 6.0,
+        "fps": 30.0,
+        "height": 1080,
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/recentered/labeled/day7_gameplay.mp4",
+      "artifact_sha256": "afdeb7eddd7d021ce8a63817e70a404c6e12dde4d1aa3a8057af448216e43e1d",
+      "asset_id": "catalog-025d5706a15f69e47040",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/recentered/labeled/day7_gameplay.mp4",
+      "legacy_provenance": "game_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 15.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/images/historical/day4_graphite_paper.png",
+      "artifact_sha256": "3187f6407ff6c46f8ae80691ad33c8467fc234763c4fbf68948e359b58f46cda",
+      "asset_id": "catalog-0303f987f1424d7cdfbd",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/images/historical/day4_graphite_paper.png",
+      "legacy_provenance": "image",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": null,
+        "fps": null,
+        "height": 1080,
+        "kind": "image",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/images/historical/day2_station_loop.png",
+      "artifact_sha256": "5074eee3f40b1b83c032808606b004c42c506a00ec3c0f2bee399232097935e1",
+      "asset_id": "catalog-030eef8e64955903ff6d",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/images/historical/day2_station_loop.png",
+      "legacy_provenance": "image",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": null,
+        "fps": null,
+        "height": 1080,
+        "kind": "image",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/historical/day1_crowd_1000.mp4",
+      "artifact_sha256": "f6845d1aadc5d28969bcc6307639dae84d2f2e305bbdabe6dd54808abe99ba10",
+      "asset_id": "catalog-04db4c573f5fd8e0d527",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/historical/day1_crowd_1000.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 2.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/images/historical/day5_station_queue.png",
+      "artifact_sha256": "4d0b00d4f6570a467e7750ae5974e3dc7960f7a9c51bd5090cf5a2347adabe05",
+      "asset_id": "catalog-06017efe2b3fab1acb78",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/images/historical/day5_station_queue.png",
+      "legacy_provenance": "image",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": null,
+        "fps": null,
+        "height": 1080,
+        "kind": "image",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/historical/day1_crowd_100.mp4",
+      "artifact_sha256": "a215c3b13c38362b87646e86f6fb906e33c1371e8c065ac88ae7b1ea8a5c87ad",
+      "asset_id": "catalog-09710621dac35c3845e9",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/historical/day1_crowd_100.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 2.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/infographics/day3_lever_canvas.mp4",
+      "artifact_sha256": "208b3027b74c7c50ac64d2deecfd4b2d0313020cc534e759fa25c851eba2eb07",
+      "asset_id": "catalog-0d910f1c9869d1a46385",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/infographics/day3_lever_canvas.mp4",
+      "legacy_provenance": "generated",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 20.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/early_3d_runtime.mp4",
+      "artifact_sha256": "23729ceef9d40ddf0cdfbf72377e1da30724806bb5698a902918fba8816320ee",
+      "asset_id": "catalog-0db1307e3bce48e85134",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/early_3d_runtime.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 9.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/recentered/labeled/day2_systems_reprise_clean.mp4",
+      "artifact_sha256": "4d5a160ff8006e32fb5fc0826dedf3557123816f10fc8909ebdc4006e411ea34",
+      "asset_id": "catalog-0e76ac22190b37800d9a",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/recentered/labeled/day2_systems_reprise_clean.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 9.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/b6/b6dbaf67cf14fe2b4f429b1ad207ceec3456543aecf13f720bc951369367fdd0.mp4",
+      "artifact_sha256": "b6dbaf67cf14fe2b4f429b1ad207ceec3456543aecf13f720bc951369367fdd0",
+      "asset_id": "catalog-0f4a55283f84a9dff333",
+      "blockers": [
+        "legacy asset escapes production root: C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/b6/b6dbaf67cf14fe2b4f429b1ad207ceec3456543aecf13f720bc951369367fdd0.mp4",
+        "license_missing",
+        "provenance_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/b6/b6dbaf67cf14fe2b4f429b1ad207ceec3456543aecf13f720bc951369367fdd0.mp4",
+      "legacy_provenance": "unknown",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 8.633008,
+        "fps": 30.0,
+        "height": 1920,
+        "kind": "video",
+        "width": 1080
+      }
+    },
+    {
+      "artifact_path": "data/footage/labeled/day4_compare.mp4",
+      "artifact_sha256": "a60c0c8d1012ad624abbe2ff554e380d307457241e9d564d2b426b5768fc7575",
+      "asset_id": "catalog-13336dca53ed1fea9b4e",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/labeled/day4_compare.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 2.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/labeled/day1_crowd.mp4",
+      "artifact_sha256": "8cd7e7857dd9fd4757b919d020690171f2a418b22ee58358404e179271534a0a",
+      "asset_id": "catalog-1673e355da278b8d7e66",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/labeled/day1_crowd.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 16.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/5e/5e210d46693e724b95dd6c03b7c9e1af19a32756253c1e2d23793e66d6da857f.png",
+      "artifact_sha256": "5e210d46693e724b95dd6c03b7c9e1af19a32756253c1e2d23793e66d6da857f",
+      "asset_id": "catalog-18adbfd70df9a010ce4d",
+      "blockers": [
+        "legacy asset escapes production root: C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/5e/5e210d46693e724b95dd6c03b7c9e1af19a32756253c1e2d23793e66d6da857f.png",
+        "license_missing",
+        "provenance_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/5e/5e210d46693e724b95dd6c03b7c9e1af19a32756253c1e2d23793e66d6da857f.png",
+      "legacy_provenance": "unknown",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": null,
+        "fps": null,
+        "height": 1445,
+        "kind": "image",
+        "width": 2559
+      }
+    },
+    {
+      "artifact_path": "data/footage/day1_walker_dynamic.mp4",
+      "artifact_sha256": "8eecb2ee33a1486b5d5f47b7f888483e6824afc00d8509e495087405e09eede7",
+      "asset_id": "catalog-19c2aece3a7c17484c58",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/day1_walker_dynamic.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 11.5,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/recentered/day7_upgrades_long_live.mp4",
+      "artifact_sha256": "2f6c3b8a3293c08d04e99799d4b754183db19def48a0c2173d78c89c6ec168ba",
+      "asset_id": "catalog-1c6a7eeceb5ce6756067",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/recentered/day7_upgrades_long_live.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 15.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/labeled/day5_queue_reprise.mp4",
+      "artifact_sha256": "99d6a7c968da768115e90d2e09391cbe76e10a1196faa75938e49f069761c6ca",
+      "asset_id": "catalog-1c72cf333c6d742077eb",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/labeled/day5_queue_reprise.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 8.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/labeled/day5_queue.mp4",
+      "artifact_sha256": "99d6a7c968da768115e90d2e09391cbe76e10a1196faa75938e49f069761c6ca",
+      "asset_id": "catalog-1e0ad4f5e99163b59c55",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/labeled/day5_queue.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 8.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/images/assembled/day3_wide_clean.png",
+      "artifact_sha256": "2f2ca45e1a121e688ff0c9312b33700de5bb937427a2015c3f231a3dfdaf31dd",
+      "asset_id": "catalog-1efc96704b66268c5214",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/images/assembled/day3_wide_clean.png",
+      "legacy_provenance": "image",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": null,
+        "fps": null,
+        "height": 1080,
+        "kind": "image",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/labeled/day2_systems.mp4",
+      "artifact_sha256": "a15add07e7ef64c54fc7211f99470d995fe0a21818c830ac37e3924a94065eef",
+      "asset_id": "catalog-1f9dce798941ba68fa60",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/labeled/day2_systems.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 9.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/current_tram_motion_live.mp4",
+      "artifact_sha256": "a34b301732adcc7206093e6fe7fddb4ab4de33ff22da85072f64a18684430fb4",
+      "asset_id": "catalog-218ee3e2913e573a6071",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/current_tram_motion_live.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 15.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/labeled/day5_build.mp4",
+      "artifact_sha256": "b855d2c9e33918ad1d435adb00ddec5ba64a0034a519fecdb38d326a5b03d997",
+      "asset_id": "catalog-2287faa375549e820fd2",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/labeled/day5_build.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 8.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/infographics/trolley_problem_motion.mp4",
+      "artifact_sha256": "7aef153fdae83a72b602281af0384b7e2acb0ab6c68b5626aeab7eca08f93721",
+      "asset_id": "catalog-25cd9ad85313f4464955",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/infographics/trolley_problem_motion.mp4",
+      "legacy_provenance": "generated",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 3.2,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/images/assembled/day3_lever_close.png",
+      "artifact_sha256": "0d2440e03bc942e04f60b35af557c52959b17f2d5e85a841806d274281c84750",
+      "asset_id": "catalog-2aab4344a781f54ec622",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/images/assembled/day3_lever_close.png",
+      "legacy_provenance": "image",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": null,
+        "fps": null,
+        "height": 1080,
+        "kind": "image",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/recentered/day1_crowd.mp4",
+      "artifact_sha256": "8db925a4df430d01b0a0b4d368ccd71dc43330d3615b836f4d79755f9e236d9d",
+      "asset_id": "catalog-2b1b934609ac85d1379c",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/recentered/day1_crowd.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 5.5,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/canvas_project_smooth.mp4",
+      "artifact_sha256": "bc08589d20ac022270c569a3cdd2b43d4dfb12f1b24eb68b52b05940dd2e17bf",
+      "asset_id": "catalog-34e9efc7cc3c6ec5a170",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/canvas_project_smooth.mp4",
+      "legacy_provenance": "canvas",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 14.566667,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/recentered/labeled/day5_build_reprise.mp4",
+      "artifact_sha256": "1bacc1e2e592d3624192bdeb5f8ea056f3eba5f49edf6ea22cc01e823ed148a4",
+      "asset_id": "catalog-3cc83c476d0df6ad39a1",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/recentered/labeled/day5_build_reprise.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 8.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/recentered/historical/day4_graphite_gameplay_live.mp4",
+      "artifact_sha256": "a3e176954dcce94537b3b9f0d484ae510683c0f4cd87c314ba6bb8b6151b7497",
+      "asset_id": "catalog-3eafcb129beb60501db4",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/recentered/historical/day4_graphite_gameplay_live.mp4",
+      "legacy_provenance": "game_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 6.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/infographics/day3_lever_canvas_reprise.mp4",
+      "artifact_sha256": "1e9b367e6c2328eecea4ff26160c66cb247ca1c90f2e10f02896f6193e8bde6a",
+      "asset_id": "catalog-3ec1578382680bdda275",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/infographics/day3_lever_canvas_reprise.mp4",
+      "legacy_provenance": "generated",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 20.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/recentered/labeled/day5_queue.mp4",
+      "artifact_sha256": "cc80d08a585c434d59c3056c619876edf9715789034e6e3e33509321bd2258ed",
+      "asset_id": "catalog-3fe7e140e4f9e8d68937",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/recentered/labeled/day5_queue.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 8.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/recentered/labeled/day2_systems.mp4",
+      "artifact_sha256": "12cd0a85d29032eac98040d8f2e1cac5291dc699afd7348b0ea4e8473b2bf57f",
+      "asset_id": "catalog-40c71151771634854a44",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/recentered/labeled/day2_systems.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 9.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/day7_gameplay_continuous.mp4",
+      "artifact_sha256": "9b73d4a6463e2e845631129777c3470bf2331c71e84796c68183ba7fee515c3b",
+      "asset_id": "catalog-423e19da78446dd5d0fc",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/day7_gameplay_continuous.mp4",
+      "legacy_provenance": "game_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 22.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/archive/day5_station_realtime_with_testbed_menu.mp4",
+      "artifact_sha256": "ab2d2e1a7471da3fe4f868f4cebe5a9a7fc7acd13c6a3bb0f68dcb496a501a7e",
+      "asset_id": "catalog-42793003872073fcadaa",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/archive/day5_station_realtime_with_testbed_menu.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 26.2,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/63/637a753a2ce03c2b6b0014e80e0e89e06376deec1f6e774a3f5ccf82b2607846.mp4",
+      "artifact_sha256": "637a753a2ce03c2b6b0014e80e0e89e06376deec1f6e774a3f5ccf82b2607846",
+      "asset_id": "catalog-43929ec3410a3bda36fb",
+      "blockers": [
+        "legacy asset escapes production root: C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/63/637a753a2ce03c2b6b0014e80e0e89e06376deec1f6e774a3f5ccf82b2607846.mp4",
+        "license_missing",
+        "provenance_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/63/637a753a2ce03c2b6b0014e80e0e89e06376deec1f6e774a3f5ccf82b2607846.mp4",
+      "legacy_provenance": "unknown",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 33.8,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/historical/day1_crowd_400.mp4",
+      "artifact_sha256": "5a9babb40cc23e62c93259ad19410f98665113dec705c8874b5e1b3c1e2373be",
+      "asset_id": "catalog-44eb6e0bf7abbd68f4db",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/historical/day1_crowd_400.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 2.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/77/77b4344dd3e7462786e587c4761234cb7255faa35ff10c8efc5e975d728e81e9.mp4",
+      "artifact_sha256": "77b4344dd3e7462786e587c4761234cb7255faa35ff10c8efc5e975d728e81e9",
+      "asset_id": "catalog-4870b55c12b1e8e77e68",
+      "blockers": [
+        "legacy asset escapes production root: C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/77/77b4344dd3e7462786e587c4761234cb7255faa35ff10c8efc5e975d728e81e9.mp4",
+        "license_missing",
+        "provenance_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/77/77b4344dd3e7462786e587c4761234cb7255faa35ff10c8efc5e975d728e81e9.mp4",
+      "legacy_provenance": "unknown",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 12.0,
+        "fps": 30.0,
+        "height": 1920,
+        "kind": "video",
+        "width": 1080
+      }
+    },
+    {
+      "artifact_path": "C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/11/11c147b58f8ab3f4c4d0901be8641beea280b32d18a43f5938763eadec169abc.png",
+      "artifact_sha256": "11c147b58f8ab3f4c4d0901be8641beea280b32d18a43f5938763eadec169abc",
+      "asset_id": "catalog-4dacc181cb19efa38543",
+      "blockers": [
+        "legacy asset escapes production root: C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/11/11c147b58f8ab3f4c4d0901be8641beea280b32d18a43f5938763eadec169abc.png",
+        "license_missing",
+        "provenance_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/11/11c147b58f8ab3f4c4d0901be8641beea280b32d18a43f5938763eadec169abc.png",
+      "legacy_provenance": "unknown",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": null,
+        "fps": null,
+        "height": 600,
+        "kind": "image",
+        "width": 900
+      }
+    },
+    {
+      "artifact_path": "data/footage/recentered/labeled/day2_systems_clean.mp4",
+      "artifact_sha256": "4d5a160ff8006e32fb5fc0826dedf3557123816f10fc8909ebdc4006e411ea34",
+      "asset_id": "catalog-50985a62c27f9b26b86c",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/recentered/labeled/day2_systems_clean.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 9.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/recentered/labeled/day6_3d.mp4",
+      "artifact_sha256": "857686bd30e09b2f165a06645e10286b389e4132b9023cdfcf2475c3f7d08021",
+      "asset_id": "catalog-52d8e2071c3417d58927",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/recentered/labeled/day6_3d.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 15.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/labeled/day1_walker.mp4",
+      "artifact_sha256": "d505a78863762061cfdb8e2967bbefb8a9c54044f3a6ab44017ace6a80c67559",
+      "asset_id": "catalog-5396e0ca0bc077e2828f",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/labeled/day1_walker.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 11.5,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/day1_walker.mp4",
+      "artifact_sha256": "4cdb68f9b6fcbb80ec5192747ae704e84b13415e370b7705ce879a6de2c865e5",
+      "asset_id": "catalog-54df43a21ac19f639898",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/day1_walker.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 5.5,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/recentered/historical/day5_build_live_before_after.mp4",
+      "artifact_sha256": "4f4dbc40ad19bc524a7bda0cc3ab9a01d054981a24233654e2c221676d9785b1",
+      "asset_id": "catalog-5660a4fce4b3b06f0465",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/recentered/historical/day5_build_live_before_after.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 8.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/day5_station_loop.mp4",
+      "artifact_sha256": "c32031e1be6c362b887dea2ed701141f7e5fa6eed9d672666c1e1fc387f1bb53",
+      "asset_id": "catalog-56b337088b03d93a57df",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/day5_station_loop.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 40.0,
+        "fps": 60.0,
+        "height": 720,
+        "kind": "video",
+        "width": 1280
+      }
+    },
+    {
+      "artifact_path": "data/footage/day3_lever_runtime_loop.mp4",
+      "artifact_sha256": "d84836ab25c0dbd97df57942dbe2ec76ababa05b2d050e5e7c101e8a8f0f0e7a",
+      "asset_id": "catalog-5aa454b5c53ca09fbe96",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/day3_lever_runtime_loop.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 12.0,
+        "fps": 30.0,
+        "height": 1570,
+        "kind": "video",
+        "width": 1080
+      }
+    },
+    {
+      "artifact_path": "data/footage/historical/day4_graphite_gameplay_live.mp4",
+      "artifact_sha256": "b4af415213f650cf681c9d2445a8c5b121bd7607c6f481712f41a5d6cc5f58ed",
+      "asset_id": "catalog-5bd248ad19e3f6fcc8cd",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/historical/day4_graphite_gameplay_live.mp4",
+      "legacy_provenance": "game_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 6.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/intro_engine_calm_live.mp4",
+      "artifact_sha256": "78a61260a088eebd85cea14bd7bff51a5341b56aac13643f4b395cb7f8598028",
+      "asset_id": "catalog-5c260b2212d7af8aa98b",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/intro_engine_calm_live.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 6.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/archive/day7_upgrades_live_before_recapture.mp4",
+      "artifact_sha256": "f1cefc575ce27401dce2181d16740148afa4375891e8b6f828a6812784cdcedc",
+      "asset_id": "catalog-5e6336c9d33f33e32dfa",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/archive/day7_upgrades_live_before_recapture.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 7.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/labeled/day6_2d.mp4",
+      "artifact_sha256": "3b5b0f9b861936abbbc59ae8945c6381453637722107fcd31d72b2ba13821d53",
+      "asset_id": "catalog-6160a83ac284ef61e3b4",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/labeled/day6_2d.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 7.0,
+        "fps": 25.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/infographics/day5_station_details.mp4",
+      "artifact_sha256": "dea9bded1070460f926eccb18704a31825ae3bb08b387b8a7032a1ba865678e5",
+      "asset_id": "catalog-619d9de85c8d87c6c225",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/infographics/day5_station_details.mp4",
+      "legacy_provenance": "generated",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 7.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/labeled/day6_3d.mp4",
+      "artifact_sha256": "a7930a92688018f4a8d1635b1259b768dbe7646fe5ac679999b365292ed5b883",
+      "asset_id": "catalog-6404d83010bd7527df4d",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/labeled/day6_3d.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 15.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/images/assembled/day4_graphite_clean.png",
+      "artifact_sha256": "d6e68f1379b512f7d82a1a5bc290c4a8c5874665eb12231e84b9c14f08b644b3",
+      "asset_id": "catalog-6503205b77a40b1b58e7",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/images/assembled/day4_graphite_clean.png",
+      "legacy_provenance": "image",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": null,
+        "fps": null,
+        "height": 1080,
+        "kind": "image",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/infographics/day1_first_model_motion.mp4",
+      "artifact_sha256": "a62b2cd4da0b2d9704b5361eb47295ba4479c357a7ec76f0b6e660a2ce57023d",
+      "asset_id": "catalog-665d32ce73ad5026232f",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/infographics/day1_first_model_motion.mp4",
+      "legacy_provenance": "generated",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 10.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/historical/day5_build_live_before_after.mp4",
+      "artifact_sha256": "726d64a975f7e024ed2e64143bc1f84dc8eb33de8582459e8a9ce0a5b0d81369",
+      "asset_id": "catalog-6806cb987d96bb4f4109",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/historical/day5_build_live_before_after.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 8.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/d0/d0a92dfc0f5479d0f226f2a87fc935cf972089fecabcb0531e3c2e88613a27a6.mp4",
+      "artifact_sha256": "d0a92dfc0f5479d0f226f2a87fc935cf972089fecabcb0531e3c2e88613a27a6",
+      "asset_id": "catalog-68cc5641adefafec6a45",
+      "blockers": [
+        "legacy asset escapes production root: C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/d0/d0a92dfc0f5479d0f226f2a87fc935cf972089fecabcb0531e3c2e88613a27a6.mp4",
+        "license_missing",
+        "provenance_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/d0/d0a92dfc0f5479d0f226f2a87fc935cf972089fecabcb0531e3c2e88613a27a6.mp4",
+      "legacy_provenance": "unknown",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 7.52,
+        "fps": 25.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/archive/day5_station_normal_speed_retime_attempt.mp4",
+      "artifact_sha256": "3d62625b1c6b72166cd374dd424af20ecbb516293ed062edbea38d71903c9c3f",
+      "asset_id": "catalog-694d44a8057eeed1ce3a",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/archive/day5_station_normal_speed_retime_attempt.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 26.2,
+        "fps": 30.0,
+        "height": 720,
+        "kind": "video",
+        "width": 1280
+      }
+    },
+    {
+      "artifact_path": "data/footage/day1_walker_loop.mp4",
+      "artifact_sha256": "b89b244e6f154f9a1744b8467cfa6f3859d271016e9140fbfb675e1e963d855a",
+      "asset_id": "catalog-69cfb8b903bddd0c2194",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/day1_walker_loop.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 11.5,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/labeled/day4_search.mp4",
+      "artifact_sha256": "44de4816c3189fc87bb88fb99aa186dfa9eccb4fd217fc50b25dcfe190a138be",
+      "asset_id": "catalog-75a69416b3c0030691ee",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/labeled/day4_search.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 6.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/labeled/day7_gameplay.mp4",
+      "artifact_sha256": "0ab7ed880be541e6473ae22c9abff3ef5ebf3b741301f8640ef82615324f66e4",
+      "asset_id": "catalog-75dfdd376bc9f262f696",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/labeled/day7_gameplay.mp4",
+      "legacy_provenance": "game_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 15.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/day5_station_realtime.mp4",
+      "artifact_sha256": "ab9bbef2a90e7ed05297b0d9dcb66d18aa383da26946e6419e30a47662b2646d",
+      "asset_id": "catalog-76502190b0ed5c139306",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/day5_station_realtime.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 27.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/day3_lever_close_live.mp4",
+      "artifact_sha256": "1d269234fda6194fac3a4b808b4343d87ee341d12cbd95c1c31b0b0c67ebeb5c",
+      "asset_id": "catalog-772f04d8605b56201738",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/day3_lever_close_live.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 12.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/day1_crowd_loop.mp4",
+      "artifact_sha256": "f51c0f7ec10e2fcc6bc08ab36b3f7092a85811bf8e1b4f7e27ff160fa7a06410",
+      "asset_id": "catalog-7788d0e47c4644ff0345",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/day1_crowd_loop.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 16.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/e6/e65d18b96a86ea2fa3f7c157a5f32a748509e07a98ddbe9d351a5d3d4893ad1d.png",
+      "artifact_sha256": "e65d18b96a86ea2fa3f7c157a5f32a748509e07a98ddbe9d351a5d3d4893ad1d",
+      "asset_id": "catalog-77d31ec3b3af1e91367f",
+      "blockers": [
+        "legacy asset escapes production root: C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/e6/e65d18b96a86ea2fa3f7c157a5f32a748509e07a98ddbe9d351a5d3d4893ad1d.png",
+        "license_missing",
+        "provenance_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/e6/e65d18b96a86ea2fa3f7c157a5f32a748509e07a98ddbe9d351a5d3d4893ad1d.png",
+      "legacy_provenance": "unknown",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": null,
+        "fps": null,
+        "height": 600,
+        "kind": "image",
+        "width": 900
+      }
+    },
+    {
+      "artifact_path": "data/footage/historical/day5_station_queue_live.mp4",
+      "artifact_sha256": "b12d512c6c6795554152d7af61551c91252d94bcd984b202e530b525bbdbd7de",
+      "asset_id": "catalog-788c36870fc838603215",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/historical/day5_station_queue_live.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 8.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/ea/eaad201da94cb323401fdb8cc760650803ddf8fd704cb9fa56317e6c69bc6fd6.ttf",
+      "artifact_sha256": "eaad201da94cb323401fdb8cc760650803ddf8fd704cb9fa56317e6c69bc6fd6",
+      "asset_id": "catalog-78a131118733274a0b97",
+      "blockers": [
+        "legacy asset escapes production root: C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/ea/eaad201da94cb323401fdb8cc760650803ddf8fd704cb9fa56317e6c69bc6fd6.ttf",
+        "license_missing",
+        "provenance_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/ea/eaad201da94cb323401fdb8cc760650803ddf8fd704cb9fa56317e6c69bc6fd6.ttf",
+      "legacy_provenance": "unknown",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": null,
+        "fps": null,
+        "height": null,
+        "kind": "font",
+        "width": null
+      }
+    },
+    {
+      "artifact_path": "data/footage/intro_latest_wide_live.mp4",
+      "artifact_sha256": "ea7fc36059142865d9e5c5c061ea9c2b1fd1cf1f5e0865ccc26e61beee0e4b59",
+      "asset_id": "catalog-7a560eed531843a15334",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/intro_latest_wide_live.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 22.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/infographics/day7_upgrade_transfer.mp4",
+      "artifact_sha256": "5cc404c590b17f80d1661a67dd141f58e6d30f375d0ba8ef5c3c81a523c3730e",
+      "asset_id": "catalog-7ae3e4b4dcfc038103c8",
+      "blockers": [
+        "license_missing",
+        "source_hash_mismatch"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/infographics/day7_upgrade_transfer.mp4",
+      "legacy_provenance": "generated",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 20.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/music/first_day_in_a_loop.ogg",
+      "artifact_sha256": "2b037f207c57dfa73382f9a39bce52e258605c63b029b07cb1e9b8b29d48d070",
+      "asset_id": "catalog-8081d22af5c8e4d1dec6",
+      "blockers": [
+        "license_missing",
+        "provenance_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/music/first_day_in_a_loop.ogg",
+      "legacy_provenance": "unknown",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 240.0,
+        "fps": null,
+        "height": null,
+        "kind": "audio",
+        "width": null
+      }
+    },
+    {
+      "artifact_path": "C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/55/55643447f7d38c597db15881290cba997465c8abde5e68474a2906aef940d382.png",
+      "artifact_sha256": "55643447f7d38c597db15881290cba997465c8abde5e68474a2906aef940d382",
+      "asset_id": "catalog-844b8e9c752ad2da9e74",
+      "blockers": [
+        "legacy asset escapes production root: C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/55/55643447f7d38c597db15881290cba997465c8abde5e68474a2906aef940d382.png",
+        "license_missing",
+        "provenance_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/55/55643447f7d38c597db15881290cba997465c8abde5e68474a2906aef940d382.png",
+      "legacy_provenance": "unknown",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": null,
+        "fps": null,
+        "height": 941,
+        "kind": "image",
+        "width": 1672
+      }
+    },
+    {
+      "artifact_path": "data/footage/day3_lever_runtime_portrait.mp4",
+      "artifact_sha256": "f3a74000a6e2fd6c023f75402e1ab9fcb9d12c3246423ca160c3de3921d16ef8",
+      "asset_id": "catalog-85275c3174dcb00e45b1",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/day3_lever_runtime_portrait.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 3.0,
+        "fps": 30.0,
+        "height": 1570,
+        "kind": "video",
+        "width": 1080
+      }
+    },
+    {
+      "artifact_path": "data/footage/recentered/intro_latest_clean_full_live.mp4",
+      "artifact_sha256": "9a28a930c51ee806862b66250912f739462aba9b8983d3d9d73aae7c949434b8",
+      "asset_id": "catalog-858945925e856b05536d",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/recentered/intro_latest_clean_full_live.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 22.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/intro_latest_full_live.mp4",
+      "artifact_sha256": "7d82cbd71125e283270e5c07ecded59b2a726932f5671c6a490dc3cda62033f8",
+      "asset_id": "catalog-89a653eac235ce51b028",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/intro_latest_full_live.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 22.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/day7_upgrades_live.mp4",
+      "artifact_sha256": "f1cefc575ce27401dce2181d16740148afa4375891e8b6f828a6812784cdcedc",
+      "asset_id": "catalog-8ca1a1bf254dc79f3d0d",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/day7_upgrades_live.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 7.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/2b/2b037f207c57dfa73382f9a39bce52e258605c63b029b07cb1e9b8b29d48d070.ogg",
+      "artifact_sha256": "2b037f207c57dfa73382f9a39bce52e258605c63b029b07cb1e9b8b29d48d070",
+      "asset_id": "catalog-8ee1b504b21adba629fa",
+      "blockers": [
+        "legacy asset escapes production root: C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/2b/2b037f207c57dfa73382f9a39bce52e258605c63b029b07cb1e9b8b29d48d070.ogg",
+        "license_missing",
+        "provenance_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/2b/2b037f207c57dfa73382f9a39bce52e258605c63b029b07cb1e9b8b29d48d070.ogg",
+      "legacy_provenance": "unknown",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 240.0,
+        "fps": null,
+        "height": null,
+        "kind": "audio",
+        "width": null
+      }
+    },
+    {
+      "artifact_path": "data/footage/recentered/labeled/day4_runtime.mp4",
+      "artifact_sha256": "d9ff61b50b824246e70bfa3a7d70656813a4cde4a81cb78582859030959481e4",
+      "asset_id": "catalog-8f5125c9c64a52aac53e",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/recentered/labeled/day4_runtime.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 6.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/labeled/day4_before_after_split.mp4",
+      "artifact_sha256": "20830bb2e07094c84a42a586bfecd018cf659ca243c5d9b13a379ad8e6166f3c",
+      "asset_id": "catalog-919cbb32e2f0b906c6b3",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/labeled/day4_before_after_split.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 9.2,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/images/historical/day3_lever_runtime.png",
+      "artifact_sha256": "190a6f1bfeba7769839ab37db962df195b9753f358a92ae174fdcfd9c3e750ff",
+      "asset_id": "catalog-93969f28e16da4309803",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/images/historical/day3_lever_runtime.png",
+      "legacy_provenance": "image",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": null,
+        "fps": null,
+        "height": 1080,
+        "kind": "image",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/images/trolley_problem_solved.jpg",
+      "artifact_sha256": "990421235c65078dadd430a08c35887d9d7894295ab52d758d12b56d25747733",
+      "asset_id": "catalog-964d57672b52afdf494f",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/images/trolley_problem_solved.jpg",
+      "legacy_provenance": "image",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": null,
+        "fps": null,
+        "height": 666,
+        "kind": "image",
+        "width": 1152
+      }
+    },
+    {
+      "artifact_path": "data/footage/recentered/labeled/day4_search.mp4",
+      "artifact_sha256": "4bd17743967b12202182e1ce486d5ad1ad7c44c810be57abb4403636ce52184d",
+      "asset_id": "catalog-9a1c719f41b05071f469",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/recentered/labeled/day4_search.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 6.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/recentered/historical/day1_tram_crowd.mp4",
+      "artifact_sha256": "e353110137c03e47bcf16ce8198dd158bb4aaf7959f545e9032ffb0d3561afb6",
+      "asset_id": "catalog-9c75abda22f94511cfd1",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/recentered/historical/day1_tram_crowd.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 5.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/current_station_hook.mp4",
+      "artifact_sha256": "17909fda72b60e41b91113b39cf45fb80572e8cc62102a3e78f7c1bb9e3a1ed4",
+      "asset_id": "catalog-a1ddd18a1273cceb6621",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/current_station_hook.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 15.333333,
+        "fps": 60.0,
+        "height": 900,
+        "kind": "video",
+        "width": 1600
+      }
+    },
+    {
+      "artifact_path": "data/infographics/day4_renderer_iterations.mp4",
+      "artifact_sha256": "518d7db51ee44c5b8f2701df2ef70824832e50aacb677d50eace18f271637309",
+      "asset_id": "catalog-a4368acfd178e5dd0cc8",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/infographics/day4_renderer_iterations.mp4",
+      "legacy_provenance": "generated",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 22.2,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/day1_crowd.mp4",
+      "artifact_sha256": "f250fe4702f22973f3218b227744d2f886dc865fd800dd0e093a7b07df8c3902",
+      "asset_id": "catalog-a585b933620d30a28b5b",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/day1_crowd.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 5.5,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/bd/bd7926791084ab2c5bdb6ef945dba862ae466565bce06348467dfbfbbd5d48e0.png",
+      "artifact_sha256": "bd7926791084ab2c5bdb6ef945dba862ae466565bce06348467dfbfbbd5d48e0",
+      "asset_id": "catalog-a7dc0870fa692c24311b",
+      "blockers": [
+        "legacy asset escapes production root: C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/bd/bd7926791084ab2c5bdb6ef945dba862ae466565bce06348467dfbfbbd5d48e0.png",
+        "license_missing",
+        "provenance_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/bd/bd7926791084ab2c5bdb6ef945dba862ae466565bce06348467dfbfbbd5d48e0.png",
+      "legacy_provenance": "unknown",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": null,
+        "fps": null,
+        "height": 600,
+        "kind": "image",
+        "width": 900
+      }
+    },
+    {
+      "artifact_path": "data/footage/historical/day4_render_split_live.mp4",
+      "artifact_sha256": "54a0870fb71f5f7f8f3a8ab770d892b8b5a626531cb5a6a9221677d00acf8795",
+      "asset_id": "catalog-a86bb80e417927d56731",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/historical/day4_render_split_live.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 2.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/infographics/day3_lever_canvas_tail.mp4",
+      "artifact_sha256": "0f30b6d2f5b3a3ea6bec913aee53f3d9f6da07d37d8e234596c909530de7dbc9",
+      "asset_id": "catalog-ab225b53a83d24c937bf",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/infographics/day3_lever_canvas_tail.mp4",
+      "legacy_provenance": "generated",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 6.7,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/infographics/intro_canvas_motion.mp4",
+      "artifact_sha256": "75adff304b2540fa0c632c2b8859220d8b8182a759e87d00999892c05dab0116",
+      "asset_id": "catalog-ab8c3bf52a6a93ff9c65",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/infographics/intro_canvas_motion.mp4",
+      "legacy_provenance": "generated",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 12.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/labeled/day7_tree_3d.mp4",
+      "artifact_sha256": "54f1db7f43ebae062a3b38a486edaa39603b7d9ee505de26483313c3b5641687",
+      "asset_id": "catalog-ac1e7b3bcd9206e8981b",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/labeled/day7_tree_3d.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 7.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/images/assembled/day2_station_clean.png",
+      "artifact_sha256": "ab504c1aede5865e55eea37a5d9598346d835ac2ca8e989be44a6a39c6977014",
+      "asset_id": "catalog-adb284782dcb6e9f2594",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/images/assembled/day2_station_clean.png",
+      "legacy_provenance": "image",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": null,
+        "fps": null,
+        "height": 1080,
+        "kind": "image",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/historical/day4_render_before_after_live.mp4",
+      "artifact_sha256": "dfc8e53b28cc9e1cc07f8cdd3a807c8d21fdcc48bdfba779d5cdba5b77298a32",
+      "asset_id": "catalog-af19ad93b270f44a2f67",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/historical/day4_render_before_after_live.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 6.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/labeled/intro_engine.mp4",
+      "artifact_sha256": "aee7db014529c2fe76bf8286ce0d855552830452c57a3ec81f31c60a28d69378",
+      "asset_id": "catalog-b1e0933394e2b607875e",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/labeled/intro_engine.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 15.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/images/assembled/day5_station_clean.png",
+      "artifact_sha256": "bd1e912eb7707b6b55a2a9bfa9df04fd19e1a2f61ed8fd74ed06d850e1af14c6",
+      "asset_id": "catalog-b2b33eb3f2bff863a779",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/images/assembled/day5_station_clean.png",
+      "legacy_provenance": "image",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": null,
+        "fps": null,
+        "height": 1080,
+        "kind": "image",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/infographics/day2_forms.mp4",
+      "artifact_sha256": "da6bc681712d5cbcd196e1a722989dbcce948d11691afef700c4c1a31ba1a862",
+      "asset_id": "catalog-b4d6e12fd88ae9299803",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/infographics/day2_forms.mp4",
+      "legacy_provenance": "generated",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 18.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/labeled/intro_lever.mp4",
+      "artifact_sha256": "dbb2ade8b2ae27e36d800d0833a0393a85087a8cb29c0625bbb3731febd0d285",
+      "asset_id": "catalog-b5aa25a81b1ee255357c",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/labeled/intro_lever.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 12.0,
+        "fps": 30.0,
+        "height": 1570,
+        "kind": "video",
+        "width": 1080
+      }
+    },
+    {
+      "artifact_path": "data/footage/2d_sticky_finger_action.mp4",
+      "artifact_sha256": "232143e08b209c66626e7651642f6ecb4d4e07774d958ccbace6cbbd36c7b106",
+      "asset_id": "catalog-b73d2a2f4e9f39adfacd",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/2d_sticky_finger_action.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 7.0,
+        "fps": 25.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/labeled/intro_canvas.mp4",
+      "artifact_sha256": "ca67f89ba2320b857f158cd7f4d3b9be83bbe0957a08cb86b38578543442193c",
+      "asset_id": "catalog-b7b0d6b5ec42c1ee1fd2",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/labeled/intro_canvas.mp4",
+      "legacy_provenance": "canvas",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 20.833333,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/2d_trailer_full.mp4",
+      "artifact_sha256": "753de188ecf184aa83f3b81a2acf04fc13b7feb864d94600798d715f8ee89125",
+      "asset_id": "catalog-b8fa7cb28141b7927f6c",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/2d_trailer_full.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 20.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/recentered/early_3d_runtime.mp4",
+      "artifact_sha256": "6db83f105e3f6bf32c02a9e2b2e2ce03f9ee4c05e380a0d4d43bbfb898669b54",
+      "asset_id": "catalog-b99c1f54f1b72a770704",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/recentered/early_3d_runtime.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 9.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/images/assembled/day1_crowd_clean.png",
+      "artifact_sha256": "f33fac765cbbab3fe3872c2a1d7ca5e8dc2936c64a31d1a32522a1f1e12db89c",
+      "asset_id": "catalog-ba86419ca2d5200cc512",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/images/assembled/day1_crowd_clean.png",
+      "legacy_provenance": "image",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": null,
+        "fps": null,
+        "height": 1080,
+        "kind": "image",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/infographics/day6_port_cards.mp4",
+      "artifact_sha256": "d4a4169c5295ec610ba9a992ef5f5e901cca1a7821ce78a6a8d48ff93aedccab",
+      "asset_id": "catalog-bb864f4a14e3437e4198",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/infographics/day6_port_cards.mp4",
+      "legacy_provenance": "generated",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 15.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/2d_trailer_forest_action.mp4",
+      "artifact_sha256": "ed505274c628491e959276cf9774291387f189e1ca399b69185d21c5ef71a884",
+      "asset_id": "catalog-bbcb8be683c5b28732a9",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/2d_trailer_forest_action.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 2.7,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/labeled/day7_gameplay_reprise.mp4",
+      "artifact_sha256": "f348de6031ec91983a5f7ecb21f3a037657c1b061226db24a98014c12113fc92",
+      "asset_id": "catalog-bea8b1821204f334ed6b",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/labeled/day7_gameplay_reprise.mp4",
+      "legacy_provenance": "game_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 8.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/day7_upgrades_live_reprise.mp4",
+      "artifact_sha256": "f1cefc575ce27401dce2181d16740148afa4375891e8b6f828a6812784cdcedc",
+      "asset_id": "catalog-bf13af234e6a04637574",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/day7_upgrades_live_reprise.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 7.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/infographics/day1_crowd_progression.mp4",
+      "artifact_sha256": "09cdc3fb79527c0c758ec5fe165c917fe036399f235a2446e1ecf207aa8583a6",
+      "asset_id": "catalog-bf23704807ced4124674",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/infographics/day1_crowd_progression.mp4",
+      "legacy_provenance": "generated",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 16.7,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/recentered/labeled/day5_build.mp4",
+      "artifact_sha256": "1bacc1e2e592d3624192bdeb5f8ea056f3eba5f49edf6ea22cc01e823ed148a4",
+      "asset_id": "catalog-c11aa50f41ad03702b8d",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/recentered/labeled/day5_build.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 8.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/current_tram_motion_probe.mp4",
+      "artifact_sha256": "af2435e5c7ce3301dc26fafb3f52269b0977d59affaf62d185eaed506cf3e36b",
+      "asset_id": "catalog-c910438c7e5b5355ef57",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/current_tram_motion_probe.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 3.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/c2/c29a94f1cef62213655905db28869d2b38adbbd60afc42dd90f25efc63cfbf46.png",
+      "artifact_sha256": "c29a94f1cef62213655905db28869d2b38adbbd60afc42dd90f25efc63cfbf46",
+      "asset_id": "catalog-c91fc05198fc1f803180",
+      "blockers": [
+        "legacy asset escapes production root: C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/c2/c29a94f1cef62213655905db28869d2b38adbbd60afc42dd90f25efc63cfbf46.png",
+        "license_missing",
+        "provenance_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/c2/c29a94f1cef62213655905db28869d2b38adbbd60afc42dd90f25efc63cfbf46.png",
+      "legacy_provenance": "unknown",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": null,
+        "fps": null,
+        "height": 941,
+        "kind": "image",
+        "width": 1672
+      }
+    },
+    {
+      "artifact_path": "data/footage/labeled/day7_tree_2d.mp4",
+      "artifact_sha256": "a7a67fe835c3a172e298d8d20576a5106db057cc979ec8b74aa58af49f28c060",
+      "asset_id": "catalog-ca3fd4f44be4d97379d7",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/labeled/day7_tree_2d.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 8.5,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/infographics/day7_mechanic_flow.mp4",
+      "artifact_sha256": "374bee5a518162c4df5730c40305f2ea4f04b3e7a9abc8f1d59b4854485419ac",
+      "asset_id": "catalog-cc5071d0b9259566d923",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/infographics/day7_mechanic_flow.mp4",
+      "legacy_provenance": "generated",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 14.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/current_3d_latest.mp4",
+      "artifact_sha256": "8c73f70c7840322cd577a21292381ec70c754e43f22bef54dda39b0a658aff4b",
+      "asset_id": "catalog-cd1d248394461989b303",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/current_3d_latest.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 8.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/recentered/historical/day4_render_before_after_live.mp4",
+      "artifact_sha256": "e68cf32db797ae803b56d7dd041118cbc4396459fdf0838e8f08dd5108304e30",
+      "asset_id": "catalog-cdb19175f98d0ff6a7ed",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/recentered/historical/day4_render_before_after_live.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 6.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/intro_latest_clean_full_live.mp4",
+      "artifact_sha256": "5945e0b80083bcb1042b2036df5f01f1a31fa03e80223c3660308e56f9e4a857",
+      "asset_id": "catalog-cece7c35662dfba3e956",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/intro_latest_clean_full_live.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 22.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/historical/day1_tram_crowd.mp4",
+      "artifact_sha256": "69cd525c5c5615e12d2eb6c864e93dc3be1948f0c8b166006e0344b89f9ed84a",
+      "asset_id": "catalog-cf6ca35ee90d7beb274d",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/historical/day1_tram_crowd.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 5.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/infographics/day3_lever_result.mp4",
+      "artifact_sha256": "aba4e87234ff7b62191f46409f3e6e602b3efd9648fb0f3722a551cccfcc47f0",
+      "asset_id": "catalog-cfc44ca5f35f267c0445",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/infographics/day3_lever_result.mp4",
+      "legacy_provenance": "generated",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 21.7,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/fonts/main.ttf",
+      "artifact_sha256": "eaad201da94cb323401fdb8cc760650803ddf8fd704cb9fa56317e6c69bc6fd6",
+      "asset_id": "catalog-d1612a1442209964ffe4",
+      "blockers": [
+        "license_missing",
+        "provenance_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/fonts/main.ttf",
+      "legacy_provenance": "unknown",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": null,
+        "fps": null,
+        "height": null,
+        "kind": "font",
+        "width": null
+      }
+    },
+    {
+      "artifact_path": "data/footage/labeled/day5_build_reprise.mp4",
+      "artifact_sha256": "b855d2c9e33918ad1d435adb00ddec5ba64a0034a519fecdb38d326a5b03d997",
+      "asset_id": "catalog-d3a6eb8ccdfe1fed32a3",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/labeled/day5_build_reprise.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 8.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/recentered/historical/day4_render_split_live.mp4",
+      "artifact_sha256": "a11c75a215008d0a0afa1abc3b07a9985f5c1459f3b47132169c4e90595d99e0",
+      "asset_id": "catalog-d41f7eb72a047e89879b",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/recentered/historical/day4_render_split_live.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 2.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/labeled/day4_runtime.mp4",
+      "artifact_sha256": "d4db4e4f5e03d0752b098a6af30f29760c65625758f46aebbc3c7a3d48f5b66e",
+      "asset_id": "catalog-d8cb4210efd8d01c2e4f",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/labeled/day4_runtime.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 6.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/historical/day5_station_queue_reprise.mp4",
+      "artifact_sha256": "b12d512c6c6795554152d7af61551c91252d94bcd984b202e530b525bbdbd7de",
+      "asset_id": "catalog-dd2def53d88f3e129f52",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/historical/day5_station_queue_reprise.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 8.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/day7_mechanic_live.mp4",
+      "artifact_sha256": "8d54f1ab9fca4d80a855b0b798ba58a99315ccb3785d1ee0992fe289bd2d8a41",
+      "asset_id": "catalog-de94a6e6fa473d3729f8",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/day7_mechanic_live.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 5.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/infographics/day6_port_cards_reprise.mp4",
+      "artifact_sha256": "d4a4169c5295ec610ba9a992ef5f5e901cca1a7821ce78a6a8d48ff93aedccab",
+      "asset_id": "catalog-df12cc6e442c8d6e503a",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/infographics/day6_port_cards_reprise.mp4",
+      "legacy_provenance": "generated",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 15.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/current_station_clean.mp4",
+      "artifact_sha256": "c0fdbd13316a6da41464681cb0c041a04e2b878c7ee887520fa62038324ba025",
+      "asset_id": "catalog-e08820dfa282554802e8",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/current_station_clean.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 15.333333,
+        "fps": 60.0,
+        "height": 720,
+        "kind": "video",
+        "width": 1280
+      }
+    },
+    {
+      "artifact_path": "data/footage/canvas_project_continuous.mp4",
+      "artifact_sha256": "33dc9d61aa0bc7ea832193b6fcee85a946f9594121cfaaeaa83c1cde512cff72",
+      "asset_id": "catalog-e1f4d2f861c852bd0a64",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/canvas_project_continuous.mp4",
+      "legacy_provenance": "canvas",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 14.566667,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/canvas_project.mp4",
+      "artifact_sha256": "e6b0cdc296a4ab3f51d712afba998dba9bf8b641c63bb94c30a5d748fd3df1d7",
+      "asset_id": "catalog-e7d4fb5b53732ee6abd2",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/canvas_project.mp4",
+      "legacy_provenance": "canvas",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 20.833333,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/day7_gameplay_live.mp4",
+      "artifact_sha256": "8561cc1f34e32eef787e87dc3b87556d4bcbb5c24a2fc796ddd0694945ac0ee4",
+      "asset_id": "catalog-e960b3a0de9ebadedcbc",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/day7_gameplay_live.mp4",
+      "legacy_provenance": "game_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 8.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/infographics/day3_lever_code.mp4",
+      "artifact_sha256": "242b1cf04cd3e8b0ed2d5de09085084095fb9a8f4c0dcc1b6fed796500863ec6",
+      "asset_id": "catalog-ed191aebf18d2c89de2b",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/infographics/day3_lever_code.mp4",
+      "legacy_provenance": "generated",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 7.2,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/labeled/intro_2d.mp4",
+      "artifact_sha256": "9bac66d77b71697127c957b834526e3cc2e44e5379281296657a7e7e20ece8da",
+      "asset_id": "catalog-eef0c32eeb24f32b3982",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/labeled/intro_2d.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 20.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/2d_context.webm",
+      "artifact_sha256": "8dc40784ca374c0da10a3a63373f21808b976a2f4bf3b50a95fcb1ed95fd7a2b",
+      "asset_id": "catalog-ef50f77770d2d970d94a",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/2d_context.webm",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 14.8,
+        "fps": 25.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/labeled/day7_tree_3d_reprise.mp4",
+      "artifact_sha256": "54f1db7f43ebae062a3b38a486edaa39603b7d9ee505de26483313c3b5641687",
+      "asset_id": "catalog-f0415a92b3e6fa993a98",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/labeled/day7_tree_3d_reprise.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 7.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/recentered/labeled/day2_systems_reprise.mp4",
+      "artifact_sha256": "12cd0a85d29032eac98040d8f2e1cac5291dc699afd7348b0ea4e8473b2bf57f",
+      "asset_id": "catalog-f286fde76e6aaa673b3e",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/recentered/labeled/day2_systems_reprise.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 9.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/infographics/day2_station_blockout.mp4",
+      "artifact_sha256": "d8ca89ae1d919208f614f22b1fc5432f71898492d7a36ce9818c71d80d57dd5c",
+      "asset_id": "catalog-f4511d503f7511c38b16",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/infographics/day2_station_blockout.mp4",
+      "legacy_provenance": "generated",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 5.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/infographics/canvas_project_full_scroll.mp4",
+      "artifact_sha256": "e976e065966a731d8e773dc4f408c4657450e31b04f3b5bcb76652f4abbfd771",
+      "asset_id": "catalog-f47e1f43a9b327751877",
+      "blockers": [
+        "license_missing",
+        "source_hash_mismatch"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/infographics/canvas_project_full_scroll.mp4",
+      "legacy_provenance": "generated",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 14.566667,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/day7_upgrades_long_live.mp4",
+      "artifact_sha256": "8b4e1c8a1132bedecdc84d85f7a3bf5de3fcafd84828ab8c61151691f248ac82",
+      "asset_id": "catalog-f56bf33f32b485bf0b18",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/day7_upgrades_long_live.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 15.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/32/329b692eca5e9d4bd4fa2e2fc5e76116662bcbaa4b29985a5e6df8a1efb515e2.png",
+      "artifact_sha256": "329b692eca5e9d4bd4fa2e2fc5e76116662bcbaa4b29985a5e6df8a1efb515e2",
+      "asset_id": "catalog-f6f4e39bf95584928fc7",
+      "blockers": [
+        "legacy asset escapes production root: C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/32/329b692eca5e9d4bd4fa2e2fc5e76116662bcbaa4b29985a5e6df8a1efb515e2.png",
+        "license_missing",
+        "provenance_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:C:/projects/devlogs/not_a_trolley_problem/shared/assets/by-hash/32/329b692eca5e9d4bd4fa2e2fc5e76116662bcbaa4b29985a5e6df8a1efb515e2.png",
+      "legacy_provenance": "unknown",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": null,
+        "fps": null,
+        "height": 600,
+        "kind": "image",
+        "width": 900
+      }
+    },
+    {
+      "artifact_path": "data/footage/day3_lever_runtime_loop_reprise.mp4",
+      "artifact_sha256": "d84836ab25c0dbd97df57942dbe2ec76ababa05b2d050e5e7c101e8a8f0f0e7a",
+      "asset_id": "catalog-f78c32dfe698df46b98b",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/day3_lever_runtime_loop_reprise.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 12.0,
+        "fps": 30.0,
+        "height": 1570,
+        "kind": "video",
+        "width": 1080
+      }
+    },
+    {
+      "artifact_path": "data/footage/canvas_project_scroll.mp4",
+      "artifact_sha256": "033984b00b6e81093937a0cfe91ab2463adfa1a9e184a01dad6371713962748f",
+      "asset_id": "catalog-f8bca2a159ebbf0f227e",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/canvas_project_scroll.mp4",
+      "legacy_provenance": "canvas",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 14.566667,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/images/historical/day1_crowd_400.png",
+      "artifact_sha256": "fb894e73d55d3e33e63d62baad16b7a01b235ecff0a229fb5c8dd0376c4513f0",
+      "asset_id": "catalog-fc60ed32c71912c1ad0b",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/images/historical/day1_crowd_400.png",
+      "legacy_provenance": "image",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": null,
+        "fps": null,
+        "height": 1080,
+        "kind": "image",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/labeled/day2_systems_reprise.mp4",
+      "artifact_sha256": "a15add07e7ef64c54fc7211f99470d995fe0a21818c830ac37e3924a94065eef",
+      "asset_id": "catalog-fcae040b98448d2a2623",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/labeled/day2_systems_reprise.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 9.0,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/2d_gameplay_upgrades_and_choice.mp4",
+      "artifact_sha256": "cb86fe9fd35d2dcd5d44eb5e74ee090cf285b644142d3b7534eb65ced24397f0",
+      "asset_id": "catalog-feaccf6414a92cf3b2e2",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/2d_gameplay_upgrades_and_choice.mp4",
+      "legacy_provenance": "game_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 8.5,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/2d_trailer_chaos_action.mp4",
+      "artifact_sha256": "043c40fe7ea825a522d4f59bb2d6db5f4ea42ff4160b5bb29215f2e767db41cc",
+      "asset_id": "catalog-fee38bf720b34af98465",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/2d_trailer_chaos_action.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 3.4,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    },
+    {
+      "artifact_path": "data/footage/archive/day5_station_realtime_manual_attempt.mp4",
+      "artifact_sha256": "e5cddb3cf0543a1640b501c37ef3dc28a8c209bdf87329bd23c8d9744a661fb7",
+      "asset_id": "catalog-ff67179b008708698a5a",
+      "blockers": [
+        "license_missing"
+      ],
+      "disposition": "BLOCKED_ARCHIVE_READ_ONLY",
+      "legacy_asset_id": "catalog:data/footage/archive/day5_station_realtime_manual_attempt.mp4",
+      "legacy_provenance": "screen_capture",
+      "legacy_schema": "asset_catalog.v1",
+      "media": {
+        "duration_seconds": 26.2,
+        "fps": 30.0,
+        "height": 1080,
+        "kind": "video",
+        "width": 1920
+      }
+    }
+  ],
+  "schema": "studio_v3.asset_translation_plan",
+  "sources": {
+    "catalog": true,
+    "registry": true
+  },
+  "summary": {
+    "blocked": 141,
+    "required_copy_bytes": 0,
+    "total": 141,
+    "translatable": 0,
+    "unique_source_bytes": 2180859945,
+    "unique_source_files": 126
+  },
+  "version": 1
+}

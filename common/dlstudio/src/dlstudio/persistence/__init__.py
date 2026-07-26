@@ -2,20 +2,26 @@
 
 from .api import (
     HeadRef,
-    ObjectRef,
     ObjectStore,
     OperationTransaction,
     ProductionRepository,
     ProductionStateRoot,
     WriterLease,
 )
+from .assets import (
+    AssetRepository,
+    GarbageCollectionReport,
+    MaterializeResult,
+)
 
 __all__ = [
     "HeadRef",
-    "ObjectRef",
     "ObjectStore",
     "OperationTransaction",
     "ProductionRepository",
     "ProductionStateRoot",
     "WriterLease",
+    "AssetRepository",
+    "GarbageCollectionReport",
+    "MaterializeResult",
 ]
