@@ -27,12 +27,29 @@ from dlstudio.foundation.api import (
     CasConflict,
     CorruptObject,
     DomainId,
+    StudioError,
     canonical_bytes,
     canonical_hash,
 )
 
-_RESERVED_RECORD_PREFIXES = ("operation:", "asset_revision:")
-_RESERVED_RECORD_KEYS = frozenset({"assets:index"})
+_RESERVED_RECORD_PREFIXES = (
+    "operation:",
+    "asset_revision:",
+    "constraint_set:",
+    "review_verdict:",
+    "workflow_run:",
+    "release_candidate:",
+    "delivery_receipt:",
+)
+_RESERVED_RECORD_KEYS = frozenset(
+    {
+        "assets:index",
+        "constraints:current",
+        "workflow:current",
+        "release:eligible",
+        "release:receipt",
+    }
+)
 
 
 def _reserved_record(key: str) -> bool:
@@ -64,6 +81,10 @@ def _atomic_write(path: Path, data: bytes) -> None:
         _fsync_dir(path.parent)
     finally:
         tmp.unlink(missing_ok=True)
+
+
+class RecoveryRequired(StudioError):
+    """A visible side effect must be reconciled before canonical mutation."""
 
 
 class ObjectStore:
@@ -332,6 +353,40 @@ class ProductionRepository:
             self.lock_root / "production.writer", timeout=timeout
         )
 
+    def pending_recovery_markers(self) -> tuple[Path, ...]:
+        """Return durable recovery markers without interpreting domain payloads."""
+
+        if not self.staging_root.is_dir():
+            return ()
+        return tuple(
+            sorted(
+                (
+                    path
+                    for path in self.staging_root.glob("*/recovery.json")
+                    if path.is_file()
+                ),
+                key=lambda path: path.as_posix(),
+            )
+        )
+
+    def _assert_no_pending_recovery_under_lease(
+        self, *, allowed: Path | None = None
+    ) -> None:
+        pending = tuple(
+            path
+            for path in self.pending_recovery_markers()
+            if allowed is None or path.resolve() != allowed.resolve()
+        )
+        if pending:
+            relative = ", ".join(
+                path.relative_to(self.staging_root).as_posix()
+                for path in pending
+            )
+            raise RecoveryRequired(
+                "canonical mutation is blocked by unresolved recovery: "
+                f"{relative}"
+            )
+
     def read_head(self) -> HeadRef | None:
         if not self.head_path.exists():
             return None
@@ -394,76 +449,103 @@ class ProductionRepository:
         expected_revision: int,
         allowed_reserved_keys: frozenset[str],
     ) -> HeadRef:
+        with self.writer_lease():
+            self._assert_no_pending_recovery_under_lease()
+            return self._commit_root_under_lease(
+                root,
+                expected_revision=expected_revision,
+                allowed_reserved_keys=allowed_reserved_keys,
+            )
+
+    def _commit_root_under_lease(
+        self,
+        root: ProductionStateRoot,
+        *,
+        expected_revision: int,
+        allowed_reserved_keys: frozenset[str],
+    ) -> HeadRef:
         if root.production_id != self.production_id:
             raise ValueError("wrong production id")
         if root.revision != expected_revision + 1:
             raise ValueError("new root must increment expected revision once")
+        current = self.read_head()
+        actual = 0 if current is None else current.revision
+        if actual != expected_revision:
+            raise CasConflict(
+                f"expected head revision {expected_revision}, got {actual}"
+            )
+        expected_parent = None if current is None else current.root_hash
+        if root.parent_root_hash != expected_parent:
+            raise CasConflict(
+                "new root parent does not match the canonical head"
+            )
+        current_root = self.read_root(current)
+        previous_reserved = {
+            key: ref
+            for key, ref in current_root.records.items()
+            if _reserved_record(key)
+        }
+        next_reserved = {
+            key: ref
+            for key, ref in root.records.items()
+            if _reserved_record(key)
+        }
+        changed_reserved = {
+            key
+            for key in previous_reserved.keys() | next_reserved.keys()
+            if previous_reserved.get(key) != next_reserved.get(key)
+        }
+        if changed_reserved != allowed_reserved_keys:
+            raise ValueError(
+                "reserved record transition does not match its owner"
+            )
+        for key in changed_reserved:
+            if key.startswith(
+                (
+                    "operation:",
+                    "asset_revision:",
+                    "constraint_set:",
+                    "review_verdict:",
+                    "release_candidate:",
+                    "delivery_receipt:",
+                )
+            ) and (key in previous_reserved or key not in next_reserved):
+                raise CasConflict(
+                    f"immutable reserved record cannot change: {key}"
+                )
+            if key in {
+                "assets:index",
+                "constraints:current",
+                "workflow:current",
+                "release:eligible",
+                "release:receipt",
+            } and key not in next_reserved:
+                raise ValueError(f"canonical owner record cannot be removed: {key}")
+        for ref in root.records.values():
+            self.objects.verify(ref)
         raw = canonical_bytes(
             root.as_payload(), domain=self.ROOT_SCHEMA, version=1
         )
         root_hash = hashlib.sha256(raw).hexdigest()
         root_path = self.roots_path / f"{root_hash}.json"
-        for ref in root.records.values():
-            self.objects.verify(ref)
         if not root_path.exists():
             _atomic_write(root_path, raw)
         elif root_path.read_bytes() != raw:
             raise CorruptObject(
                 f"immutable production root collision at {root_hash}"
             )
-        with self.writer_lease():
-            current = self.read_head()
-            actual = 0 if current is None else current.revision
-            if actual != expected_revision:
-                raise CasConflict(
-                    f"expected head revision {expected_revision}, got {actual}"
-                )
-            expected_parent = None if current is None else current.root_hash
-            if root.parent_root_hash != expected_parent:
-                raise CasConflict(
-                    "new root parent does not match the canonical head"
-                )
-            current_root = self.read_root(current)
-            previous_reserved = {
-                key: ref
-                for key, ref in current_root.records.items()
-                if _reserved_record(key)
-            }
-            next_reserved = {
-                key: ref
-                for key, ref in root.records.items()
-                if _reserved_record(key)
-            }
-            changed_reserved = {
-                key
-                for key in previous_reserved.keys() | next_reserved.keys()
-                if previous_reserved.get(key) != next_reserved.get(key)
-            }
-            if changed_reserved != allowed_reserved_keys:
-                raise ValueError(
-                    "reserved record transition does not match its owner"
-                )
-            for key in changed_reserved:
-                if key.startswith(("operation:", "asset_revision:")) and (
-                    key in previous_reserved or key not in next_reserved
-                ):
-                    raise CasConflict(
-                        f"immutable reserved record cannot change: {key}"
-                    )
-                if key == "assets:index" and key not in next_reserved:
-                    raise ValueError("asset index cannot be removed")
-            head = {
-                "schema": self.HEAD_SCHEMA,
-                "version": 1,
-                "root_hash": root_hash,
-                "revision": root.revision,
-            }
-            _atomic_write(
-                self.head_path,
-                json.dumps(
-                    head, sort_keys=True, separators=(",", ":")
-                ).encode("utf-8"),
-            )
+        head = {
+            "schema": self.HEAD_SCHEMA,
+            "version": 1,
+            "root_hash": root_hash,
+            "revision": root.revision,
+        }
+        _atomic_write(
+            self.head_path,
+            json.dumps(
+                head, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8"),
+        )
         return HeadRef(root_hash, root.revision)
 
     def update_records(
@@ -479,6 +561,21 @@ class ProductionRepository:
         )
 
     def _update_records(
+        self,
+        records: Mapping[str, BlobRef],
+        *,
+        expected_revision: int,
+        allowed_reserved_keys: frozenset[str],
+    ) -> HeadRef:
+        with self.writer_lease():
+            self._assert_no_pending_recovery_under_lease()
+            return self._update_records_under_lease(
+                records,
+                expected_revision=expected_revision,
+                allowed_reserved_keys=allowed_reserved_keys,
+            )
+
+    def _update_records_under_lease(
         self,
         records: Mapping[str, BlobRef],
         *,
@@ -501,7 +598,7 @@ class ProductionRepository:
         current = self.read_root(current_head)
         merged = dict(current.records)
         merged.update(snapshot)
-        return self._commit_root(
+        return self._commit_root_under_lease(
             ProductionStateRoot(
                 self.production_id,
                 expected_revision + 1,
@@ -511,6 +608,161 @@ class ProductionRepository:
             expected_revision=expected_revision,
             allowed_reserved_keys=allowed_reserved_keys,
         )
+
+
+class MutationSession:
+    """Hold the production writer lease across validation, side effect and commit."""
+
+    RECOVERY_SCHEMA = "dlstudio.recovery_marker"
+
+    def __init__(
+        self,
+        repository: ProductionRepository,
+        *,
+        operation_id: str,
+        expected_revision: int,
+        allow_recovery: bool = False,
+        timeout: float = 30.0,
+    ) -> None:
+        if re.fullmatch(r"[0-9a-f]{64}", operation_id) is None:
+            raise ValueError("operation_id must be exactly 64 lowercase hex")
+        if expected_revision < 0:
+            raise ValueError("expected revision cannot be negative")
+        self.repository = repository
+        self.operation_id = operation_id
+        self.expected_revision = expected_revision
+        self.allow_recovery = allow_recovery
+        self.stage = repository.staging_root / operation_id
+        self.recovery_path = self.stage / "recovery.json"
+        self._lease = repository.writer_lease(timeout=timeout)
+        self._head: HeadRef | None = None
+        self._root: ProductionStateRoot | None = None
+
+    @property
+    def held(self) -> bool:
+        return self._lease.held
+
+    @property
+    def root(self) -> ProductionStateRoot:
+        if not self.held or self._root is None:
+            raise RuntimeError("mutation session is not open")
+        return self._root
+
+    @property
+    def head(self) -> HeadRef | None:
+        if not self.held:
+            raise RuntimeError("mutation session is not open")
+        return self._head
+
+    def open(self) -> "MutationSession":
+        if self.held:
+            return self
+        self._lease.acquire()
+        try:
+            allowed = self.recovery_path if self.allow_recovery else None
+            self.repository._assert_no_pending_recovery_under_lease(
+                allowed=allowed
+            )
+            if self.allow_recovery and not self.recovery_path.is_file():
+                raise RecoveryRequired(
+                    "requested recovery marker does not exist"
+                )
+            self._head = self.repository.read_head()
+            actual = 0 if self._head is None else self._head.revision
+            if actual != self.expected_revision:
+                raise CasConflict(
+                    f"expected head revision {self.expected_revision}, "
+                    f"got {actual}"
+                )
+            self._root = self.repository.read_root(self._head)
+            return self
+        except BaseException:
+            self.close()
+            raise
+
+    def write_recovery_marker(self, payload: Mapping[str, Any]) -> str:
+        if not self.held:
+            raise RuntimeError("mutation session is not open")
+        raw = canonical_bytes(
+            {
+                "operation_id": self.operation_id,
+                "production_id": self.repository.production_id,
+                "expected_revision": self.expected_revision,
+                "payload": dict(payload),
+            },
+            domain=self.RECOVERY_SCHEMA,
+            version=1,
+        )
+        digest = hashlib.sha256(raw).hexdigest()
+        if self.recovery_path.exists():
+            if self.recovery_path.read_bytes() != raw:
+                raise CasConflict(
+                    "recovery marker differs for the same operation"
+                )
+            return digest
+        self.stage.mkdir(parents=True, exist_ok=True)
+        _atomic_write(self.recovery_path, raw)
+        return digest
+
+    def read_recovery_marker(self) -> Mapping[str, Any]:
+        if not self.held or not self.recovery_path.is_file():
+            raise RecoveryRequired("recovery marker is not available")
+        raw = self.recovery_path.read_bytes()
+        wrapped = json.loads(raw.decode("utf-8"))
+        if (
+            wrapped.get("$domain") != self.RECOVERY_SCHEMA
+            or wrapped.get("$version") != 1
+        ):
+            raise CorruptObject("invalid recovery marker schema")
+        payload = wrapped.get("payload")
+        if (
+            not isinstance(payload, dict)
+            or payload.get("operation_id") != self.operation_id
+            or payload.get("production_id") != self.repository.production_id
+            or payload.get("expected_revision") != self.expected_revision
+        ):
+            raise CorruptObject("recovery marker identity mismatch")
+        return MappingProxyType(dict(payload["payload"]))
+
+    def clear_recovery_marker(self, *, expected_hash: str) -> None:
+        if not self.held:
+            raise RuntimeError("mutation session is not open")
+        raw = self.recovery_path.read_bytes()
+        if hashlib.sha256(raw).hexdigest() != expected_hash:
+            raise CasConflict("recovery marker hash changed")
+        self.recovery_path.unlink()
+        _fsync_dir(self.recovery_path.parent)
+        try:
+            self.stage.rmdir()
+        except OSError:
+            pass
+
+    def commit_records(
+        self,
+        records: Mapping[str, BlobRef],
+        *,
+        allowed_reserved_keys: frozenset[str],
+    ) -> HeadRef:
+        if not self.held:
+            raise RuntimeError("mutation session is not open")
+        head = self.repository._update_records_under_lease(
+            records,
+            expected_revision=self.expected_revision,
+            allowed_reserved_keys=allowed_reserved_keys,
+        )
+        self.expected_revision = head.revision
+        self._head = head
+        self._root = self.repository.read_root(head)
+        return head
+
+    def close(self) -> None:
+        self._lease.release()
+
+    def __enter__(self) -> "MutationSession":
+        return self.open()
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
 
 
 class OperationTransaction:
