@@ -2,12 +2,10 @@
 
 from .api import (
     HeadRef,
-    MutationSession,
     ObjectStore,
     OperationTransaction,
     ProductionRepository,
     ProductionStateRoot,
-    RecoveryRequired,
     WriterLease,
 )
 from .assets import (
@@ -18,12 +16,10 @@ from .assets import (
 
 __all__ = [
     "HeadRef",
-    "MutationSession",
     "ObjectStore",
     "OperationTransaction",
     "ProductionRepository",
     "ProductionStateRoot",
-    "RecoveryRequired",
     "WriterLease",
     "AssetRepository",
     "GarbageCollectionReport",
