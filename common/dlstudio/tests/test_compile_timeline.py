@@ -69,6 +69,7 @@ def test_only_plate_overlay_become_overlays_with_list_order_z(tmp_path):
     tl = build_timeline(edit, probe=False, probes=probes)
     ov = tl.beats[0].overlays
     assert [(o.chunk_index, o.z) for o in ov] == [(0, 0), (2, 1), (3, 2)]
+    assert [o.public_text for o in ov] == [["P"], ["O"], ["P2"]]
 
 
 def test_decorated_imageshot_emits_overlay_item(tmp_path):
@@ -91,6 +92,7 @@ def test_decorated_imageshot_emits_overlay_item(tmp_path):
     assert [(o.chunk_index, o.z) for o in ov] == [(0, 0)]
     assert ov[0].content_hash is not None and len(ov[0].content_hash) == 16
     assert ov[0].asset_paths == []       # image src travels as a segment, not raster
+    assert ov[0].public_text == ["GAMEPLAY"]
     # the image itself is still a background segment for its window
     assert any(s.src == "photo.png" for s in tl.beats[0].segments)
 

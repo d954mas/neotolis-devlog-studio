@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageChops
 
 from dlstudio.services import extract_keyframes, make_contact_sheet
 
@@ -25,7 +25,11 @@ def sample_video(tmp_path_factory):
     mp4 = d / "draft.mp4"
     subprocess.run(
         ["ffmpeg", "-y", "-f", "lavfi", "-i",
-         "testsrc=d=4:s=320x180:r=24", "-pix_fmt", "yuv420p", str(mp4)],
+        # A long/low-rate fixture keeps the test cheap while exercising the
+        # sub-1fps sampling used by real 2-4 minute devlogs. Real assembled
+        # edits can also change colour metadata at beat boundaries, so the
+        # implementation must not depend on one persistent tile filter graph.
+        "testsrc=d=145:s=320x180:r=1", "-pix_fmt", "yuv420p", str(mp4)],
         check=True, capture_output=True)
     return mp4
 
@@ -39,6 +43,19 @@ def test_contact_sheet_tiles_grid(sample_video, tmp_path):
     # 4 cols x 160px cells (+ padding/margins) — sanity, not pixel-exact
     assert img.width > 4 * 160
     assert img.height > img.width * 0.4          # 4 rows of 16:9 cells
+    # Regression: tile's first emitted frame used to contain only its first
+    # cell (or first row), leaving most of the contact sheet pure black. A
+    # review sheet is useful only if every requested sample is present.
+    cell_height = 90  # sample_video is 16:9 and cell_width is 160
+    for row in range(4):
+        for col in range(4):
+            left = 4 + col * (160 + 4)
+            top = 4 + row * (cell_height + 4)
+            cell = img.crop((left, top, left + 160, top + cell_height)).convert("RGB")
+            black = Image.new("RGB", cell.size, "black")
+            assert ImageChops.difference(cell, black).getbbox() is not None, (
+                f"contact-sheet cell {row},{col} is empty"
+            )
 
 
 @pytestmark_integration

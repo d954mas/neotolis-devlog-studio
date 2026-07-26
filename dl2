@@ -1,2 +1,6 @@
 #!/bin/sh
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if [ -x "$ROOT/common/dlstudio/.venv/bin/python" ]; then
+  exec "$ROOT/common/dlstudio/.venv/bin/python" -X utf8 -m dlstudio "$@"
+fi
 exec python -X utf8 -m dlstudio "$@"

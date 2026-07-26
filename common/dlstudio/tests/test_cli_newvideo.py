@@ -100,6 +100,22 @@ def test_created_edit_imports_and_exposes_edit(tmp_path, monkeypatch):
     assert mod.EDIT.mix.music        # ...including the music example
 
 
+def test_created_edit_teaches_non_looping_identity_bound_video(tmp_path, monkeypatch):
+    pkg = _unique_pkg("vidproj_identity")
+    _scaffold(tmp_path, monkeypatch, pkg)
+    mod = _import_created_edit(tmp_path, monkeypatch, pkg)
+
+    gameplay = mod.EDIT.beats["b01"].scene
+    assert gameplay.loop is False
+    assert gameplay.asset_id == "capture:gameplay_01"
+    assert gameplay.editorial_role == "gameplay"
+    assert gameplay.offset == 5.0
+
+    infographic = mod.EDIT.beats["b02"].chunks[-1].content
+    assert infographic.editorial_role == "presentation"
+    assert infographic.render_manifest.endswith(".mp4.render.json")
+
+
 def test_landscape_resolution(tmp_path, monkeypatch):
     pkg = _unique_pkg("vidproj_land")
     _scaffold(tmp_path, monkeypatch, pkg, "--format", "landscape")

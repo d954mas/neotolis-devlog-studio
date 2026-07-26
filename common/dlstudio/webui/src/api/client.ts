@@ -9,7 +9,13 @@ import type {
   RenderBeatRequest,
   TakeUploadResult,
   Timeline,
+  ScriptApprovalResult,
+  AutopilotApprovalResult,
+  AutopilotChangeResult,
+  AutopilotCheckpointData,
+  AutopilotRequestAction,
 } from "./types";
+import type { VoiceTakeMetadata } from "../lib/takes";
 
 async function getJSON<T>(url: string): Promise<T> {
   const r = await fetch(url, { headers: { Accept: "application/json" } });
@@ -34,6 +40,32 @@ export const api = {
   ir: () => getJSON<Timeline>("/api/ir"),
   check: () => getJSON<CheckReport>("/api/check"),
   feedback: () => getJSON<Feedback>("/api/feedback"),
+  approveScript: (approvedBy = "author") =>
+    postJSON<ScriptApprovalResult>("/api/script/approve", {
+      approved_by: approvedBy,
+    }),
+  autopilotCheckpoint: () =>
+    getJSON<AutopilotCheckpointData>("/api/autopilot/checkpoint"),
+  approveAutopilotCheckpoint: (
+    expectedCheckpointDigest: string,
+    approvedBy = "author",
+  ) =>
+    postJSON<AutopilotApprovalResult>("/api/autopilot/checkpoint/approve", {
+      approved_by: approvedBy,
+      expected_checkpoint_digest: expectedCheckpointDigest,
+    }),
+  requestAutopilotChange: (
+    action: AutopilotRequestAction,
+    shotId: string,
+    reason: string,
+    requestedBy = "author",
+  ) =>
+    postJSON<AutopilotChangeResult>("/api/autopilot/checkpoint/request", {
+      action,
+      shot_id: shotId,
+      reason,
+      requested_by: requestedBy,
+    }),
 
   postFeedback: (patch: Partial<Feedback>) =>
     postJSON<Feedback>("/api/feedback", patch),
@@ -43,14 +75,21 @@ export const api = {
     beatId: string,
     file: Blob,
     filename: string,
+    metadata?: VoiceTakeMetadata,
   ): Promise<TakeUploadResult> {
     const fd = new FormData();
     fd.append("file", file, filename);
+    if (metadata) fd.append("metadata", JSON.stringify(metadata));
     const r = await fetch(`/api/takes/${encodeURIComponent(beatId)}`, {
       method: "POST",
       body: fd,
     });
-    if (!r.ok) throw new Error(`POST /api/takes/${beatId} → HTTP ${r.status}`);
+    if (!r.ok) {
+      const payload = await r.json().catch(() => null) as { detail?: string } | null;
+      throw new Error(
+        payload?.detail || `POST /api/takes/${beatId} → HTTP ${r.status}`,
+      );
+    }
     return (await r.json()) as TakeUploadResult;
   },
 

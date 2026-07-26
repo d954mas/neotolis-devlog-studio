@@ -41,14 +41,13 @@ pytestmark = pytest.mark.skipif(
 
 
 def _font_path() -> str:
-    """A real font when available (Windows arial), else a placeholder file —
-    raster falls back to PIL's default font on load failure, but VQ-ASSET
-    requires the referenced path to exist."""
-    arial = Path("C:/Windows/Fonts/arial.ttf")
-    if arial.exists():
-        return str(arial)
-    Path("data/font.ttf").write_bytes(b"placeholder")
-    return "data/font.ttf"
+    """Return a real loadable system font for the render acceptance test."""
+    from _builders import find_system_font
+
+    system_font = find_system_font()
+    if system_font is None:
+        pytest.skip("no known system font found (VQ-ASSET validates loadability)")
+    return system_font
 
 
 @pytest.fixture()

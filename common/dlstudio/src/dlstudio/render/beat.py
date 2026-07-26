@@ -219,26 +219,96 @@ def _normalize_segment(idx: int, seg: IRSegment, seg_dur: float,
                                                  "stop_duration": pad_needed}))
 
     ken = seg.ken_burns and seg_dur > 2.0
+    geometry = (
+        seg.geometry.for_output(w, h)
+        if seg.geometry is not None
+        else None
+    )
     if seg.fit == "contain" and not ken:
-        filters.append(FilterNode("scale", positional=[w, h],
-                                  args={"force_original_aspect_ratio": "decrease"}))
-        filters.append(FilterNode("pad", positional=[w, h, "(ow-iw)/2", "(oh-ih)/2"],
-                                  args={"color": bg_color}))
+        if (
+            geometry is not None
+            and geometry.scaled_width is not None
+            and geometry.scaled_height is not None
+            and geometry.pad_x is not None
+            and geometry.pad_y is not None
+        ):
+            filters.append(FilterNode(
+                "scale",
+                positional=[geometry.scaled_width, geometry.scaled_height],
+            ))
+            filters.append(FilterNode(
+                "pad",
+                positional=[w, h, geometry.pad_x, geometry.pad_y],
+                args={"color": bg_color},
+            ))
+        else:
+            filters.append(FilterNode("scale", positional=[w, h],
+                                      args={"force_original_aspect_ratio": "decrease"}))
+            filters.append(FilterNode("pad", positional=[w, h, "(ow-iw)/2", "(oh-ih)/2"],
+                                      args={"color": bg_color}))
     elif ken:
-        # cover-fit first, then time-based zoom, then re-crop to WxH.
-        filters.append(FilterNode("scale", positional=[w, h],
-                                  args={"force_original_aspect_ratio": "increase"}))
-        z = f"(1.0+{KB_ZOOM}*t/{seg_dur:.3f})"
-        filters.append(FilterNode("scale", args={"w": f"iw*{z}", "h": f"ih*{z}",
-                                                  "eval": "frame"}))
-        filters.append(FilterNode("crop", positional=[w, h]))
+        # Normalize the frame rate before the transform so ``on`` maps to
+        # timeline time even when a source video has a different native fps.
+        filters.append(FilterNode("fps", positional=[fps]))
+        # Cover-fit and crop once, then zoom with a subpixel transform.  The
+        # old per-frame ``scale=iw*(1+...)`` rounded dimensions to integers;
+        # at draft resolution that held the same raw frame for several ticks.
+        if (
+            geometry is not None
+            and geometry.scaled_width is not None
+            and geometry.scaled_height is not None
+            and geometry.crop_x is not None
+            and geometry.crop_y is not None
+        ):
+            filters.append(FilterNode(
+                "scale",
+                positional=[geometry.scaled_width, geometry.scaled_height],
+            ))
+            filters.append(FilterNode(
+                "crop",
+                positional=[w, h, geometry.crop_x, geometry.crop_y],
+            ))
+        else:
+            filters.append(FilterNode("scale", positional=[w, h],
+                                      args={"force_original_aspect_ratio": "increase"}))
+            filters.append(FilterNode("crop", positional=[w, h]))
+        z = f"(1.0+{KB_ZOOM}*on/{seg_dur * fps:.3f})"
+        mx = f"W*(1-1/{z})/2"
+        my = f"H*(1-1/{z})/2"
+        filters.append(FilterNode("perspective", args={
+            "x0": mx, "y0": my,
+            "x1": f"W-({mx})", "y1": my,
+            "x2": mx, "y2": f"H-({my})",
+            "x3": f"W-({mx})", "y3": f"H-({my})",
+            "interpolation": "cubic", "sense": "source", "eval": "frame",
+        }))
     else:  # cover
-        filters.append(FilterNode("scale", positional=[w, h],
-                                  args={"force_original_aspect_ratio": "increase"}))
-        filters.append(FilterNode("crop", positional=[w, h]))
+        if (
+            geometry is not None
+            and geometry.scaled_width is not None
+            and geometry.scaled_height is not None
+            and geometry.crop_x is not None
+            and geometry.crop_y is not None
+        ):
+            filters.append(FilterNode(
+                "scale",
+                positional=[geometry.scaled_width, geometry.scaled_height],
+            ))
+            filters.append(FilterNode(
+                "crop",
+                positional=[w, h, geometry.crop_x, geometry.crop_y],
+            ))
+        else:
+            filters.append(FilterNode("scale", positional=[w, h],
+                                      args={"force_original_aspect_ratio": "increase"}))
+            filters.append(FilterNode("crop", positional=[w, h]))
 
     filters.append(FilterNode("setsar", positional=[1]))
-    filters.append(FilterNode("fps", positional=[fps]))
+    if not ken:
+        filters.append(FilterNode("fps", positional=[fps]))
+    # FFmpeg concat emits AVTB.  Normalise source pads to AVTB too so mixed
+    # cut -> xfade chains have identical input timebases (xfade requires it).
+    filters.append(FilterNode("settb", args={"expr": "AVTB"}))
     filters.append(FilterNode("format", positional=["yuv420p"]))
     return Chain(inputs=[f"{idx}:v"], filters=filters, outputs=[label])
 

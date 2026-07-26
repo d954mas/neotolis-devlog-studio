@@ -82,6 +82,118 @@ def test_compile_beat_flag_gates_captions(tmp_path):
     assert caps and caps[0].text == "привет мир"
 
 
+def test_explicit_caption_groups_compile_exact_phrases(tmp_path):
+    wp = tmp_path / "w.json"
+    wp.write_text(json.dumps({"words": [
+        {"word": "one", "start": 0.0, "end": 0.3},
+        {"word": "two", "start": 0.4, "end": 0.7},
+        {"word": "three", "start": 0.8, "end": 1.1},
+        {"word": "four", "start": 1.2, "end": 1.5},
+    ]}), encoding="utf-8")
+    probes = {
+        "vo.wav": AssetProbe(path="vo.wav", kind="audio", exists=True, duration=2.0),
+        "missing.ttf": AssetProbe(path="missing.ttf", kind="font", exists=True),
+    }
+    beat = Beat(
+        audio="vo.wav", words=str(wp), subtitles=True,
+        caption_groups=[(0, 2), (3, 3)],
+        chunks=[Chunk(words=(0, 3), content=Plate(text="X"))],
+    )
+    edit = Edit(name="e", design=_design(), beats={"b1": beat},
+                order=["b1"], output="o.mp4")
+
+    compiled = build_timeline(edit, probe=False, probes=probes).beats[0]
+
+    assert [(c.text, c.t0, c.t1) for c in compiled.captions] == [
+        ("one two three", 0.0, 1.2),
+        ("four", 1.2, 1.8),
+    ]
+
+
+def test_explicit_caption_groups_allow_gaps_without_adding_omitted_words(tmp_path):
+    wp = tmp_path / "w.json"
+    wp.write_text(json.dumps({"words": [
+        {"word": "keep", "start": 0.0, "end": 0.3},
+        {"word": "omit", "start": 0.4, "end": 0.7},
+        {"word": "also", "start": 0.8, "end": 1.1},
+    ]}), encoding="utf-8")
+    probes = {
+        "vo.wav": AssetProbe(path="vo.wav", kind="audio", exists=True, duration=2.0),
+        "missing.ttf": AssetProbe(path="missing.ttf", kind="font", exists=True),
+    }
+    beat = Beat(
+        audio="vo.wav", words=str(wp), subtitles=True,
+        caption_groups=[(0, 0), (2, 2)],
+        chunks=[Chunk(words=(0, 2), content=Plate(text="X"))],
+    )
+    edit = Edit(name="e", design=_design(), beats={"b1": beat},
+                order=["b1"], output="o.mp4")
+
+    timeline = build_timeline(edit, probe=False, probes=probes)
+
+    assert [c.text for c in timeline.beats[0].captions] == ["keep", "also"]
+    assert not [d for d in timeline.diagnostics if d.code == "VQ-WORDS"]
+
+
+@pytest.mark.parametrize(
+    ("groups", "message"),
+    [
+        ([(-1, 0)], "start index -1 out of range"),
+        ([(1, 0)], "start index 1 > end index 0"),
+        ([(0, 3)], "end index 3 out of range"),
+        ([(1, 1), (0, 0)], "overlaps/precedes previous caption group end 1"),
+        ([(0, 1), (1, 2)], "overlaps/precedes previous caption group end 1"),
+    ],
+)
+def test_explicit_caption_groups_report_vq_words_errors(tmp_path, groups, message):
+    wp = tmp_path / "w.json"
+    wp.write_text(json.dumps({"words": [
+        {"word": "a", "start": 0.0, "end": 0.3},
+        {"word": "b", "start": 0.4, "end": 0.7},
+        {"word": "c", "start": 0.8, "end": 1.1},
+    ]}), encoding="utf-8")
+    probes = {
+        "vo.wav": AssetProbe(path="vo.wav", kind="audio", exists=True, duration=2.0),
+        "missing.ttf": AssetProbe(path="missing.ttf", kind="font", exists=True),
+    }
+    beat = Beat(
+        audio="vo.wav", words=str(wp), subtitles=True, caption_groups=groups,
+        chunks=[Chunk(words=(0, 2), content=Plate(text="X"))],
+    )
+    edit = Edit(name="e", design=_design(), beats={"b1": beat},
+                order=["b1"], output="o.mp4")
+
+    timeline = build_timeline(edit, probe=False, probes=probes)
+
+    assert any(d.code == "VQ-WORDS" and d.where == "b1" and message in d.message
+               for d in timeline.diagnostics)
+    assert any(w.startswith("[b1] VQ-WORDS:") and message in w
+               for w in timeline.warnings)
+
+
+def test_caption_groups_are_ignored_when_subtitles_are_disabled(tmp_path):
+    wp = tmp_path / "w.json"
+    wp.write_text(json.dumps({"words": [
+        {"word": "a", "start": 0.0, "end": 0.3},
+    ]}), encoding="utf-8")
+    probes = {
+        "vo.wav": AssetProbe(path="vo.wav", kind="audio", exists=True, duration=1.0),
+        "missing.ttf": AssetProbe(path="missing.ttf", kind="font", exists=True),
+    }
+    beat = Beat(
+        audio="vo.wav", words=str(wp), subtitles=False,
+        caption_groups=[(-5, 99)],
+        chunks=[Chunk(words=(0, 0), content=Plate(text="X"))],
+    )
+    edit = Edit(name="e", design=_design(), beats={"b1": beat},
+                order=["b1"], output="o.mp4")
+
+    timeline = build_timeline(edit, probe=False, probes=probes)
+
+    assert timeline.beats[0].captions == []
+    assert not [d for d in timeline.diagnostics if d.code == "VQ-WORDS"]
+
+
 def test_captions_change_beat_cache_key(tmp_path):
     """Captions ride inside the IRBeat, so toggling subtitles must change the
     beat cache key (a cached no-subtitles render is not a subtitled one)."""

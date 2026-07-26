@@ -37,9 +37,11 @@ Use the `devlog-thumbnail` skill when available.
 
 ## Creation Workflow
 
-1. State a one-sentence thumbnail concept.
-2. Pick the layout: split proof, device insert, before/after, or dashboard proof.
-3. Identify the real product image to use.
+1. For long-form, state three distinct viewer-promise hypotheses:
+   curiosity, number, and outcome. They must differ in idea, not only color.
+2. Pick a layout for each: split proof, device insert, before/after, or
+   dashboard proof.
+3. Identify the real product image to use for every hypothesis.
 4. If AI art is needed, specify what AI should generate and what must remain placeholder/blank for compositing.
 5. Composite or instruct the orchestrator how to composite the real screenshot.
 6. Run or request a contact sheet:
@@ -48,7 +50,10 @@ Use the `devlog-thumbnail` skill when available.
 python .agents/skills/devlog-thumbnail/scripts/thumbnail_contact_sheet.py <thumbnail.png> --out <thumbnail>_contact.png
 ```
 
-7. Review the final thumbnail at 320x180 and 160x90.
+7. Review every candidate at 320x180 and 160x90. Persist long-form candidates
+   as `data/publish/thumbnail_curiosity.png`,
+   `thumbnail_number.png`, and `thumbnail_outcome.png`; identify the default
+   but retain all three for YouTube's native A/B test.
 
 ## Review Output
 

@@ -10,6 +10,7 @@ import json
 import os
 import re
 import sqlite3
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -96,6 +97,14 @@ FEEDBACK_PATTERNS: dict[str, tuple[str, ...]] = {
         "пуш",
     ),
 }
+
+
+def configure_utf8_stdio() -> None:
+    """Keep Markdown reports printable from Windows shells with legacy codepages."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="replace")
 
 
 def parse_ts(value: str) -> float:
@@ -232,6 +241,8 @@ def read_rollout(
                 if call_id in calls:
                     output = str(payload.get("output") or payload.get("result") or "")
                     calls[call_id]["end"] = timestamp
+                    calls[call_id]["output_chars"] = len(output)
+                    calls[call_id]["output_lines"] = output.count("\n") + (1 if output else 0)
                     match = re.search(r"Wall time:\s*([0-9.]+) seconds", output)
                     if match:
                         calls[call_id]["wall"] = float(match.group(1))
@@ -283,7 +294,19 @@ def latest_rollout_for_cwd(cwd: str | None, home: Path) -> tuple[str | None, Pat
     for db in sqlite_files(home):
         try:
             con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-            rows = con.execute("select id, rollout_path, cwd from threads order by updated_at desc limit 200").fetchall()
+            rows = con.execute(
+                """
+                select t.id, t.rollout_path, t.cwd
+                from threads t
+                where not exists (
+                    select 1
+                    from thread_spawn_edges e
+                    where e.child_thread_id = t.id
+                )
+                order by t.updated_at desc
+                limit 200
+                """
+            ).fetchall()
             con.close()
         except sqlite3.Error:
             continue
@@ -355,24 +378,34 @@ def print_report(
     print()
 
     grouped: dict[str, dict[str, float | int]] = collections.defaultdict(
-        lambda: {"calls": 0, "wall": 0.0, "latency": 0.0, "max": 0.0}
+        lambda: {
+            "calls": 0,
+            "wall": 0.0,
+            "latency": 0.0,
+            "max": 0.0,
+            "output_chars": 0,
+            "output_lines": 0,
+        }
     )
     for row in rows:
         bucket = grouped[row["category"]]
         bucket["calls"] += 1
         bucket["latency"] += float(row["latency"])
         bucket["max"] = max(float(bucket["max"]), float(row["latency"]))
+        bucket["output_chars"] += int(row.get("output_chars") or 0)
+        bucket["output_lines"] += int(row.get("output_lines") or 0)
         if row.get("wall") is not None:
             bucket["wall"] += float(row["wall"])
 
     print("### Categories")
     print()
-    print("| Category | Calls | Shell Wall | Response Latency | Max Latency |")
-    print("|---|---:|---:|---:|---:|")
+    print("| Category | Calls | Shell Wall | Response Latency | Max Latency | Output chars / lines |")
+    print("|---|---:|---:|---:|---:|---:|")
     for name, data in sorted(grouped.items(), key=lambda item: float(item[1]["latency"]), reverse=True):
         print(
             f"| {name} | {int(data['calls'])} | {format_seconds(float(data['wall']))} | "
-            f"{format_seconds(float(data['latency']))} | {format_seconds(float(data['max']))} |"
+            f"{format_seconds(float(data['latency']))} | {format_seconds(float(data['max']))} | "
+            f"{int(data['output_chars']):,} / {int(data['output_lines']):,} |"
         )
     print()
 
@@ -386,6 +419,19 @@ def print_report(
             f"| {format_seconds(float(row['latency']))} | {format_seconds(row.get('wall'))} | "
             f"{row['category']} | `{row['name']}` | `{row['args']}` |"
         )
+
+    noisy_rows = [row for row in rows if int(row.get("output_chars") or 0) > 0]
+    if noisy_rows:
+        print()
+        print("### Noisiest Calls")
+        print()
+        print("| Chars | Lines | Category | Tool | Args |")
+        print("|---:|---:|---|---|---|")
+        for row in sorted(noisy_rows, key=lambda r: int(r.get("output_chars") or 0), reverse=True)[:top]:
+            print(
+                f"| {int(row.get('output_chars') or 0):,} | {int(row.get('output_lines') or 0):,} | "
+                f"{row['category']} | `{row['name']}` | `{row['args']}` |"
+            )
     gap_rows = [row for row in rows if row["category"] == "orchestration/session gap"]
     if gap_rows:
         print()
@@ -437,6 +483,7 @@ def print_user_feedback(user_messages: list[dict[str, Any]], top: int) -> None:
 
 
 def main() -> int:
+    configure_utf8_stdio()
     parser = argparse.ArgumentParser(description="Summarize Codex rollout tool timing.")
     parser.add_argument("--rollout", type=Path, help="Path to rollout-*.jsonl")
     parser.add_argument("--thread-id", help="Codex thread id to resolve through state_*.sqlite")

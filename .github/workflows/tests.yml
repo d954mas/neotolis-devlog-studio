@@ -70,8 +70,9 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Web UI typecheck + build
+      - name: Web UI tests + typecheck + build
         working-directory: common/dlstudio/webui
         run: |
           npm ci
+          npm test
           npm run build

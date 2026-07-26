@@ -117,6 +117,7 @@ def _render_markdown(
     edit: Edit,
     *,
     title_variants: list[str] | None,
+    thumbnail_variants: list[str] | None,
     description: str | None,
     tags: list[str] | None,
     chapters_from_timeline: Timeline | None,
@@ -128,6 +129,22 @@ def _render_markdown(
         lines.extend(f"{i}. {title}" for i, title in enumerate(title_variants, start=1))
     else:
         lines.append("_no title variants supplied_")
+    lines.append("")
+
+    lines.append("## A/B test plan")
+    if thumbnail_variants:
+        lines.extend(
+            f"{i}. `{thumbnail}`"
+            for i, thumbnail in enumerate(thumbnail_variants, start=1)
+        )
+    else:
+        lines.append("_no thumbnail variants supplied_")
+    lines.append("")
+    lines.append(
+        "Pair each thumbnail with a meaningfully different title hypothesis. "
+        "Use YouTube's native A/B test for long-form and choose by watch time, "
+        "not click-through rate alone."
+    )
     lines.append("")
 
     lines.append("## Description")
@@ -175,6 +192,7 @@ def generate_youtube_package(
     *,
     out_path: Path | str,
     title_variants: list[str] | None = None,
+    thumbnail_variants: list[str] | None = None,
     description: str | None = None,
     tags: list[str] | None = None,
     chapters_from_timeline: Timeline | None = None,
@@ -192,6 +210,7 @@ def generate_youtube_package(
     text = _render_markdown(
         edit,
         title_variants=title_variants,
+        thumbnail_variants=thumbnail_variants,
         description=description,
         tags=tags,
         chapters_from_timeline=chapters_from_timeline,

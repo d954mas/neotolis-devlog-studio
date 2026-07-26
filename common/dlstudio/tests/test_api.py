@@ -13,6 +13,7 @@ root; the autouse `_restore_cwd` fixture in conftest puts cwd back.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import subprocess
@@ -180,6 +181,14 @@ def _await_job(client: TestClient, job_id: str, *, timeout: float = 8.0) -> dict
     raise AssertionError(f"job {job_id} never finished: {data}")
 
 
+def _approve_script(client: TestClient) -> None:
+    response = client.post(
+        "/api/script/approve",
+        json={"approved_by": "test"},
+    )
+    assert response.status_code == 200
+
+
 # ─── /api/project, /api/ir, /api/check (compiled) ────────────────────────────
 
 @_needs_ffmpeg
@@ -249,6 +258,13 @@ def test_root_serves_placeholder_when_no_static(light_client):
     assert "Studio v2" in r.text
 
 
+def test_research_page_serves_the_same_ui_shell(light_client):
+    client, _, _ = light_client
+    r = client.get("/research/")
+    assert r.status_code == 200
+    assert '<base href="/"' in r.text or "Studio v2" in r.text
+
+
 # ─── feedback: read empty, write, deep-merge ─────────────────────────────────
 
 def test_feedback_empty_when_missing(light_client):
@@ -310,10 +326,100 @@ def test_feedback_rejects_too_deep(light_client):
     assert client.post("/api/feedback", json=deep).status_code == 400
 
 
+# ─── single Autopilot checkpoint ───
+
+def _write_checkpoint_inputs(root: Path) -> Path:
+    plan = root / "data" / "plan"
+    assets = root / "data" / "assets"
+    review = root / "data" / "review"
+    plan.mkdir(parents=True, exist_ok=True)
+    assets.mkdir(parents=True, exist_ok=True)
+    review.mkdir(parents=True, exist_ok=True)
+    source = root / "data" / "footage" / "game.mp4"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(b"reviewed-gameplay")
+    manifest = plan / "shot_manifest.json"
+    manifest.write_text(json.dumps({"shots": [{
+        "id": "b01_s01", "vo_thesis": "real game proof",
+        "src": "data/footage/game.mp4", "t0": 0, "t1": 3,
+        "approved": False,
+    }]}), encoding="utf-8")
+    catalog = assets / "catalog.json"
+    catalog.write_text(json.dumps({"assets": [{
+        "path": "data/footage/game.mp4", "provenance": "game_capture",
+        "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+        "source_role": "real_product", "quality_flags": [],
+    }]}), encoding="utf-8")
+    (review / "preflight.json").write_text(json.dumps({
+        "wall_time": {"budget_minutes": 60, "elapsed_minutes": 12},
+        "issues": [],
+        "inputs": {
+            "shot_manifest_sha256": __import__(
+                "dlstudio.services.autopilot_checkpoint",
+                fromlist=["preflight_manifest_sha256"],
+            ).preflight_manifest_sha256(manifest),
+            "asset_catalog_sha256": hashlib.sha256(catalog.read_bytes()).hexdigest(),
+        },
+    }), encoding="utf-8")
+    return manifest
+
+
+def test_autopilot_checkpoint_get_and_approve_are_production_scoped(light_client):
+    client, root, _ = light_client
+    manifest = _write_checkpoint_inputs(root)
+
+    snapshot = client.get("/api/autopilot/checkpoint")
+    assert snapshot.status_code == 200
+    assert snapshot.json()["rows"][0]["shot"]["provenance"] == "game_capture"
+
+    approved = client.post(
+        "/api/autopilot/checkpoint/approve",
+        json={
+            "approved_by": "author",
+            "expected_checkpoint_digest": snapshot.json()["checkpoint_digest"],
+        },
+    )
+    assert approved.status_code == 200
+    assert approved.json()["checkpoint"]["approved_all"] is True
+    assert json.loads(manifest.read_text(encoding="utf-8"))["shots"][0]["approved"] is True
+
+
+def test_autopilot_content_action_records_request_without_mutating_manifest(light_client):
+    client, root, _ = light_client
+    manifest = _write_checkpoint_inputs(root)
+    before = manifest.read_bytes()
+
+    response = client.post("/api/autopilot/checkpoint/request", json={
+        "action": "replace_shot", "shot_id": "b01_s01",
+        "reason": "Use the newer portrait capture", "requested_by": "author",
+    })
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "requested"
+    assert manifest.read_bytes() == before
+    request_file = root / "data" / "plan" / "autopilot_requests.json"
+    assert json.loads(request_file.read_text(encoding="utf-8"))["requests"][0]["action"] == "replace_shot"
+
+
 # ─── takes upload ────────────────────────────────────────────────────────────
+
+def test_takes_upload_requires_script_approval(light_client):
+    client, root, _ = light_client
+
+    response = client.post(
+        "/api/takes/b01",
+        files={"file": ("take.webm", b"AUDIO-BYTES", "audio/webm")},
+    )
+
+    assert response.status_code == 409
+    assert "approval is missing" in response.json()["detail"]
+    recordings = root / "data" / "recordings"
+    assert not (recordings.exists() and list(recordings.glob("b01_*")))
+
 
 def test_takes_upload_saves_file(light_client):
     client, root, _ = light_client
+    _approve_script(client)
     r = client.post(
         "/api/takes/b01",
         files={"file": ("take.webm", b"AUDIO-BYTES", "audio/webm")},
@@ -325,6 +431,91 @@ def test_takes_upload_saves_file(light_client):
     saved = root / rel
     assert saved.is_file()
     assert saved.read_bytes() == b"AUDIO-BYTES"
+
+
+def test_takes_upload_persists_validated_recording_markers(light_client):
+    client, root, _ = light_client
+    _approve_script(client)
+    metadata = {
+        "schema": "devlog.voice_take",
+        "version": 1,
+        "countdown_seconds": 3,
+        "room_tone_seconds": 2,
+        "speech_start_seconds": 5,
+        "stop_requested_seconds": 12.5,
+        "post_roll_end_seconds": 13.5,
+        "post_roll_target_seconds": 1,
+        "post_roll_completed": True,
+        "completed_lead_in": True,
+    }
+    r = client.post(
+        "/api/takes/b01",
+        files={"file": ("take.webm", b"AUDIO-BYTES", "audio/webm")},
+        data={"metadata": json.dumps(metadata)},
+    )
+    assert r.status_code == 200
+    metadata_path = root / r.json()["metadata_path"]
+    assert json.loads(metadata_path.read_text(encoding="utf-8")) == metadata
+
+
+def test_takes_upload_does_not_publish_raw_without_sidecar_bundle(
+    light_client,
+    monkeypatch,
+):
+    client, root, _ = light_client
+    _approve_script(client)
+    metadata = {
+        "schema": "devlog.voice_take",
+        "version": 1,
+        "countdown_seconds": 3,
+        "room_tone_seconds": 2,
+        "speech_start_seconds": 5,
+        "stop_requested_seconds": 12.5,
+        "post_roll_end_seconds": 13.5,
+        "post_roll_target_seconds": 1,
+        "post_roll_completed": True,
+        "completed_lead_in": True,
+    }
+    monkeypatch.setattr(
+        "dlstudio.services.bundle.promote_bundle",
+        lambda _replacements: (_ for _ in ()).throw(
+            RuntimeError("promotion failed")
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="promotion failed"):
+        client.post(
+            "/api/takes/b01",
+            files={"file": ("take.webm", b"AUDIO-BYTES", "audio/webm")},
+            data={"metadata": json.dumps(metadata)},
+        )
+
+    recordings = root / "data" / "recordings"
+    assert not list(recordings.glob("b01_*"))
+    assert not list(recordings.glob(".*.upload"))
+
+
+def test_takes_upload_rejects_unordered_recording_markers(light_client):
+    client, _, _ = light_client
+    _approve_script(client)
+    metadata = {
+        "schema": "devlog.voice_take",
+        "version": 1,
+        "countdown_seconds": 3,
+        "room_tone_seconds": 2,
+        "speech_start_seconds": 5,
+        "stop_requested_seconds": 12,
+        "post_roll_end_seconds": 11,
+        "post_roll_target_seconds": 1,
+        "post_roll_completed": False,
+        "completed_lead_in": True,
+    }
+    r = client.post(
+        "/api/takes/b01",
+        files={"file": ("take.webm", b"AUDIO-BYTES", "audio/webm")},
+        data={"metadata": json.dumps(metadata)},
+    )
+    assert r.status_code == 400
 
 
 def test_takes_upload_rejects_bad_beat_id(light_client):
@@ -339,6 +530,7 @@ def test_takes_upload_rejects_bad_beat_id(light_client):
 
 def test_takes_upload_rejects_empty(light_client):
     client, root, _ = light_client
+    _approve_script(client)
     r = client.post(
         "/api/takes/b01",
         files={"file": ("empty.webm", b"", "audio/webm")},
@@ -351,6 +543,7 @@ def test_takes_upload_rejects_empty(light_client):
 
 def test_takes_upload_rejects_oversize(light_client, monkeypatch):
     client, root, _ = light_client
+    _approve_script(client)
     # shrink the cap so a tiny body trips it (streamed cap, not Content-Length)
     monkeypatch.setattr("dlstudio.api.app._MAX_UPLOAD_BYTES", 4)
     r = client.post(
@@ -435,8 +628,24 @@ class _FakeProcessResult:
         self.duration = 3.2
 
 
+def test_process_take_requires_script_approval(light_client):
+    client, root, _ = light_client
+    recording = root / "data" / "recordings" / "take.webm"
+    recording.parent.mkdir(parents=True, exist_ok=True)
+    recording.write_bytes(b"raw")
+
+    response = client.post("/api/actions/process-take", json={
+        "beat_id": "b01",
+        "recording_path": "data/recordings/take.webm",
+    })
+
+    assert response.status_code == 409
+    assert "approval is missing" in response.json()["detail"]
+
+
 def test_process_take_job_lifecycle(light_client, monkeypatch):
     client, root, _ = light_client
+    _approve_script(client)
     (root / "data" / "recordings").mkdir(parents=True, exist_ok=True)
     (root / "data" / "recordings" / "take.webm").write_bytes(b"raw")
 
@@ -491,6 +700,7 @@ def test_process_take_job_lifecycle(light_client, monkeypatch):
 
 def test_process_take_rejects_traversal_recording(light_client):
     client, _, _ = light_client
+    _approve_script(client)
     r = client.post("/api/actions/process-take", json={
         "beat_id": "b01", "recording_path": "../evil.webm",
     })
@@ -509,6 +719,7 @@ def test_process_take_unknown_beat_404(light_client):
 
 def test_process_take_job_reports_error(light_client, monkeypatch):
     client, root, _ = light_client
+    _approve_script(client)
     (root / "data" / "recordings").mkdir(parents=True, exist_ok=True)
     (root / "data" / "recordings" / "take.webm").write_bytes(b"raw")
 
@@ -525,20 +736,59 @@ def test_process_take_job_reports_error(light_client, monkeypatch):
     assert "ffmpeg exploded" in done["error"]
 
 
+def test_process_take_quality_rejection_persists_rejected_verdict(
+    light_client,
+    monkeypatch,
+):
+    client, root, _ = light_client
+    _approve_script(client)
+    recording = root / "data" / "recordings" / "take.webm"
+    recording.parent.mkdir(parents=True, exist_ok=True)
+    recording.write_bytes(b"raw")
+
+    from dlstudio import services
+
+    verdict = {
+        "schema": "dlstudio.voice-take-verdict",
+        "version": 1,
+        "verdict": "block",
+        "recommended_action": "re_record",
+    }
+
+    def reject(recording, out_wav, **kw):
+        raise services.VoiceTakeQualityError("click detected", verdict)
+
+    monkeypatch.setattr("dlstudio.services.process_take", reject)
+    response = client.post("/api/actions/process-take", json={
+        "beat_id": "b01",
+        "recording_path": "data/recordings/take.webm",
+    })
+    done = _await_job(client, response.json()["job_id"])
+
+    assert done["status"] == "error"
+    assert "click detected" in done["error"]
+    rejected = root / "data" / "review" / "voice_takes" / "take.rejected.json"
+    assert json.loads(rejected.read_text(encoding="utf-8"))["verdict"] == "block"
+
+
 def test_process_take_failure_leaves_previous_take_intact(light_client, monkeypatch):
     """0.7 regression: WAV/words used to be written STRAIGHT to the beat's
     declared paths — a transcribe failure left a new wav with the OLD words
     (or a half-written wav). With temp+promote, any failure leaves the
     previous take byte-identical and no temp litter behind."""
     client, root, _ = light_client
+    _approve_script(client)
     (root / "data" / "recordings").mkdir(parents=True, exist_ok=True)
     (root / "data" / "recordings" / "take.webm").write_bytes(b"raw")
 
     audio_out = root / "data" / "finalize" / "b01_audio_tight_pause.wav"
     words_out = root / "data" / "finalize" / "b01_words_tight.json"
+    verdict_out = root / "data" / "review" / "voice_takes" / "take.json"
     audio_out.parent.mkdir(parents=True, exist_ok=True)
+    verdict_out.parent.mkdir(parents=True, exist_ok=True)
     audio_out.write_bytes(b"previous-take-wav")
     words_out.write_text('{"words": "previous"}', encoding="utf-8")
+    verdict_out.write_text('{"verdict": "previous"}', encoding="utf-8")
 
     def fake_process_take(recording, out_wav, **kw):
         Path(out_wav).write_bytes(b"new-take-wav")     # stage 1 succeeds...
@@ -559,6 +809,7 @@ def test_process_take_failure_leaves_previous_take_intact(light_client, monkeypa
     # the previous take survived untouched — nothing was promoted
     assert audio_out.read_bytes() == b"previous-take-wav"
     assert words_out.read_text(encoding="utf-8") == '{"words": "previous"}'
+    assert verdict_out.read_text(encoding="utf-8") == '{"verdict": "previous"}'
     assert not list(audio_out.parent.glob("*.tmp-*"))
 
 
@@ -566,6 +817,7 @@ def test_parallel_process_take_jobs_same_beat_serialize(light_client, monkeypatc
     """0.7: two Process jobs of ONE beat must never run concurrently (they
     write the same declared wav/words paths)."""
     client, root, _ = light_client
+    _approve_script(client)
     (root / "data" / "recordings").mkdir(parents=True, exist_ok=True)
     (root / "data" / "recordings" / "take.webm").write_bytes(b"raw")
 
@@ -773,6 +1025,179 @@ def test_project_hot_reloads_edit_module(light_client):
 
     data = client.get("/api/project").json()
     assert [b["id"] for b in data["beats"]] == ["b01", "b02"]
+
+
+def test_script_approval_is_hash_bound_and_invalidates_after_vo_edit(light_client):
+    client, root, _ = light_client
+    initial = client.get("/api/project").json()
+    assert initial["script_approved"] is False
+    assert len(initial["script_sha256"]) == 64
+
+    approved = client.post("/api/script/approve", json={"approved_by": "author"})
+    assert approved.status_code == 200
+    assert approved.json()["script_approved"] is True
+    assert client.get("/api/project").json()["script_approved"] is True
+    assert (root / "data" / "plan" / "script_approval.json").is_file()
+
+    init_path = root / "edits" / "myedit" / "__init__.py"
+    source = init_path.read_text(encoding="utf-8")
+    init_path.write_text(source.replace("hi there world", "hi changed world"), encoding="utf-8")
+
+    changed = client.get("/api/project").json()
+    assert changed["script_approved"] is False
+    assert changed["script_sha256"] != initial["script_sha256"]
+
+
+def test_stale_script_approval_blocks_take_upload(light_client):
+    client, root, _ = light_client
+    assert client.post(
+        "/api/script/approve",
+        json={"approved_by": "author"},
+    ).status_code == 200
+    init_path = root / "edits" / "myedit" / "__init__.py"
+    init_path.write_text(
+        init_path.read_text(encoding="utf-8").replace(
+            "hi there world",
+            "hot edited script",
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.post(
+        "/api/takes/b01",
+        files={"file": ("take.webm", b"AUDIO-BYTES", "audio/webm")},
+    )
+
+    assert response.status_code == 409
+    assert "approval is stale" in response.json()["detail"]
+    recordings = root / "data" / "recordings"
+    assert not (recordings.exists() and list(recordings.glob("b01_*")))
+
+
+def test_stale_script_approval_blocks_take_processing(light_client):
+    client, root, _ = light_client
+    assert client.post(
+        "/api/script/approve",
+        json={"approved_by": "author"},
+    ).status_code == 200
+    recording = root / "data" / "recordings" / "take.webm"
+    recording.parent.mkdir(parents=True, exist_ok=True)
+    recording.write_bytes(b"raw")
+    init_path = root / "edits" / "myedit" / "__init__.py"
+    init_path.write_text(
+        init_path.read_text(encoding="utf-8").replace(
+            "hi there world",
+            "hot edited script",
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.post("/api/actions/process-take", json={
+        "beat_id": "b01",
+        "recording_path": "data/recordings/take.webm",
+    })
+
+    assert response.status_code == 409
+    assert "approval is stale" in response.json()["detail"]
+
+
+def test_project_hot_reloads_filesystem_production(tmp_path, monkeypatch):
+    product = tmp_path / "not_a_trolley_problem"
+    production = product / "reels" / "2026_07_18_reel_01"
+    devlog = product / "devlogs" / "2026_07_17_devlog_01"
+    edit_dir = production / "edit"
+    edit_dir.mkdir(parents=True)
+    (devlog / "edit").mkdir(parents=True)
+    (tmp_path / "devlog.toml").write_text("", encoding="utf-8")
+    (product / "product.toml").write_text(
+        "\n".join(
+            [
+                'id = "not_a_trolley_problem"',
+                'title = "Not a Trolley Problem"',
+                'game_root = "C:/projects/game-67-idle"',
+                "[sources]",
+                'diary = "https://neotolis-diary.dev"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (production / "production.toml").write_text(
+        "\n".join(
+            [
+                'id = "2026_07_18_reel_01"',
+                'kind = "reel"',
+                'date = "2026-07-18"',
+                'orientation = "vertical"',
+                'edit_path = "edit"',
+                'data_root = "data"',
+                'delivery_root = "../../delivery/reels/2026_07_18_reel_01"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (devlog / "production.toml").write_text(
+        "\n".join(
+            [
+                'id = "2026_07_17_devlog_01"',
+                'kind = "devlog"',
+                'date = "2026-07-17"',
+                'orientation = "landscape"',
+                'edit_path = "edit"',
+                'data_root = "data"',
+                'delivery_root = "../../delivery/devlogs/2026_07_17_devlog_01"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    source_v1 = textwrap.dedent(
+        """
+        from dlstudio.model import Design, Edit, Fonts, Palette
+        EDIT = Edit(
+            name="filesystem-v1",
+            design=Design(
+                resolution=(1080, 1920),
+                palette=Palette(tokens={"bg": "#000000", "text": "#ffffff"}),
+                fonts=Fonts(main="data/fonts/main.ttf"),
+            ),
+            beats={}, order=[], output="data/finalize/final.mp4",
+        )
+        """
+    )
+    init_path = edit_dir / "__init__.py"
+    init_path.write_text(source_v1, encoding="utf-8")
+    (devlog / "edit" / "__init__.py").write_text(
+        source_v1.replace("filesystem-v1", "devlog-v1"), encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+
+    with TestClient(create_app(str(production))) as client:
+        project_data = client.get("/api/project").json()
+        assert project_data["edit_name"] == "filesystem-v1"
+        assert project_data["product"] == {
+            "id": "not_a_trolley_problem",
+            "title": "Not a Trolley Problem",
+            "current_production_id": "2026_07_18_reel_01",
+            "productions": [
+                {
+                    "id": "2026_07_17_devlog_01",
+                    "kind": "devlog",
+                    "date": "2026-07-17",
+                    "orientation": "landscape",
+                    "studio_ref": "not_a_trolley_problem:2026_07_17_devlog_01",
+                    "current": False,
+                },
+                {
+                    "id": "2026_07_18_reel_01",
+                    "kind": "reel",
+                    "date": "2026-07-18",
+                    "orientation": "vertical",
+                    "studio_ref": "not_a_trolley_problem:2026_07_18_reel_01",
+                    "current": True,
+                },
+            ],
+        }
+        init_path.write_text(source_v1.replace("filesystem-v1", "filesystem-v2"), encoding="utf-8")
+        assert client.get("/api/project").json()["edit_name"] == "filesystem-v2"
 
 
 # ─── job lifecycle: render-beat ──────────────────────────────────────────────

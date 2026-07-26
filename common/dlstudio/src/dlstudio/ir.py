@@ -15,6 +15,7 @@ implementing agents; adding new optional fields is allowed.
 """
 from __future__ import annotations
 
+import math
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -74,7 +75,8 @@ class IROverlayItem(_Model):
     bg) changes, even though the Chunk itself travels to the rasterizer
     out-of-band via the chunk resolver. `asset_paths` lists file paths the
     raster pass reads (e.g. Plate.bg_image) so the cache can include their
-    identity (size+mtime)."""
+    content identity. `public_text` carries only viewer-visible copy for
+    deterministic release-copy checks."""
 
     chunk_index: int
     z: int
@@ -84,6 +86,117 @@ class IROverlayItem(_Model):
     transition_in: Transition | None = None
     content_hash: str | None = None
     asset_paths: list[str] = Field(default_factory=list)
+    public_text: list[str] = Field(default_factory=list)
+
+
+class IRSegmentGeometry(_Model):
+    """Resolved source-to-output transform.
+
+    All coordinates are integer pixels.  A compiled segment therefore carries
+    enough information for checks and reviewers to reproduce the exact crop or
+    pad without relying on FFmpeg's implicit centering defaults.
+    """
+
+    fit: Literal["cover", "contain"]
+    anchor_x: float = Field(ge=0.0, le=1.0)
+    anchor_y: float = Field(ge=0.0, le=1.0)
+    source_width: int | None = None
+    source_height: int | None = None
+    scaled_width: int | None = None
+    scaled_height: int | None = None
+    output_width: int
+    output_height: int
+    crop_x: int | None = None
+    crop_y: int | None = None
+    crop_width: int | None = None
+    crop_height: int | None = None
+    pad_x: int | None = None
+    pad_y: int | None = None
+
+    @staticmethod
+    def _even_ceil(value: float) -> int:
+        rounded = int(math.ceil(value - 1e-9))
+        return rounded if rounded % 2 == 0 else rounded + 1
+
+    @classmethod
+    def resolve(
+        cls,
+        *,
+        fit: Literal["cover", "contain"],
+        anchor_x: float,
+        anchor_y: float,
+        source_width: int | None,
+        source_height: int | None,
+        output_width: int,
+        output_height: int,
+    ) -> "IRSegmentGeometry":
+        base = {
+            "fit": fit,
+            "anchor_x": anchor_x,
+            "anchor_y": anchor_y,
+            "source_width": source_width,
+            "source_height": source_height,
+            "output_width": output_width,
+            "output_height": output_height,
+        }
+        if not source_width or not source_height:
+            return cls(**base)
+
+        if fit == "cover":
+            scale = max(
+                output_width / source_width,
+                output_height / source_height,
+            )
+            scaled_width = cls._even_ceil(source_width * scale)
+            scaled_height = cls._even_ceil(source_height * scale)
+            excess_x = max(0, scaled_width - output_width)
+            excess_y = max(0, scaled_height - output_height)
+            crop_x = min(excess_x, max(0, int(round(excess_x * anchor_x))))
+            crop_y = min(excess_y, max(0, int(round(excess_y * anchor_y))))
+            return cls(
+                **base,
+                scaled_width=scaled_width,
+                scaled_height=scaled_height,
+                crop_x=crop_x,
+                crop_y=crop_y,
+                crop_width=output_width,
+                crop_height=output_height,
+            )
+
+        scale = min(
+            output_width / source_width,
+            output_height / source_height,
+        )
+        scaled_width = min(
+            output_width,
+            max(2, cls._even_ceil(source_width * scale)),
+        )
+        scaled_height = min(
+            output_height,
+            max(2, cls._even_ceil(source_height * scale)),
+        )
+        free_x = max(0, output_width - scaled_width)
+        free_y = max(0, output_height - scaled_height)
+        pad_x = min(free_x, max(0, int(round(free_x * anchor_x))))
+        pad_y = min(free_y, max(0, int(round(free_y * anchor_y))))
+        return cls(
+            **base,
+            scaled_width=scaled_width,
+            scaled_height=scaled_height,
+            pad_x=pad_x,
+            pad_y=pad_y,
+        )
+
+    def for_output(self, width: int, height: int) -> "IRSegmentGeometry":
+        return self.resolve(
+            fit=self.fit,
+            anchor_x=self.anchor_x,
+            anchor_y=self.anchor_y,
+            source_width=self.source_width,
+            source_height=self.source_height,
+            output_width=width,
+            output_height=height,
+        )
 
 
 class IRSegment(_Model):
@@ -92,12 +205,31 @@ class IRSegment(_Model):
 
     kind: Literal["image", "video"]
     src: str
+    asset_id: str | None = None
+    render_manifest: str | None = None
+    editorial_role: Literal[
+        "gameplay",
+        "debug_proof",
+        "presentation",
+        "reference",
+    ] | None = None
+    expected_state_id: str | None = None
+    expected_build_id: str | None = None
+    expected_action_id: str | None = None
     offset: float
     t0: float
     t1: float
     ken_burns: bool = False
     loop: bool = False
     fit: Literal["cover", "contain"] = "cover"
+    geometry: IRSegmentGeometry | None = None
+    transition_intent: Literal[
+        "continuous_same_take",
+        "motivated_cut",
+        "before_after",
+        "chapter_boundary",
+        "no_cut",
+    ] | None = None
     xfade: Transition | None = None
 
 
@@ -189,6 +321,7 @@ class Timeline(_Model):
     mix: IRMix
     assets: dict[str, AssetProbe]            # path -> probe facts
     output: str
+    asset_policy: Literal["compatibility", "production"] = "compatibility"
     warnings: list[str] = Field(default_factory=list)
     # Structured compile-time diagnostics. Preferred over string-tagged
     # warnings: compile appends CheckIssue objects here and check merges

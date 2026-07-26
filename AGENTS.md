@@ -37,19 +37,25 @@ the `RESOLUTION` tuple in `design.py` — there is no separate format field.
 | Quick result from a beats.py edit | `dl2 iter <edit> --stale -j 4` |
 | One-beat iteration | `dl2 compose <edit> <beat>` |
 | Watchable draft + review artifacts | `dl2 preview <edit>` → draft at `EDIT.output` + `data/review/contact_sheet.jpg` + `data/review/keyframes/` |
+| Product-first video run | `dl2 autopilot-run <product:production>` → author checkpoint → `--resume` → exact review → `--resume` → package checkpoint → `--resume` |
 | Final upload-ready render | `dl2 final <edit>` (1080p, −14 LUFS loudnorm) |
 | Start a new video | `dl2 new-video <project> --format vertical` (or `landscape`) |
 | Scratch VO for a beat | `dl2 scratch-tts <edit> <beat>` → `dl2 transcribe <wav> <words.json>` → wire BOTH paths into the beat in `beats.py` |
-| Process a recorded take | `dl2 audio <edit> <beat> <take>` (takes live in `data/recordings/`) |
+| Process a recorded take | `dl2 audio <edit> <beat> <take>` → automatic agent speech edit per `docs/SPEECH_EDIT.md` (takes live in `data/recordings/`) |
 | Record VO / takes / feedback UI | `dl2 studio <edit>` → http://127.0.0.1:8788 |
 | Missing-asset / compile triage | `dl2 check <edit>` (its error list is the TODO); cache status: `dl2 beats <edit>` |
 | Ground-truth timings | `dl2 ir <edit> --out ir.json` |
+| Record or validate gameplay / VO | Use `$devlog-record-media`; gameplay requires a real-time client-area stream, exact state/build identity, 5s head/tail handles, and a passing machine audit before ingest |
+| Controlled debug / presentation capture | Use `$devlog-debug-scenes`; keep frame-stepped DevAPI output classified as `debug_proof` or `presentation`, never ordinary gameplay |
 | Motion / infographic asset | `dl2 gen-html <asset> --init`, edit HTML, render to `data/infographics/` |
 | Stock b-roll | `dl2 stock search` / `dl2 stock download` |
 | YouTube package | `dl2 publish <edit>` → `data/publish/youtube_package.md` |
+| Archive a completed publish package | After `dl2 deliver`, run `py -3.12 tools/publish_archive.py --workspace . --destination C:\Users\ROG\YandexDisk\Devlogs\projects`; this is append-only, SHA-verified, and archives only final publish/delivery files |
+| Completed or interrupted production run | Spawn `devlog-reflector` once; persist a timestamped report under `data/review/reflections/` |
 | Environment triage | `dl2 doctor` |
 | Engine-work verification | `dl2 verify --changed` |
 | Vertical reel, before any `dl2 final` | Run `docs/CHECKLIST_VERTICAL_REEL.md` section A in full — no deadline exception |
+| Long-form devlog | Read `docs/LONGFORM_DEVLOG_AUDIT_2026-07-26.md` and normative `docs/LONGFORM_DEVLOG_SPEC.md`; fill `story_map.json` + enriched `shot_manifest.json`; run `dl2 longform-check <product:production>` during planning and `--strict` before final VO; run `docs/CHECKLIST_LONG_DEVLOG.md` before `dl2 final` |
 
 Agent routing:
 
@@ -92,6 +98,38 @@ Agent routing:
 7. **Draft first for a new reel.** Scaffold, provisional script, scratch
    VO, existing/stock/generated visuals, `dl2 preview`. Source capture is a
    short bounded step; use placeholders and replace next iteration.
+8. **Review compact evidence first.** `autopilot-run` creates
+   `data/review/review_pack.json` and `review_pack_sheet.jpg`. Reviewers read
+   those first and open a full-resolution frame only after the pack exposes a
+   concrete anomaly. Never stream all keyframes into model context by default.
+9. **One run, one id, no polling.** Resume `data/review/autopilot_run.json`
+   at the author, exact-review, and package boundaries. Do not rediscover and manually
+   dispatch inventory/preflight/storyboard/final/publish/delivery commands.
+10. **Capture method is part of asset identity.** DevAPI may prepare game state,
+    but ordinary gameplay is recorded as one real-time client-area media stream.
+    Frame-stepped `capture.frame` + `time.step` output is debug/presentation
+    evidence only. A gameplay asset is not ingestible without structured
+    capture method, state/build id, native geometry, edit handles, and a passing
+    `$devlog-record-media` audit.
+
+## Automatic speech edit — agent-owned, no author checkpoint
+
+Speech edit of an existing recorded take is an automatic agent stage, not a
+Studio UI task. After `dl2 audio`, follow `docs/SPEECH_EDIT.md`: prepare the
+hash-bound baseline plan, inspect the transcript, add only defensible semantic
+cuts (false starts, superseded repeats, filler/noise), apply it with
+`dl2 speech-edit`, update any affected `Chunk.words` / `SfxEvent.word` indices
+from the artifact map, then run `dl2 check`. Do not ask the author to approve
+the cut plan. Preserve the raw recording in `data/recordings/`.
+
+`speech_edit.json` is evidence, not a checkpoint. A stale input hash or a plan
+that removes the entire result is a hard failure. A cut that splits a word or
+lacks quiet guarded boundaries is never forced: retain that fragment and
+record it in `resolution.skipped_cuts`. A failed post-render join-continuity
+check blocks the whole bundle; remove/refine that cut and retry. The agent may
+automatically refine its plan, but uncertain speech stays. Stop and ask only
+when the fix requires new wording, a re-record, or a genuine change of
+meaning/product claim; those are not speech edits.
 
 ## Reel defaults
 
@@ -103,7 +141,12 @@ Agent routing:
   failure, contrast, funny situation) — else rewrite/re-record before any
   visual polish.
 - **Standalone:** no "а ещё / теперь / можно…" openings, no dependency on a
-  prior reel.
+  prior reel. Before rendering, persist a one-sentence `standalone_story`
+  contract: the hook names the product/situation, the middle contains one causal
+  turn, and the ending resolves it. A numbered episode must still pass this gate.
+- **No internal edit labels:** `REEL 01`, `REEL 02`, `VERSION B`, production ids,
+  and similar workflow labels never appear on screen unless the user explicitly
+  requested a public serialized identity.
 - **Voice energy:** flat, disengaged VO is a re-record issue; visual edits
   can't hide it.
 - **Motion floor:** no static screenshot run over ~3s — `ken_burns`,
@@ -199,7 +242,8 @@ Safe to apply without asking (PLAN_STUDIO_V2 §2.2): clear typos; `size`,
 **only if the new path exists in `data/`**; wiring an existing asset;
 creating/editing HyperFrames assets; re-rendering drafts; running review.
 
-Stop and ask the user (§2.3): new real footage; final VO or any VO change;
+Stop and ask the user (§2.3): new real footage; new final-VO wording or a
+re-record (automatic speech edit of an existing take is explicitly safe);
 meaning or structure changes (split/merge beats, new chunks/beats);
 word-index re-mappings; contested product claims; a critical asset that
 can't be substituted; reviewer demands a 6th iteration.
@@ -225,11 +269,17 @@ can't be substituted; reviewer demands a 6th iteration.
   music present and mixed, VO joins clean, no visual glitches, text inside
   safe zones, real product visuals where promised, deliberate ending,
   thumbnail QA for YouTube packaging.
+- Before the final handoff, after the artifact/package is ready, or when a meaningful production run is stopped,
+  spawn `devlog-reflector` once. Reflection is a non-blocking process audit,
+  separate from blind artifact review. It compares target vs actual wall and
+  human time, saves a timestamped report under `data/review/reflections/`, and
+  proposes at most three changes for the next run.
 
 ## Quality rules
 
-`common/quality/` holds the VQ-* catalog (sync, audio, motion, hook, safe
-zones, ending, real-product proof, resolution, word indices, assets).
+`common/quality/` holds the VQ-* catalog (sync, audio, motion, hook,
+long-form story, safe zones, ending, real-product proof, resolution, word
+indices, assets).
 Mechanical parts of VQ-SYNC/VQ-RES/VQ-WORDS/VQ-ASSET are enforced in code
 (`common/dlstudio/src/dlstudio/check/`); the rest is judgment, checked
 against the rule files — never assumed from "looks fine". Unverified ≠ pass.
@@ -242,6 +292,8 @@ against the rule files — never assumed from "looks fine". Unverified ≠ pass.
   `data/infographics/*` outputs unless the user wants assets versioned.
 - Don't invent file paths for `src` changes — Glob/Read first (VQ-ASSET).
 - Don't invent `dl2` commands or flags — `dl2 --help` is the surface.
+- Don't accept free-form capture notes as proof of method or state, and don't
+  satisfy a real-time gameplay request with frame-stepped DevAPI output.
 - Don't reuse a feedback verdict whose `artifact_sha256` no longer matches.
 - Don't loop improve iterations past the cap without checking in.
 - Don't touch `common/dlstudio` internals for content work — engine changes
@@ -252,5 +304,8 @@ against the rule files — never assumed from "looks fine". Unverified ≠ pass.
 - `docs/QUICKSTART_V2.md` — full draft path (commands + output paths)
 - `docs/ARCHITECTURE_V2.md` — engine contract and phase status
 - `docs/PLAN_STUDIO_V2.md` — production plan, safe-fix/stop rules
+- `docs/LONGFORM_DEVLOG_SPEC.md` — mandatory story, montage, presentation, and review contract for `kind=devlog`
+- `docs/LONGFORM_DEVLOG_AUDIT_2026-07-26.md` — current-state critique, competitor comparison, and evidence-backed acceptance bar
+- `docs/PLAN_NEXT_LONGFORM_DEVLOG.md` — phased plan and exit criteria for the next Not a Trolley Problem episode
 - `.claude/agents/` — canonical workspace agent templates
 - `<project>/.claude/agents/` — project-local copies/overrides

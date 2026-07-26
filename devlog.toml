@@ -2,6 +2,12 @@
 
 default_edit = "neotolis_diary.edits.youtube"
 
+[v2]
+
+[v2.final]
+width = "1080p"
+quality = "upload"
+
 [defaults]
 width = "540p"
 quality = "draft"

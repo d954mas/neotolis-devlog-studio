@@ -187,6 +187,29 @@ For vertical reels/shorts, add a short-form audit:
 - **Motion floor:** any static screenshot >3s without Ken Burns, crop change, insert, or moving surrounding elements
 - **Captions:** `subtitles=True` present on spoken beats, and phrase captions land inside the safe zone
 
+For a product-first long-form devlog, read `data/review/review_pack.json`,
+`data/plan/story_map.json`, and `data/review/longform_preflight.json`. Add a
+long-form audit:
+- Run the exact MP4 through `tools/devlog_reference_lab/analyze.py
+  <artifact> --out <production>/data/review/longform_metrics --skip-sheets`
+  unless an exact-hash report already exists. Compare the diagnostic scene
+  cadence to `data/research/zerah_games/analysis/summary.csv`; never treat it
+  as a mandatory cut count.
+- State the macro question you inferred from the video before reading its
+  declared value, then compare them.
+- List every mini-arc you could identify, with exact failure and payoff
+  timestamps. An authored arc you cannot identify without production notes
+  is a clarity failure.
+- Check that the cold open shows failure and payoff by 0:08 and speaks the
+  episode promise by 0:15.
+- Name the longest master-shot or same-visual-mode plateau and whether it
+  contains a real semantic change every 3–6 seconds.
+- Check for an honest author reaction/opinion/cost every 45–75 seconds.
+- Verify the ending answers the macro question and leaves at most one next
+  open loop.
+- Do not return `ship` when strict long-form preflight is missing/failing,
+  an arc lacks visible proof, or the exact video contradicts its story map.
+
 ### Output
 ```
 ### <output name>.mp4 · Full Video Review
@@ -219,6 +242,19 @@ For vertical reels/shorts, add a short-form audit:
 - Screencast risk: pass/fail, longest static run <Xs>
 - Motion floor: pass/fail
 - Captions: pass/fail
+
+**Long-form devlog gate** (if `kind=devlog`):
+- Inferred macro question: <question>
+- Declared macro question match: pass/fail
+- Cold-open failure/payoff by 0:08: pass/fail
+- Episode promise by 0:15: pass/fail
+- Identifiable mini-arcs: <N>/<declared N>
+- Arc evidence: <arc id · failure timestamp · payoff timestamp · verdict>
+- Longest semantic plateau: <range/duration>
+- Diagnostic scene cadence: <events/min, median gap, benchmark comparison>
+- Author-reaction cadence: pass/fail
+- Ending resolves macro question: pass/fail
+- Strict gate: pass/fail/unverified
 
 **Top 5 improvements ranked by ROI:**
 1. **<severity> · mech/re-record/re-design · effort <X>** · <one-line>

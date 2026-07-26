@@ -36,6 +36,12 @@ Use evidence before conclusions:
 
 Mark estimates as estimates. Do not invent exact durations.
 
+When the user states production budgets, compare them explicitly with the run.
+For the current long-form baseline, record both 2–3 hours total wall time and
+20–30 minutes of human time for recording plus review. Agent logs cannot infer
+human time reliably; mark it unknown unless the user or recording timestamps
+provide it.
+
 ## Tool Timing Audit
 
 Before writing the reflection, inspect tool usage and waits. Prefer the bundled skill script:
@@ -50,6 +56,10 @@ If the active thread id is known:
 python .agents/skills/devlog-reflection/scripts/analyze_rollout.py --thread-id <thread-id> --children
 ```
 
+Prefer the exact root thread id. When falling back to `--cwd`, verify the
+rollout path printed at the top; the analyzer selects a root task and
+`--children` adds delegated work.
+
 Use this data explicitly:
 
 - total counts by tool: shell, patches, image previews, browser/Node REPL, web search, image generation, subagent spawn/wait
@@ -59,6 +69,8 @@ Use this data explicitly:
 - parent `wait_agent` time versus child-agent tool time
 - aborted turns and context compactions
 - user feedback loops and repeated corrections; treat them as evidence for missed gates or preference calibration
+- noisiest calls by output characters/lines; distinguish context-heavy image
+  payloads and broad listings from genuinely slow commands
 
 If rollout logs are unavailable, say so and fall back to file mtimes and visible conversation evidence.
 
@@ -98,6 +110,14 @@ Find problems in these areas:
    - owner: agent / skill / CLI / Studio / template / checklist
 6. Turn repeated user corrections into explicit gates with owners.
 7. Preserve positive patterns that should become defaults.
+8. Save the finished report to
+   `<project>/data/review/reflections/<YYYY-MM-DDTHH-MM-SS>_<edit>.md` with
+   rollout/thread id, output artifact path and SHA-256, target budgets, and
+   actual known wall/human time.
+9. Keep one-run observations local to that report. Promote only deterministic
+   missed gates, repeated problems, or clearly large measured wins. Route
+   engine work to `docs/issues/`; do not self-edit the pipeline from a single
+   preference correction.
 
 ## Output
 
@@ -140,4 +160,9 @@ Use this structure:
 <smallest change to test on the next video>
 ```
 
-Keep it actionable. Avoid generic advice like "communicate better" or "improve quality"; name the exact checklist, agent prompt, CLI command, or Studio feature to change.
+Rank no more than three changes for the next run. Keep it actionable. Avoid generic advice like "communicate better" or "improve quality"; name the exact checklist, agent prompt, CLI command, or Studio feature to change.
+
+This is the immediate production reflection. A separate 48-hour / 7-day
+follow-up can compare YouTube retention/engagement with Neotolis Diary posts,
+clicks, and wishlist movement; do not mix those outcome signals with pipeline
+speed.

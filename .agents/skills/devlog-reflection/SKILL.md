@@ -14,6 +14,8 @@ Reflect on a completed or interrupted devlog production run using evidence first
 3. Prefer workflow fixes over vague advice. Name the agent, skill, script, UI, command, or checklist that should change.
 4. Preserve what worked. Fast paths matter as much as failures.
 5. Do not blame the user for missing context. If the process needed context, propose a capture step or checklist.
+6. Compare the run with the user's stated budgets. For the current long-form devlog baseline, track both **2–3 hours total wall time** and **20–30 minutes of human time** for recording plus review.
+7. Keep quality review and process reflection separate: `video-reviewer` judges the artifact; this skill diagnoses how the artifact was produced.
 
 ## Evidence To Gather
 
@@ -39,6 +41,11 @@ Run this before writing bottlenecks when a Codex rollout file is available:
 python .agents/skills/devlog-reflection/scripts/analyze_rollout.py --cwd C:\projects\devlogs --children
 ```
 
+Prefer an exact root thread id when it is available. `--cwd` deliberately
+selects the newest root task rather than a newer child agent, then `--children`
+adds the delegated work. Always verify the printed rollout path before using
+the report as evidence.
+
 Useful variants:
 
 ```powershell
@@ -54,6 +61,9 @@ Use the report to answer:
 - Treat `orchestration/session gap` separately from productive work. It usually means an interrupted turn, resume, approval gap, or wrapper delay, not that the underlying tool was slow.
 - Which subagents ran, how long the parent waited for them, and whether their own tool usage was heavy or mostly model reasoning.
 - Whether repeated tool calls indicate a missing pipeline primitive, for example repeated website capture, repeated Hyperframes lint/render, or repeated thumbnail compositing.
+- Which calls produced the most output characters/lines. Treat a large image
+  payload or recursive file listing as context cost, not command wall time;
+  recommend a narrower query or preview when the extra output was unused.
 
 ## User Feedback Loop Audit
 
@@ -101,6 +111,22 @@ Do not pass this correction history to `video-reviewer`, `vo-reviewer`, or `thum
 7. **Next Experiment**
    - Propose the smallest next-run experiment to validate the improvements.
 
+8. **Persist And Promote Carefully**
+   - Save the reflection to
+     `<project>/data/review/reflections/<YYYY-MM-DDTHH-MM-SS>_<edit>.md`.
+   - Include the exact rollout/thread id, output artifact path and SHA-256 when
+     an artifact exists, target budgets, and actual known human/wall time.
+   - Keep one-run observations in the reflection. Promote a change into an
+     owning skill/checklist only when it is a deterministic missed gate, has
+     repeated, or has an obviously large measured payoff. Route engine work to
+     `docs/issues/`; do not silently redesign the pipeline from one run.
+
+9. **Follow Up On Outcome**
+   - Immediate reflection covers production speed and artifact quality.
+   - A separate 48-hour / 7-day follow-up may compare YouTube retention and
+     engagement with Neotolis Diary posts, clicks, and wishlist movement. Do
+     not treat production telemetry as proof that the video performed well.
+
 ## Output Format
 
 Use this structure:
@@ -140,4 +166,4 @@ Use this structure:
 <one concrete experiment>
 ```
 
-Keep the final reflection concise enough to act on. Move detailed logs into an appendix only if the user asks.
+Rank at most three improvements for the next run. Keep the final reflection concise enough to act on. Move detailed logs into an appendix only if the user asks.
