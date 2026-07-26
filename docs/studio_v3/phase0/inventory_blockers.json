@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "status": "BLOCKED_FAIL_CLOSED",
+  "stage": "real_workspace_before_manifest",
+  "reason": "Python process denied read access in Codex sandbox",
+  "resolved_parse_compatibility": [
+    "UTF-8 BOM in legacy JSON",
+    "UTF-8 BOM in legacy Python"
+  ],
+  "unreadable_paths": [
+    "trolley_devlog/data/audio/b01_vo_padded.wav",
+    "trolley_devlog/data/audio/b02_vo_padded.wav",
+    "trolley_devlog/data/audio/b03_vo_padded.wav",
+    "trolley_devlog/data/audio/b04_vo_padded.wav",
+    "trolley_devlog/data/audio/b05_vo_padded.wav",
+    "trolley_devlog/data/audio/b06_vo_padded.wav",
+    "trolley_devlog/data/audio/b07_vo_padded.wav",
+    "trolley_devlog/data/scratch/b01_short_scratch_tts.wav",
+    "trolley_devlog/data/scratch/b02_short_scratch_tts.wav",
+    "trolley_devlog/data/scratch/b03_short_scratch_tts.wav",
+    "trolley_devlog/data/scratch/b04_short_scratch_tts.wav",
+    "trolley_devlog/data/scratch/b05_short_scratch_tts.wav",
+    "trolley_devlog/data/scratch/b06_short_scratch_tts.wav",
+    "trolley_devlog/data/scratch/b07_short_scratch_tts.wav"
+  ],
+  "safe_resolution": "Run the identical dry-run command as the owning user; do not omit or fabricate these entries."
+}

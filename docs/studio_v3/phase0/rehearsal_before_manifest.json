@@ -1,0 +1,57 @@
+{
+  "entries": [
+    {
+      "action": "MIGRATE",
+      "bytes": 35,
+      "kind": "file",
+      "path": "demo/product.toml",
+      "project_disposition": "MIGRATE_ACTIVE",
+      "project_root": "demo",
+      "project_rule_id": "active_product",
+      "rule_id": "project_production_toml",
+      "sha256": "fe0274b1f4c80d38540e3855186501cbb5eeb50d251b76fd25a5ae1bab2cc4d2",
+      "source_media": false,
+      "target_owner": "constraints/application"
+    },
+    {
+      "action": "ARCHIVE",
+      "bytes": 74,
+      "kind": "file",
+      "path": "demo/recording_payload.fixture",
+      "project_disposition": "MIGRATE_ACTIVE",
+      "project_root": "demo",
+      "project_rule_id": "active_product",
+      "rule_id": "unknown_artifact_preserve",
+      "sha256": "8f663c74a14e565d39d9a42ae8d439a2b52a05cee1832401cdb0672384959a95",
+      "source_media": false,
+      "target_owner": "archive/unknown_preserved"
+    }
+  ],
+  "generated_at": "2026-07-26T12:15:22.068119+00:00",
+  "project_roots": [
+    {
+      "disposition": "MIGRATE_ACTIVE",
+      "name": "demo",
+      "rule_id": "active_product"
+    }
+  ],
+  "rules_sha256": "e81b7e9666223ea9a23cda57e77cd28d9115d3b573574813334a7f1462c9744a",
+  "schema_version": 1,
+  "summary": {
+    "ambiguous": 0,
+    "by_action": {
+      "ARCHIVE": 1,
+      "MIGRATE": 1
+    },
+    "by_project_disposition": {
+      "MIGRATE_ACTIVE": 2
+    },
+    "bytes": 109,
+    "entries": 2,
+    "parse_failures": 0,
+    "projects": 1,
+    "source_media_bytes": 0,
+    "unmatched": 0
+  },
+  "workspace": "C:\\projects\\devlogs\\tools\\studio_v3_migrate\\tests\\fixtures\\rehearsal_workspace"
+}

@@ -1,0 +1,13 @@
+{
+  "clone_copy_bytes": 0,
+  "clone_policy": "hardlink_then_verify",
+  "destination_free_bytes": 152352043008,
+  "hardlinks_are_backup": false,
+  "required_additional_peak_bytes": 218,
+  "restore_rehearsal_copy_bytes": 109,
+  "schema_version": 1,
+  "source_media_bytes": 0,
+  "sufficient": true,
+  "verified_backup_copy_bytes": 109,
+  "workspace_bytes": 109
+}
