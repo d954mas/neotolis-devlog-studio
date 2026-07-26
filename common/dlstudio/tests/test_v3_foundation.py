@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from dlstudio.application.api import ProductionContext
+from dlstudio.assets.api import BlobRef
 from dlstudio.foundation.api import (
     CanonicalEncodingError,
     CasConflict,
@@ -22,7 +23,6 @@ from dlstudio.foundation.api import (
     normalize_logical_path,
 )
 from dlstudio.persistence import (
-    ObjectRef,
     OperationTransaction,
     ProductionRepository,
 )
@@ -111,12 +111,12 @@ def test_semantic_mappings_are_defensively_frozen(tmp_path: Path) -> None:
     values["ffmpeg_build"] = "two"
     assert custom.values["ffmpeg_build"] == "one"
 
-    records: dict[str, ObjectRef] = {}
+    records: dict[str, BlobRef] = {}
     root = persistence_api.ProductionStateRoot("fixture.reel", 0, records)
-    records["late"] = ObjectRef("0" * 64, 0)
+    records["late"] = BlobRef("0" * 64, 0)
     assert "late" not in root.records
     with pytest.raises(TypeError):
-        root.records["late"] = ObjectRef("0" * 64, 0)  # type: ignore[index]
+        root.records["late"] = BlobRef("0" * 64, 0)  # type: ignore[index]
 
 
 def test_logical_paths_are_portable() -> None:
@@ -155,7 +155,7 @@ def test_object_store_and_head_cas(tmp_path: Path) -> None:
 
 def test_root_rejects_dangling_object(tmp_path: Path) -> None:
     repo = _repository(tmp_path)
-    missing = ObjectRef("0" * 64, 1)
+    missing = BlobRef("0" * 64, 1)
     with pytest.raises(Exception, match="missing or wrong-sized"):
         repo.update_records({"missing": missing}, expected_revision=0)
     assert repo.read_head() is None
@@ -198,7 +198,11 @@ def test_commit_rejects_corrupt_preexisting_immutable_root(
     repo.roots_path.mkdir(parents=True)
     (repo.roots_path / f"{root_hash}.json").write_bytes(b"corrupt")
     with pytest.raises(CorruptObject, match="collision"):
-        repo._commit_root(root, expected_revision=0, operation_key=None)
+        repo._commit_root(
+            root,
+            expected_revision=0,
+            allowed_reserved_keys=frozenset(),
+        )
     assert repo.read_head() is None
 
 
@@ -324,6 +328,19 @@ def test_operation_mutation_requires_live_lease(tmp_path: Path) -> None:
     assert not tx.stage.exists()
 
 
+def test_distinct_operations_can_execute_in_parallel(tmp_path: Path) -> None:
+    repo = _repository(tmp_path)
+    first = OperationTransaction(repo, operation_id="1" * 64, inputs={})
+    second = OperationTransaction(repo, operation_id="2" * 64, inputs={})
+    first.prepare()
+    second._lease.timeout = 0.2
+    second.prepare()
+    assert first._lease.held
+    assert second._lease.held
+    second.close()
+    first.close()
+
+
 def test_failed_operation_commit_releases_lease_and_reserves_namespace(
     tmp_path: Path,
 ) -> None:
@@ -333,7 +350,7 @@ def test_failed_operation_commit_releases_lease_and_reserves_namespace(
     with pytest.raises(ValueError, match="namespace"):
         tx.commit(
             outputs={},
-            record_updates={"operation:" + "d" * 64: ObjectRef("0" * 64, 0)},
+            record_updates={"operation:" + "d" * 64: BlobRef("0" * 64, 0)},
             expected_revision=0,
         )
     with OperationTransaction(
@@ -343,7 +360,12 @@ def test_failed_operation_commit_releases_lease_and_reserves_namespace(
 
     with pytest.raises(ValueError, match="namespace"):
         repo.update_records(
-            {"operation:" + "d" * 64: ObjectRef("0" * 64, 0)},
+            {"operation:" + "d" * 64: BlobRef("0" * 64, 0)},
+            expected_revision=0,
+        )
+    with pytest.raises(ValueError, match="namespace"):
+        repo.update_records(
+            {"assets:index": repo.objects.put_bytes(b"fake")},
             expected_revision=0,
         )
     assert not hasattr(repo, "commit_root")
@@ -367,11 +389,11 @@ def test_internal_root_transition_cannot_remove_operation_record(
         },
         committed_head.root_hash,
     )
-    with pytest.raises(ValueError, match="namespace transition"):
+    with pytest.raises(ValueError, match="reserved record transition"):
         repo._commit_root(
             stripped,
             expected_revision=1,
-            operation_key=None,
+            allowed_reserved_keys=frozenset(),
         )
     assert repo.read_head() == committed_head
 
@@ -381,12 +403,12 @@ def test_operation_snapshots_adversarial_output_mapping(
 ) -> None:
     repo = _repository(tmp_path)
     good = repo.objects.put_bytes(b"good")
-    missing = ObjectRef("0" * 64, 1)
+    missing = BlobRef("0" * 64, 1)
 
-    class ChangingOutputs(Mapping[str, ObjectRef]):
+    class ChangingOutputs(Mapping[str, BlobRef]):
         calls = 0
 
-        def __getitem__(self, key: str) -> ObjectRef:
+        def __getitem__(self, key: str) -> BlobRef:
             self.calls += 1
             return good if self.calls == 1 else missing
 

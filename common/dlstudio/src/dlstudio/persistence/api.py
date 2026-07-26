@@ -22,6 +22,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, BinaryIO
 
+from dlstudio.assets.api import BlobRef
 from dlstudio.foundation.api import (
     CasConflict,
     CorruptObject,
@@ -29,6 +30,15 @@ from dlstudio.foundation.api import (
     canonical_bytes,
     canonical_hash,
 )
+
+_RESERVED_RECORD_PREFIXES = ("operation:", "asset_revision:")
+_RESERVED_RECORD_KEYS = frozenset({"assets:index"})
+
+
+def _reserved_record(key: str) -> bool:
+    return key in _RESERVED_RECORD_KEYS or key.startswith(
+        _RESERVED_RECORD_PREFIXES
+    )
 
 
 def _fsync_dir(path: Path) -> None:
@@ -56,33 +66,16 @@ def _atomic_write(path: Path, data: bytes) -> None:
         tmp.unlink(missing_ok=True)
 
 
-@dataclass(frozen=True, slots=True)
-class ObjectRef:
-    sha256: str
-    size: int
-
-    def __post_init__(self) -> None:
-        if len(self.sha256) != 64 or any(
-            char not in "0123456789abcdef" for char in self.sha256
-        ):
-            raise ValueError("invalid sha256")
-        if self.size < 0:
-            raise ValueError("negative object size")
-
-    def as_payload(self) -> dict[str, object]:
-        return {"sha256": self.sha256, "size": self.size}
-
-
 class ObjectStore:
     def __init__(self, root: Path, staging_root: Path) -> None:
         self.root = root
         self.staging_root = staging_root
 
-    def path_for(self, ref: ObjectRef) -> Path:
+    def path_for(self, ref: BlobRef) -> Path:
         return self.root / ref.sha256
 
-    def put_bytes(self, data: bytes) -> ObjectRef:
-        ref = ObjectRef(hashlib.sha256(data).hexdigest(), len(data))
+    def put_bytes(self, data: bytes) -> BlobRef:
+        ref = BlobRef(hashlib.sha256(data).hexdigest(), len(data))
         target = self.path_for(ref)
         if target.exists():
             self.verify(ref)
@@ -107,7 +100,7 @@ class ObjectStore:
         finally:
             stage.unlink(missing_ok=True)
 
-    def ingest_file(self, source: Path) -> ObjectRef:
+    def ingest_file(self, source: Path) -> BlobRef:
         hasher = hashlib.sha256()
         size = 0
         source = source.resolve()
@@ -121,7 +114,7 @@ class ObjectStore:
                     dst.write(chunk)
                 dst.flush()
                 os.fsync(dst.fileno())
-            ref = ObjectRef(hasher.hexdigest(), size)
+            ref = BlobRef(hasher.hexdigest(), size)
             target = self.path_for(ref)
             target.parent.mkdir(parents=True, exist_ok=True)
             if target.exists():
@@ -134,11 +127,11 @@ class ObjectStore:
         finally:
             stage.unlink(missing_ok=True)
 
-    def read(self, ref: ObjectRef) -> bytes:
+    def read(self, ref: BlobRef) -> bytes:
         self.verify(ref)
         return self.path_for(ref).read_bytes()
 
-    def verify(self, ref: ObjectRef) -> None:
+    def verify(self, ref: BlobRef) -> None:
         path = self.path_for(ref)
         if not path.is_file() or path.stat().st_size != ref.size:
             raise CorruptObject(f"missing or wrong-sized object {ref.sha256}")
@@ -154,7 +147,7 @@ class ObjectStore:
 class ProductionStateRoot:
     production_id: str
     revision: int
-    records: Mapping[str, ObjectRef] = field(default_factory=dict)
+    records: Mapping[str, BlobRef] = field(default_factory=dict)
     parent_root_hash: str | None = None
 
     def __post_init__(self) -> None:
@@ -374,7 +367,7 @@ class ProductionRepository:
             production_id=str(payload["production_id"]),
             revision=int(payload["revision"]),
             records={
-                key: ObjectRef(
+                key: BlobRef(
                     sha256=str(value["sha256"]), size=int(value["size"])
                 )
                 for key, value in payload["records"].items()
@@ -399,7 +392,7 @@ class ProductionRepository:
         root: ProductionStateRoot,
         *,
         expected_revision: int,
-        operation_key: str | None,
+        allowed_reserved_keys: frozenset[str],
     ) -> HeadRef:
         if root.production_id != self.production_id:
             raise ValueError("wrong production id")
@@ -431,33 +424,34 @@ class ProductionRepository:
                     "new root parent does not match the canonical head"
                 )
             current_root = self.read_root(current)
-            previous_operations = {
+            previous_reserved = {
                 key: ref
                 for key, ref in current_root.records.items()
-                if key.startswith("operation:")
+                if _reserved_record(key)
             }
-            next_operations = {
+            next_reserved = {
                 key: ref
                 for key, ref in root.records.items()
-                if key.startswith("operation:")
+                if _reserved_record(key)
             }
-            if operation_key is None:
-                if next_operations != previous_operations:
-                    raise ValueError(
-                        "operation namespace transition requires its owner"
+            changed_reserved = {
+                key
+                for key in previous_reserved.keys() | next_reserved.keys()
+                if previous_reserved.get(key) != next_reserved.get(key)
+            }
+            if changed_reserved != allowed_reserved_keys:
+                raise ValueError(
+                    "reserved record transition does not match its owner"
+                )
+            for key in changed_reserved:
+                if key.startswith(("operation:", "asset_revision:")) and (
+                    key in previous_reserved or key not in next_reserved
+                ):
+                    raise CasConflict(
+                        f"immutable reserved record cannot change: {key}"
                     )
-            else:
-                expected_operations = dict(previous_operations)
-                if operation_key in expected_operations:
-                    raise CasConflict("operation record is already committed")
-                operation_ref = next_operations.get(operation_key)
-                if operation_ref is None:
-                    raise ValueError("owning operation record is missing")
-                expected_operations[operation_key] = operation_ref
-                if next_operations != expected_operations:
-                    raise ValueError(
-                        "operation may only add its own canonical record"
-                    )
+                if key == "assets:index" and key not in next_reserved:
+                    raise ValueError("asset index cannot be removed")
             head = {
                 "schema": self.HEAD_SCHEMA,
                 "version": 1,
@@ -474,28 +468,29 @@ class ProductionRepository:
 
     def update_records(
         self,
-        records: Mapping[str, ObjectRef],
+        records: Mapping[str, BlobRef],
         *,
         expected_revision: int,
     ) -> HeadRef:
         return self._update_records(
             records,
             expected_revision=expected_revision,
-            allow_operation_records=False,
+            allowed_reserved_keys=frozenset(),
         )
 
     def _update_records(
         self,
-        records: Mapping[str, ObjectRef],
+        records: Mapping[str, BlobRef],
         *,
         expected_revision: int,
-        allow_operation_records: bool,
+        allowed_reserved_keys: frozenset[str],
     ) -> HeadRef:
         snapshot = dict(records)
-        if not allow_operation_records and any(
-            key.startswith("operation:") for key in snapshot
-        ):
-            raise ValueError("operation record namespace is reserved")
+        requested_reserved = frozenset(
+            key for key in snapshot if _reserved_record(key)
+        )
+        if requested_reserved != allowed_reserved_keys:
+            raise ValueError("reserved record namespace is owned")
         current_head = self.read_head()
         actual_revision = 0 if current_head is None else current_head.revision
         if actual_revision != expected_revision:
@@ -514,11 +509,7 @@ class ProductionRepository:
                 None if current_head is None else current_head.root_hash,
             ),
             expected_revision=expected_revision,
-            operation_key=(
-                next(iter(key for key in snapshot if key.startswith("operation:")))
-                if allow_operation_records
-                else None
-            ),
+            allowed_reserved_keys=allowed_reserved_keys,
         )
 
 
@@ -549,9 +540,13 @@ class OperationTransaction:
             repository.lock_root / f"operation.{operation_id}.writer",
             timeout=30.0,
         )
+        self._gc_barrier = WriterLease(
+            repository.lock_root / "gc.barrier",
+            timeout=30.0,
+        )
         self._prepared = False
-        self._committed_outputs: dict[str, ObjectRef] | None = None
-        self._committed_updates: dict[str, ObjectRef] | None = None
+        self._committed_outputs: dict[str, BlobRef] | None = None
+        self._committed_updates: dict[str, BlobRef] | None = None
         self._committed_head: HeadRef | None = None
 
     @property
@@ -580,6 +575,12 @@ class OperationTransaction:
         )
 
     def prepare(self) -> Path:
+        with self._gc_barrier:
+            return self._prepare_after_gc_barrier()
+
+    def _prepare_after_gc_barrier(self) -> Path:
+        """Prepare while the caller already excludes reachability GC."""
+
         if self._lease.held:
             return self.stage
         self._lease.acquire()
@@ -605,7 +606,7 @@ class OperationTransaction:
                         "operation id reused with different committed inputs"
                     )
                 self._committed_outputs = {
-                    key: ObjectRef(
+                    key: BlobRef(
                         sha256=str(value["sha256"]), size=int(value["size"])
                     )
                     for key, value in committed["outputs"].items()
@@ -613,7 +614,7 @@ class OperationTransaction:
                 for ref in self._committed_outputs.values():
                     self.repository.objects.verify(ref)
                 self._committed_updates = {
-                    key: ObjectRef(
+                    key: BlobRef(
                         sha256=str(value["sha256"]), size=int(value["size"])
                     )
                     for key, value in committed["record_updates"].items()
@@ -653,7 +654,7 @@ class OperationTransaction:
             self._prepared = True
             return self.stage
         except BaseException:
-            self._lease.release()
+            self._release_leases()
             raise
 
     def _prepare_stage(self) -> None:
@@ -682,7 +683,7 @@ class OperationTransaction:
             ).encode("utf-8"),
         )
 
-    def publish_file(self, path: Path) -> ObjectRef:
+    def publish_file(self, path: Path) -> BlobRef:
         if (
             not self._prepared
             or not self._lease.held
@@ -697,29 +698,55 @@ class OperationTransaction:
         return self.repository.objects.ingest_file(resolved)
 
     @property
-    def committed_outputs(self) -> Mapping[str, ObjectRef] | None:
+    def committed_outputs(self) -> Mapping[str, BlobRef] | None:
         if self._committed_outputs is None:
             return None
         return MappingProxyType(dict(self._committed_outputs))
 
+    @property
+    def committed_head(self) -> HeadRef | None:
+        return self._committed_head
+
+    @property
+    def committed_record_updates(self) -> Mapping[str, BlobRef] | None:
+        if self._committed_updates is None:
+            return None
+        return MappingProxyType(dict(self._committed_updates))
+
     def commit(
         self,
         *,
-        outputs: Mapping[str, ObjectRef],
-        record_updates: Mapping[str, ObjectRef] | None = None,
+        outputs: Mapping[str, BlobRef],
+        record_updates: Mapping[str, BlobRef] | None = None,
         expected_revision: int,
+    ) -> HeadRef:
+        if record_updates:
+            self._release_leases()
+            raise ValueError(
+                "record namespace updates require their owning repository"
+            )
+        return self._commit_with_records(
+            outputs=outputs,
+            record_updates={},
+            expected_revision=expected_revision,
+            owned_record_keys=frozenset(),
+        )
+
+    def _commit_with_records(
+        self,
+        *,
+        outputs: Mapping[str, BlobRef],
+        record_updates: Mapping[str, BlobRef],
+        expected_revision: int,
+        owned_record_keys: frozenset[str],
     ) -> HeadRef:
         if not self._prepared or not self._lease.held:
             raise RuntimeError("operation lease must be held during commit")
         try:
             output_snapshot = dict(outputs)
-            requested_updates = (
-                {} if record_updates is None else dict(record_updates)
-            )
-            if any(
-                key.startswith("operation:") for key in requested_updates
-            ):
-                raise ValueError("operation record namespace is reserved")
+            requested_updates = dict(record_updates)
+            if frozenset(requested_updates) != owned_record_keys:
+                raise ValueError("record update set differs from owner capability")
             if self._committed_outputs is not None:
                 assert self._committed_updates is not None
                 assert self._committed_head is not None
@@ -762,7 +789,9 @@ class OperationTransaction:
             head = self.repository._update_records(
                 updates,
                 expected_revision=expected_revision,
-                allow_operation_records=True,
+                allowed_reserved_keys=frozenset(
+                    {self.root_record_key, *owned_record_keys}
+                ),
             )
             self._committed_outputs = output_snapshot
             self._committed_updates = dict(requested_updates)
@@ -771,7 +800,7 @@ class OperationTransaction:
                 shutil.rmtree(self.stage)
             return head
         finally:
-            self._lease.release()
+            self._release_leases()
 
     def abandon(self) -> None:
         try:
@@ -780,11 +809,14 @@ class OperationTransaction:
             if self.stage.is_dir() and self._committed_outputs is None:
                 shutil.rmtree(self.stage)
         finally:
-            self._lease.release()
+            self._release_leases()
 
     def close(self) -> None:
         """Release execution ownership but preserve staging for resume."""
 
+        self._release_leases()
+
+    def _release_leases(self) -> None:
         self._lease.release()
 
     def __enter__(self) -> "OperationTransaction":

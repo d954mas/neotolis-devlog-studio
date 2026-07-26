@@ -1,0 +1,18 @@
+{
+  "production_root": "C:/projects/devlogs/not_a_trolley_problem/devlogs/2026_07_17_devlog_01",
+  "records": [],
+  "schema": "studio_v3.asset_translation_plan",
+  "sources": {
+    "catalog": false,
+    "registry": false
+  },
+  "summary": {
+    "blocked": 0,
+    "required_copy_bytes": 0,
+    "total": 0,
+    "translatable": 0,
+    "unique_source_bytes": 0,
+    "unique_source_files": 0
+  },
+  "version": 1
+}
