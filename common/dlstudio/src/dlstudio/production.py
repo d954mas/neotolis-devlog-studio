@@ -17,7 +17,7 @@ import threading
 import tomllib
 from dataclasses import dataclass
 from datetime import date as calendar_date
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from types import ModuleType
 
 
@@ -119,7 +119,7 @@ def load_product_manifest(root_or_file: str | Path) -> ProductManifest:
     if not isinstance(game_root_value, str) or not game_root_value.strip():
         raise ProductionError("game_root must be a non-empty path")
     game_root = Path(game_root_value)
-    if not game_root.is_absolute():
+    if not game_root.is_absolute() and not PureWindowsPath(game_root_value).is_absolute():
         game_root = (root / game_root).resolve()
     sources_raw = _mapping(data.get("sources", {}), "[sources]")
     sources: dict[str, str] = {}
