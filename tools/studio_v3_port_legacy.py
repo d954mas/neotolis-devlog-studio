@@ -561,8 +561,10 @@ def main() -> int:
 
     def register(logical: str) -> str:
         if logical not in paths:
-            digest, _size = _sha(project / logical)
-            paths[logical] = f"asset.{digest[:20]}"
+            normalized = logical.replace("\\", "/").casefold()
+            slug = re.sub(r"[^a-z0-9]+", ".", normalized).strip(".")
+            path_hash = hashlib.sha256(normalized.encode()).hexdigest()[:8]
+            paths[logical] = f"asset.{slug}.{path_hash}"
         return paths[logical]
 
     raster_root = project / "data/v3_port/raster"
@@ -914,7 +916,7 @@ EVIDENCE_OBJECTS = (
 {chr(10).join(evidence_rows)}
 )
 
-ASSETS = (
+MIGRATION_ASSETS = (
 {chr(10).join(asset_rows)}
 )
 
@@ -926,7 +928,6 @@ EDIT = Edit(
     fps_den=1,
     duration_ns={total_ns},
     background={timeline.design.palette.tokens.get("bg", "#000000")!r},
-    assets=ASSETS,
     visuals=(
 {chr(10).join(visual_rows)}
     ),

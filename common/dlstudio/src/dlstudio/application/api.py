@@ -2,6 +2,7 @@
 
 from .context import MachineBindings, ProductionContext, ProductionPaths
 from .assets import IngestAssetCommand, ingest_asset
+from .authoring import compile_production
 from .delivery import (
     LocalDeliveryState,
     deliver_local,
@@ -16,6 +17,7 @@ __all__ = [
     "LocalDeliveryState",
     "ProductionContext",
     "ProductionPaths",
+    "compile_production",
     "deliver_local",
     "ingest_asset",
     "recover_local_delivery",

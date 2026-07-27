@@ -11,13 +11,15 @@ import json
 import math
 import os
 import re
+import runpy
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-from dlstudio.authoring.compiler import compile_edit
-from dlstudio.authoring.loader import load_edit
+from dlstudio.application.api import compile_production
+from dlstudio.persistence.api import ProductionRepository
+from dlstudio.persistence.assets import AssetRepository
 
 
 def _hash(path: Path) -> str:
@@ -456,8 +458,41 @@ def main() -> int:
     package_root = workspace / "common" / "dlstudio" / "src"
     env["PYTHONPATH"] = str(package_root)
     for name, port in ports.items():
-        edit = load_edit(port)
-        timeline = compile_edit(edit)
+        namespace = runpy.run_path(str(port))
+        edit = namespace["EDIT"]
+        migration_assets = namespace["MIGRATION_ASSETS"]
+        repository = ProductionRepository(
+            object_root=work / "repositories" / name / "objects",
+            state_root=work / "repositories" / name / "state",
+            staging_root=work / "repositories" / name / "staging",
+            lock_root=work / "repositories" / name / "locks",
+            production_id=edit.production_id,
+        )
+        assets = AssetRepository(repository)
+        for expected, raw in namespace["EVIDENCE_OBJECTS"]:
+            if repository.objects.put_bytes(raw) != expected:
+                raise RuntimeError("representative evidence hash mismatch")
+        head_revision = 0
+        for bootstrap in migration_assets:
+            logical_source = bootstrap.provenance.logical_source
+            if logical_source is None:
+                raise RuntimeError(
+                    f"representative {bootstrap.asset_id} has no logical source"
+                )
+            result = assets.ingest(
+                port.parent / logical_source,
+                asset_id=bootstrap.asset_id,
+                media=bootstrap.media,
+                provenance=bootstrap.provenance,
+                approval=bootstrap.approval,
+                license=bootstrap.license,
+                expected_revision=head_revision,
+                inspect_media=lambda _path, facts=bootstrap.media: facts,
+            )
+            if result.revision != bootstrap:
+                raise RuntimeError("representative asset migration changed facts")
+            head_revision = result.state_revision
+        timeline = compile_production(edit, assets)
         baseline = json.loads(baseline_paths[name].read_text(encoding="utf-8"))
         for snapshot in timeline.assets:
             logical_source = snapshot.revision.provenance.logical_source

@@ -502,3 +502,7 @@ class AssetIngestPort(Protocol):
         expected_revision: int,
         inspect_media: Callable[[Path], MediaFacts],
     ) -> AssetIngestResult: ...
+
+
+class AssetReadPort(Protocol):
+    def current(self, asset_id: str) -> AssetRevision: ...

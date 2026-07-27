@@ -15,6 +15,7 @@ from types import SimpleNamespace
 import pytest
 
 from _builders import find_system_font
+from dlstudio.application.api import compile_production
 from dlstudio.assets.api import (
     Approval,
     AssetRevision,
@@ -34,9 +35,10 @@ from dlstudio.authoring.api import (
     TextLayer,
     VideoFade,
 )
-from dlstudio.authoring.compiler import compile_edit
+from dlstudio.authoring.api import _compile_resolved as compile_edit
 from dlstudio.foundation.api import canonical_bytes
-from dlstudio.persistence.api import ObjectStore
+from dlstudio.persistence.api import ObjectStore, ProductionRepository
+from dlstudio.persistence.assets import AssetRepository
 from dlstudio.rendering.api import (
     ExecutionFingerprint,
     RenderOptions,
@@ -152,20 +154,46 @@ def test_unreachable_asset_does_not_change_timeline_or_cache_identity(
         "unused.data", unused, MediaFacts(kind="data", format_name="bin")
     )
     base = _edit()
-    with_unused = Edit(
-        production_id=base.production_id,
-        width=base.width,
-        height=base.height,
-        fps_num=base.fps_num,
-        fps_den=base.fps_den,
-        duration_ns=base.duration_ns,
-        background=base.background,
-        assets=(revision,),
-        visuals=base.visuals,
-        standalone_story=base.standalone_story,
-        kind=base.kind,
+    assert compile_edit(base, (revision,)).timeline_id == compile_edit(
+        base
+    ).timeline_id
+
+
+def test_application_resolves_only_assets_used_by_the_edit(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "frame.bin"
+    source.write_bytes(b"x")
+    revision = _asset(
+        "frame.main",
+        source,
+        MediaFacts(kind="image", format_name="raw", width=1, height=1),
     )
-    assert compile_edit(with_unused).timeline_id == compile_edit(base).timeline_id
+
+    class Catalog:
+        requested: list[str] = []
+
+        def current(self, asset_id: str) -> AssetRevision:
+            self.requested.append(asset_id)
+            return revision
+
+    edit = Edit(
+        "fixture.resolve",
+        1,
+        1,
+        1,
+        1,
+        1_000_000_000,
+        "black",
+        visuals=(MediaLayer("frame.main", 0, 1_000_000_000, 0, 0, 0, 1, 1),),
+        standalone_story="The application resolves one exact current asset.",
+    )
+    catalog = Catalog()
+    timeline = compile_production(edit, catalog)
+    assert catalog.requested == ["frame.main"]
+    assert timeline.assets == (
+        rendering_api.AssetSnapshot.from_revision(revision),
+    )
 
 
 def test_canonical_timeline_rejects_surplus_snapshot(tmp_path: Path) -> None:
@@ -223,13 +251,12 @@ def test_canonical_ir_cannot_rebind_revision_ref_to_other_blob(
         fps_den=1,
         duration_ns=1_000_000_000,
         background="black",
-        assets=(revision,),
         visuals=(
             MediaLayer("fixture.media", 0, 1_000_000_000, 0, 0, 0, 1, 1),
         ),
         standalone_story="The exact trusted byte identity remains bound.",
     )
-    wrapped = json.loads(compile_edit(edit).canonical_bytes())
+    wrapped = json.loads(compile_edit(edit, (revision,)).canonical_bytes())
     wrapped["payload"]["assets"][0]["revision"]["blob"] = {
         "sha256": "0" * 64,
         "size": 7,
@@ -503,7 +530,6 @@ def test_text_font_is_path_bound_not_ffmpeg_media_input(tmp_path: Path) -> None:
             fps_den=1,
             duration_ns=500_000_000,
             background="black",
-            assets=(revision,),
             visuals=(
                 TextLayer(
                     "Studio v3",
@@ -519,7 +545,8 @@ def test_text_font_is_path_bound_not_ffmpeg_media_input(tmp_path: Path) -> None:
                 ),
             ),
             standalone_story="Exact-font text appears and resolves.",
-        )
+        ),
+        (revision,),
     )
     result = render(
         timeline,
@@ -557,7 +584,6 @@ def test_text_box_geometry_changes_filtergraph(tmp_path: Path) -> None:
                 fps_den=1,
                 duration_ns=500_000_000,
                 background="black",
-                assets=(revision,),
                 visuals=(
                     TextLayer(
                         "bounded",
@@ -573,7 +599,8 @@ def test_text_box_geometry_changes_filtergraph(tmp_path: Path) -> None:
                     ),
                 ),
                 standalone_story="Text remains inside an exact raster box.",
-            )
+            ),
+            (revision,),
         )
         command = rendering_api._build_command(
             timeline,
@@ -621,7 +648,6 @@ def test_resolved_media_geometry_is_replayed_exactly(tmp_path: Path) -> None:
             fps_den=1,
             duration_ns=500_000_000,
             background="black",
-            assets=(revision,),
             visuals=(
                 MediaLayer(
                     "fixture.frame",
@@ -637,7 +663,8 @@ def test_resolved_media_geometry_is_replayed_exactly(tmp_path: Path) -> None:
                 ),
             ),
             standalone_story="The resolved crop is replayed exactly.",
-        )
+        ),
+        (revision,),
     )
     command = rendering_api._build_command(
         timeline,
@@ -688,7 +715,6 @@ def test_base_track_uses_native_xfade_not_alpha_overlay(tmp_path: Path) -> None:
             fps_den=1,
             duration_ns=2_000_000_000,
             background="black",
-            assets=tuple(revisions),
             visuals=(
                 MediaLayer(
                     revisions[0].asset_id,
@@ -716,7 +742,8 @@ def test_base_track_uses_native_xfade_not_alpha_overlay(tmp_path: Path) -> None:
                 ),
             ),
             standalone_story="A true crossfade joins two exact raster sources.",
-        )
+        ),
+        tuple(revisions),
     )
     command = rendering_api._build_command(
         timeline,
@@ -773,7 +800,6 @@ def test_duck_amount_changes_sidechain_render_graph(tmp_path: Path) -> None:
                 fps_den=1,
                 duration_ns=1_000_000_000,
                 background="black",
-                assets=(revision,),
                 audio=(
                     AudioClip("fixture.tone", 0, 1_000_000_000, role="voice"),
                     AudioClip(
@@ -786,7 +812,8 @@ def test_duck_amount_changes_sidechain_render_graph(tmp_path: Path) -> None:
                 ),
                 duck_amount_db_milli=amount,
                 standalone_story="Voice deterministically ducks the music bed.",
-            )
+            ),
+            (revision,),
         )
         command = rendering_api._build_command(
             timeline,
@@ -843,7 +870,6 @@ def test_invalid_geometry_and_non_base_special_transition_are_rejected() -> None
                 fps_den=1,
                 duration_ns=1,
                 background="black",
-                assets=(source,),
                 visuals=(
                     MediaLayer(
                         source.asset_id,
@@ -865,7 +891,8 @@ def test_invalid_geometry_and_non_base_special_transition_are_rejected() -> None
                     ),
                 ),
                 standalone_story="Impossible geometry cannot enter canonical IR.",
-            )
+            ),
+            (source,),
         )
 
 
@@ -912,7 +939,6 @@ def test_serialized_animations_execute_without_authoring_runtime(
             fps_den=1,
             duration_ns=500_000_000,
             background="black",
-            assets=(revision,),
             visuals=(
                 MediaLayer(
                     revision.asset_id,
@@ -928,7 +954,8 @@ def test_serialized_animations_execute_without_authoring_runtime(
                 ),
             ),
             standalone_story="Serialized animation replays without a DSL resolver.",
-        )
+        ),
+        (revision,),
     )
     replayed = TimelineIR.from_canonical_bytes(timeline.canonical_bytes())
     assert replayed == timeline
@@ -1096,7 +1123,6 @@ def test_delayed_media_starts_at_source_zero(tmp_path: Path) -> None:
             fps_den=1,
             duration_ns=2_000_000_000,
             background="black",
-            assets=(revision,),
             visuals=(
                 MediaLayer(
                     "fixture.video",
@@ -1111,7 +1137,8 @@ def test_delayed_media_starts_at_source_zero(tmp_path: Path) -> None:
                 ),
             ),
             standalone_story="Delayed red-to-blue media begins at source zero.",
-        )
+        ),
+        (revision,),
     )
     output = tmp_path / "delayed.mp4"
     render(
@@ -1197,11 +1224,16 @@ def test_representative_vertical_longform_and_voice_ports_compile(
     for index, path in enumerate(ports):
         namespace = runpy.run_path(str(path))
         edit = namespace["EDIT"]
+        migration_assets = namespace["MIGRATION_ASSETS"]
         evidence_objects = namespace["EVIDENCE_OBJECTS"]
-        store = ObjectStore(
-            tmp_path / f"objects-{index}",
-            tmp_path / f"staging-{index}",
+        repository = ProductionRepository(
+            object_root=tmp_path / f"objects-{index}",
+            state_root=tmp_path / f"state-{index}",
+            staging_root=tmp_path / f"staging-{index}",
+            lock_root=tmp_path / f"locks-{index}",
+            production_id=edit.production_id,
         )
+        store = repository.objects
         published = {
             store.put_bytes(raw)
             for _expected, raw in evidence_objects
@@ -1209,7 +1241,7 @@ def test_representative_vertical_longform_and_voice_ports_compile(
         assert published == {expected for expected, _raw in evidence_objects}
         referenced = {
             ref
-            for revision in edit.assets
+            for revision in migration_assets
             for ref in (
                 *revision.provenance.evidence_refs,
                 *revision.approval.evidence_refs,
@@ -1218,7 +1250,24 @@ def test_representative_vertical_longform_and_voice_ports_compile(
         assert referenced == published
         for ref in referenced:
             store.verify(ref)
-        timelines.append(compile_edit(edit))
+        assets = AssetRepository(repository)
+        head_revision = 0
+        for bootstrap in migration_assets:
+            logical_source = bootstrap.provenance.logical_source
+            assert logical_source is not None
+            result = assets.ingest(
+                path.parent / logical_source,
+                asset_id=bootstrap.asset_id,
+                media=bootstrap.media,
+                provenance=bootstrap.provenance,
+                approval=bootstrap.approval,
+                license=bootstrap.license,
+                expected_revision=head_revision,
+                inspect_media=lambda _path, facts=bootstrap.media: facts,
+            )
+            assert result.revision == bootstrap
+            head_revision = result.state_revision
+        timelines.append(compile_production(edit, assets))
     assert [item.metadata["kind"] for item in timelines] == [
         "reel",
         "devlog",
