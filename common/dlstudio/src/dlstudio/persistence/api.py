@@ -325,10 +325,44 @@ class ProductionRepository:
     def roots_path(self) -> Path:
         return self.state_root / "roots"
 
+    @property
+    def pending_delivery_path(self) -> Path:
+        return self.state_root / "pending_delivery.json"
+
     def writer_lease(self, *, timeout: float = 30.0) -> WriterLease:
         return WriterLease(
             self.lock_root / "production.writer", timeout=timeout
         )
+
+    def read_pending_delivery(self) -> bytes | None:
+        if not self.pending_delivery_path.exists():
+            return None
+        return self.pending_delivery_path.read_bytes()
+
+    def _begin_delivery(
+        self, journal: bytes, *, expected_revision: int
+    ) -> None:
+        """Publish the one delivery journal while the canonical head is stable."""
+
+        with self.writer_lease():
+            if self.pending_delivery_path.exists():
+                raise CasConflict("a delivery is already pending")
+            current = self.read_head()
+            actual = 0 if current is None else current.revision
+            if actual != expected_revision:
+                raise CasConflict(
+                    f"expected head revision {expected_revision}, got {actual}"
+                )
+            _atomic_write(self.pending_delivery_path, journal)
+
+    def _finish_delivery(self, journal: bytes) -> None:
+        """Remove the exact journal after its receipt is canonical."""
+
+        with self.writer_lease():
+            if self.read_pending_delivery() != journal:
+                raise CasConflict("pending delivery changed")
+            self.pending_delivery_path.unlink()
+            _fsync_dir(self.pending_delivery_path.parent)
 
     def read_head(self) -> HeadRef | None:
         if not self.head_path.exists():
@@ -391,6 +425,7 @@ class ProductionRepository:
         *,
         expected_revision: int,
         allowed_reserved_keys: frozenset[str],
+        allow_pending_delivery: bool = False,
     ) -> HeadRef:
         if root.production_id != self.production_id:
             raise ValueError("wrong production id")
@@ -410,6 +445,13 @@ class ProductionRepository:
                 f"immutable production root collision at {root_hash}"
             )
         with self.writer_lease():
+            if (
+                self.pending_delivery_path.exists()
+                and not allow_pending_delivery
+            ):
+                raise CasConflict(
+                    "canonical mutation blocked by pending delivery"
+                )
             current = self.read_head()
             actual = 0 if current is None else current.revision
             if actual != expected_revision:
@@ -484,6 +526,7 @@ class ProductionRepository:
         *,
         expected_revision: int,
         allowed_reserved_keys: frozenset[str],
+        allow_pending_delivery: bool = False,
     ) -> HeadRef:
         snapshot = dict(records)
         requested_reserved = frozenset(
@@ -510,4 +553,5 @@ class ProductionRepository:
             ),
             expected_revision=expected_revision,
             allowed_reserved_keys=allowed_reserved_keys,
+            allow_pending_delivery=allow_pending_delivery,
         )

@@ -255,6 +255,41 @@ class WorkflowRun:
             delivery_receipt=None,
         )
 
+    def delivered(
+        self, candidate: BlobRef, receipt: BlobRef
+    ) -> "WorkflowRun":
+        """Record the journal-protected delivery as one workflow transition."""
+
+        if self.eligible_candidate != candidate:
+            raise ValueError("delivered candidate is not eligible")
+        if self.completed:
+            if self.delivery_receipt != receipt:
+                raise ValueError("delivery already has another receipt")
+            return self
+        if self.current_stage != "deliver":
+            raise ValueError("workflow is not ready to deliver")
+        operation_id = canonical_hash(
+            {
+                "run_id": self.run_id,
+                "candidate": candidate.as_payload(),
+            },
+            domain="dlstudio.workflow_delivery",
+        )
+        attempt = StageAttempt(
+            "deliver",
+            operation_id,
+            (NamedRef("candidate", candidate),),
+            (NamedRef("receipt", receipt),),
+            "succeeded",
+        )
+        kept = tuple(item for item in self.attempts if item.stage != "deliver")
+        return replace(
+            self,
+            revision=self.revision + 1,
+            attempts=(*kept, attempt),
+            delivery_receipt=receipt,
+        )
+
     def as_payload(self) -> dict[str, Any]:
         return {
             "run_id": self.run_id,
