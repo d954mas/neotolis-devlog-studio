@@ -180,7 +180,36 @@ class DeliveryReceipt:
             self.as_payload(), domain=self.DOMAIN, version=self.VERSION
         )
 
+    @property
+    def ref(self) -> BlobRef:
+        raw = self.canonical_bytes()
+        return BlobRef(self.receipt_id, len(raw))
+
     def canonical_bytes(self) -> bytes:
         return canonical_bytes(
             self.as_payload(), domain=self.DOMAIN, version=self.VERSION
         )
+
+    @classmethod
+    def from_canonical_bytes(cls, raw: bytes) -> "DeliveryReceipt":
+        wrapped = json.loads(raw)
+        if (
+            wrapped.get("$domain") != cls.DOMAIN
+            or wrapped.get("$version") != cls.VERSION
+        ):
+            raise ValueError("invalid delivery receipt schema")
+        value = wrapped["payload"]
+        result = cls(
+            candidate_id=str(value["candidate_id"]),
+            destination_id=str(value["destination_id"]),
+            delivered_at=str(value["delivered_at"]),
+            manifest=tuple(
+                PackageFile(
+                    str(item["path"]), BlobRef.from_payload(item["blob"])
+                )
+                for item in value["manifest"]
+            ),
+        )
+        if result.canonical_bytes() != raw:
+            raise ValueError("delivery receipt is not canonical")
+        return result

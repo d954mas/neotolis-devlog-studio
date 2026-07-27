@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from dlstudio.foundation.api import BlobRef, CasConflict, CorruptObject
 from dlstudio.persistence.api import HeadRef, ProductionRepository
@@ -20,6 +21,10 @@ class WorkflowRepository:
 
     def __init__(self, repository: ProductionRepository) -> None:
         self.repository = repository
+
+    @property
+    def production_id(self) -> str:
+        return self.repository.production_id
 
     def read_current(self) -> WorkflowRun | None:
         root = self.repository.read_root()
@@ -40,6 +45,83 @@ class WorkflowRepository:
         expected_workflow_revision: int,
         expected_head_revision: int,
     ) -> SavedWorkflow:
+        return self._save(
+            workflow,
+            expected_workflow_revision=expected_workflow_revision,
+            expected_head_revision=expected_head_revision,
+            allow_pending_delivery=False,
+        )
+
+    def complete_delivery(
+        self,
+        workflow: WorkflowRun,
+        *,
+        expected_workflow_revision: int,
+        expected_head_revision: int,
+    ) -> SavedWorkflow:
+        if not workflow.completed:
+            raise ValueError("delivery workflow must be complete")
+        if self.repository.read_pending_delivery() is None:
+            raise ValueError("delivery completion requires its journal")
+        return self._save(
+            workflow,
+            expected_workflow_revision=expected_workflow_revision,
+            expected_head_revision=expected_head_revision,
+            allow_pending_delivery=True,
+        )
+
+    def snapshot(self) -> tuple[WorkflowRun, int]:
+        workflow = self.read_current()
+        head = self.repository.read_head()
+        if workflow is None or head is None:
+            raise ValueError("delivery requires a canonical workflow")
+        return workflow, head.revision
+
+    def read_blob(self, ref: BlobRef) -> bytes:
+        return self.repository.objects.read(ref)
+
+    def put_blob(self, data: bytes) -> BlobRef:
+        return self.repository.objects.put_bytes(data)
+
+    def verify_blob(self, ref: BlobRef) -> None:
+        self.repository.objects.verify(ref)
+
+    def blob_path(self, ref: BlobRef) -> Path:
+        self.repository.objects.verify(ref)
+        return self.repository.objects.path_for(ref)
+
+    def read_pending(self) -> bytes | None:
+        return self.repository.read_pending_delivery()
+
+    def begin_pending(self, journal: bytes, *, expected_head: int) -> None:
+        self.repository._begin_delivery(
+            journal, expected_revision=expected_head
+        )
+
+    def save_completed(
+        self,
+        workflow: WorkflowRun,
+        *,
+        expected_workflow: int,
+        expected_head: int,
+    ) -> None:
+        self.complete_delivery(
+            workflow,
+            expected_workflow_revision=expected_workflow,
+            expected_head_revision=expected_head,
+        )
+
+    def clear_pending(self, journal: bytes) -> None:
+        self.repository._finish_delivery(journal)
+
+    def _save(
+        self,
+        workflow: WorkflowRun,
+        *,
+        expected_workflow_revision: int,
+        expected_head_revision: int,
+        allow_pending_delivery: bool,
+    ) -> SavedWorkflow:
         if workflow.production_id != self.repository.production_id:
             raise ValueError("workflow belongs to another production")
         current = self.read_current()
@@ -59,5 +141,6 @@ class WorkflowRepository:
             {self.RECORD_KEY: ref},
             expected_revision=expected_head_revision,
             allowed_reserved_keys=frozenset({self.RECORD_KEY}),
+            allow_pending_delivery=allow_pending_delivery,
         )
         return SavedWorkflow(ref, head)
