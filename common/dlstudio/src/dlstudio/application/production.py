@@ -6,7 +6,7 @@ from pathlib import Path
 
 from dlstudio.assets.api import AssetReadPort
 from dlstudio.authoring.api import load_edit
-from dlstudio.constraints.api import ConstraintSet
+from dlstudio.constraints.api import Constraint, ConstraintSet
 from dlstudio.foundation.api import BlobRef
 from dlstudio.release.api import PackageFile
 from dlstudio.rendering.api import (
@@ -28,10 +28,10 @@ from dlstudio.workflow.api import NamedRef, StageId, WorkflowRun, WorkflowStore
 from .authoring import compile_production
 from .release import BlobStore
 from .workflow import (
-    _save_next,
-    advance,
+    _advance,
+    _package_release,
+    _run_stage,
     get_status,
-    package_release,
     start_workflow,
 )
 
@@ -49,6 +49,8 @@ def advance_production(
     """Start when needed, then advance one user-visible production step."""
 
     edit = load_edit(authoring_path)
+    if edit.production_id != workflows.production_id:
+        raise ValueError("authoring belongs to another production")
     workflow_kind = "longform" if edit.kind == "devlog" else edit.kind
     current = workflows.read_current()
     if current is None:
@@ -61,16 +63,35 @@ def advance_production(
         raise ValueError("authoring kind does not match the current workflow")
     timeline = compile_production(edit, assets)
     timeline_ref = store.put_bytes(timeline.canonical_bytes())
+    expected_platform = {
+        "reel": "vertical",
+        "longform": "landscape",
+        "capture_vo": "landscape",
+    }[current.kind]
     constraints = ConstraintSet(
         workflows.production_id,
         "studio.v3.defaults",
-        (),
+        (
+            Constraint(
+                f"platform.{expected_platform}",
+                f"Output must be {expected_platform}.",
+                "blocker",
+            ),
+            Constraint(
+                "assets.approved",
+                "Every referenced asset revision must be approved.",
+                "blocker",
+            ),
+            Constraint(
+                "assets.redistributable",
+                "Every referenced asset must permit release redistribution.",
+                "blocker",
+            ),
+        ),
     )
     policy = CheckPolicy(
         policy_id="studio_v3.release",
-        platform=(
-            "vertical" if timeline.height > timeline.width else "landscape"
-        ),
+        platform=expected_platform,
         constraints=constraints.ref,
         require_approved_assets=True,
         require_redistributable_assets=True,
@@ -95,6 +116,16 @@ def advance_production(
         NamedRef("constraints", constraints.ref),
         NamedRef("timeline", timeline_ref),
     )
+
+    def prepare(*_unused: object) -> tuple[NamedRef, ...]:
+        if report.blocking:
+            finding_ids = ", ".join(
+                item.rule for item in report.findings
+                if item.severity == "error"
+            )
+            raise ValueError(f"pre-render checks failed: {finding_ids}")
+        return prepare_outputs
+
     previous_prepare = next(
         (item for item in current.attempts if item.stage == "prepare"),
         None,
@@ -103,23 +134,22 @@ def advance_production(
         previous_prepare.inputs != prepare_inputs
         or previous_prepare.outputs != prepare_outputs
     ):
-        running = current.start(
-            "prepare", prepare_inputs, contract="studio.v3.prepare.v1"
+        return _run_stage(
+            workflows,
+            current=current,
+            stage="prepare",
+            inputs=prepare_inputs,
+            contract="studio.v3.prepare.v1",
+            run_stage=prepare,
         )
-        _save_next(workflows, current, running)
-        succeeded = running.succeed(
-            running.attempts[-1].operation_id, prepare_outputs
-        )
-        _save_next(workflows, running, succeeded)
-        return succeeded
 
     stage = current.current_stage
     if stage == "prepare":
-        return advance(
+        return _advance(
             workflows,
             inputs=prepare_inputs,
             contract="studio.v3.prepare.v1",
-            run_stage=lambda *_: prepare_outputs,
+            run_stage=prepare,
         )
     if stage in {"draft", "final"}:
         execution = fingerprint or ExecutionFingerprint.detect()
@@ -148,7 +178,7 @@ def advance_production(
                 NamedRef("render_options", options.ref),
             )
 
-        return advance(
+        return _advance(
             workflows,
             inputs=(
                 NamedRef("execution", execution.ref),
@@ -192,7 +222,7 @@ def advance_production(
             False,
             (),
         )
-        _, ready = package_release(
+        _, ready = _package_release(
             workflows,
             store,
             timeline=loaded_timeline,

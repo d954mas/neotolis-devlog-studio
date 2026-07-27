@@ -61,6 +61,85 @@ def test_explicit_authoring_loads_dataclasses_with_postponed_annotations(
     assert load_edit(source).production_id == "fixture.loader"
 
 
+def test_blocking_checks_fail_prepare_before_render(tmp_path: Path) -> None:
+    production = tmp_path / "production"
+    production.mkdir()
+    authoring = production / "edit.py"
+    authoring.write_text(
+        "\n".join(
+            (
+                "from dlstudio.authoring.api import Edit, SolidLayer",
+                "EDIT = Edit(",
+                "    production_id='fixture.wrong_orientation',",
+                "    width=96, height=64, fps_num=30, fps_den=1,",
+                "    duration_ns=200_000_000, background='black',",
+                "    visuals=(SolidLayer(0, 200_000_000, 0, 0, 0, 96, 64, 'black'),),",
+                "    standalone_story='A landscape file declared as a reel.',",
+                "    kind='reel',",
+                ")",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+    repository, assets, workflows = open_local_repositories(
+        production, "fixture.wrong_orientation"
+    )
+
+    with pytest.raises(ValueError, match="pre-render checks failed"):
+        advance_production(
+            workflows,
+            assets,
+            repository.objects,
+            authoring_path=authoring,
+            output_root=production / "outputs",
+        )
+
+    current = workflows.read_current()
+    assert current is not None
+    assert current.current_stage == "prepare"
+    assert current.attempts[0].state == "failed"
+    assert not (production / "outputs").exists()
+
+
+def test_authoring_identity_mismatch_leaves_production_untouched(
+    tmp_path: Path,
+) -> None:
+    production = tmp_path / "production"
+    production.mkdir()
+    authoring = production / "edit.py"
+    authoring.write_text(
+        "\n".join(
+            (
+                "from dlstudio.authoring.api import Edit",
+                "EDIT = Edit(",
+                "    production_id='fixture.other',",
+                "    width=64, height=96, fps_num=30, fps_den=1,",
+                "    duration_ns=200_000_000, background='black',",
+                "    standalone_story='This belongs elsewhere.',",
+                ")",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+    repository, assets, workflows = open_local_repositories(
+        production, "fixture.expected"
+    )
+
+    with pytest.raises(ValueError, match="another production"):
+        advance_production(
+            workflows,
+            assets,
+            repository.objects,
+            authoring_path=authoring,
+            output_root=production / "outputs",
+        )
+
+    assert workflows.read_current() is None
+    assert not (production / "outputs").exists()
+
+
 def _release(
     production: Path,
     *,

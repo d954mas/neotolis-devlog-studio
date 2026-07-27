@@ -4,13 +4,14 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import dlstudio.application.api as application_api
 
 from dlstudio.application.api import (
-    advance,
     get_status,
     start_workflow,
     submit_review,
 )
+from dlstudio.application.workflow import _advance
 from dlstudio.foundation.api import BlobRef
 from dlstudio.persistence import ProductionRepository, WorkflowRepository
 from dlstudio.review.api import ReviewVerdict
@@ -37,6 +38,11 @@ def test_status_is_a_direct_workflow_projection(tmp_path: Path) -> None:
     created = start_workflow(workflows, run_id="run.main", kind="reel")
     assert get_status(workflows) == created
     assert start_workflow(workflows, run_id="run.main", kind="reel") == created
+
+
+def test_public_api_has_no_generic_stage_or_package_bypass() -> None:
+    assert not hasattr(application_api, "advance")
+    assert not hasattr(application_api, "package_release")
 
 
 @pytest.mark.performance_smoke
@@ -68,7 +74,7 @@ def test_advance_hides_attempt_bookkeeping_and_resumes_running_stage(
         calls.append(operation_id)
         return (NamedRef("manifest", _put(workflows, b"manifest")),)
 
-    completed = advance(
+    completed = _advance(
         workflows,
         inputs=(),
         contract="prepare.v1",
@@ -90,7 +96,7 @@ def test_advance_persists_failure_and_retry_uses_same_operation_id(
         raise RuntimeError("provider stopped")
 
     with pytest.raises(RuntimeError, match="provider stopped"):
-        advance(
+        _advance(
             workflows,
             inputs=(),
             contract="prepare.v1",
@@ -98,7 +104,7 @@ def test_advance_persists_failure_and_retry_uses_same_operation_id(
         )
     assert get_status(workflows).attempts[-1].state == "failed"
 
-    advance(
+    _advance(
         workflows,
         inputs=(),
         contract="prepare.v1",
@@ -110,14 +116,16 @@ def test_advance_persists_failure_and_retry_uses_same_operation_id(
     assert calls[0] == calls[1]
 
 
-def test_review_must_name_exact_final_outputs(tmp_path: Path) -> None:
+def test_review_must_name_exact_final_outputs_and_resume_running_attempt(
+    tmp_path: Path,
+) -> None:
     workflows = _workflows(tmp_path)
     start_workflow(workflows, run_id="run.main", kind="reel")
     artifact = _put(workflows, b"final")
     report = _put(workflows, b"report")
     constraints = _put(workflows, b"constraints")
 
-    advance(
+    _advance(
         workflows,
         inputs=(),
         contract="prepare.v1",
@@ -128,13 +136,13 @@ def test_review_must_name_exact_final_outputs(tmp_path: Path) -> None:
             NamedRef("constraints", constraints),
         ),
     )
-    advance(
+    _advance(
         workflows,
         inputs=(),
         contract="draft.v1",
         run_stage=lambda *_: (NamedRef("artifact", _put(workflows, b"draft")),),
     )
-    advance(
+    _advance(
         workflows,
         inputs=(),
         contract="final.v1",
@@ -153,6 +161,22 @@ def test_review_must_name_exact_final_outputs(tmp_path: Path) -> None:
         reviewer="video.reviewer",
         reviewed_at="2026-07-27T00:00:00Z",
     )
+    current = get_status(workflows)
+    running = current.start(
+        "review",
+        (
+            NamedRef("artifact", verdict.artifact),
+            NamedRef("check_report", verdict.check_report),
+            NamedRef("constraints", verdict.constraints),
+        ),
+        contract=f"{ReviewVerdict.DOMAIN}.v{ReviewVerdict.VERSION}",
+    )
+    workflows.save(
+        running,
+        expected_workflow_revision=current.revision,
+        expected_head_revision=workflows.head_revision(),
+    )
+
     reviewed = submit_review(workflows, verdict)
     assert reviewed.current_stage == "package"
     assert reviewed.attempts[-1].outputs == (
@@ -186,8 +210,8 @@ def test_generic_advance_cannot_publish_an_arbitrary_candidate(
             expected_workflow_revision=running.revision,
             expected_head_revision=workflows.head_revision(),
         )
-    with pytest.raises(ValueError, match="package_release"):
-        advance(
+    with pytest.raises(ValueError, match="package stage"):
+        _advance(
             workflows,
             inputs=(),
             contract="package.v1",

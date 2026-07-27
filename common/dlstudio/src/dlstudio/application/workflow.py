@@ -60,7 +60,7 @@ def start_workflow(
     return created
 
 
-def advance(
+def _advance(
     workflows: WorkflowStore,
     *,
     inputs: tuple[NamedRef, ...],
@@ -78,7 +78,27 @@ def advance(
     if stage == "review":
         raise ValueError("use submit_review for the review stage")
     if stage == "package":
-        raise ValueError("use package_release for the package stage")
+        raise ValueError("package stage is owned by advance_production")
+    return _run_stage(
+        workflows,
+        current=current,
+        stage=stage,
+        inputs=inputs,
+        contract=contract,
+        run_stage=run_stage,
+    )
+
+
+def _run_stage(
+    workflows: WorkflowStore,
+    *,
+    current: WorkflowRun,
+    stage: StageId,
+    inputs: tuple[NamedRef, ...],
+    contract: str,
+    run_stage: Callable[[StageId, str], tuple[NamedRef, ...]],
+) -> WorkflowRun:
+    """Run one selected stage; identical persisted attempts resume in place."""
 
     running = current.start(stage, inputs, contract=contract)
     if running is not current:
@@ -95,7 +115,8 @@ def advance(
         _save_next(workflows, running, failed)
         raise
     succeeded = running.succeed(operation_id, outputs)
-    _save_next(workflows, running, succeeded)
+    if succeeded is not running:
+        _save_next(workflows, running, succeeded)
     return succeeded
 
 
@@ -138,7 +159,8 @@ def submit_review(
         ),
         contract=f"{ReviewVerdict.DOMAIN}.v{ReviewVerdict.VERSION}",
     )
-    _save_next(workflows, current, running)
+    if running is not current:
+        _save_next(workflows, current, running)
     succeeded = running.succeed(
         running.attempts[-1].operation_id,
         (NamedRef("verdict", verdict_ref),),
@@ -180,7 +202,7 @@ def submit_review_payload(
     return submit_review(workflows, verdict)
 
 
-def package_release(
+def _package_release(
     workflows: WorkflowStore,
     store: BlobStore,
     *,
@@ -249,13 +271,14 @@ def package_release(
         failed = running.fail(operation_id, str(exc))
         _save_next(workflows, running, failed)
         raise
-    succeeded = running.succeed(
-        operation_id, (NamedRef("candidate", candidate_ref),)
+    succeeded = workflows._complete_package(
+        running,
+        operation_id,
+        candidate_ref,
+        expected_workflow_revision=running.revision,
+        expected_head_revision=_head_revision(workflows),
     )
-    _save_next(workflows, running, succeeded)
-    eligible = succeeded.allow_delivery()
-    _save_next(workflows, succeeded, eligible)
-    return candidate, eligible
+    return candidate, succeeded
 
 
 def _stage_outputs(workflow: WorkflowRun, stage: StageId) -> dict[str, BlobRef]:
