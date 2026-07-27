@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
 from hashlib import sha256
@@ -163,7 +164,15 @@ def load_edit(path: Path) -> Edit:
     if spec is None or spec.loader is None:
         raise ValueError(f"cannot load authoring file: {source}")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    previous = sys.modules.get(name)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        if previous is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = previous
     if hasattr(module, "MIGRATION_ASSETS") or hasattr(module, "EVIDENCE_OBJECTS"):
         raise ValueError("migration trust data is forbidden in runtime authoring")
     edit = getattr(module, "EDIT", None)
