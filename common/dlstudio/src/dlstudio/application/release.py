@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Protocol
 
 from dlstudio.constraints.api import ConstraintSet
@@ -24,6 +25,12 @@ from dlstudio.timeline.api import (
 
 class BlobStore(Protocol):
     def put_bytes(self, data: bytes) -> BlobRef: ...
+
+    def ingest_file(self, source: Path) -> BlobRef: ...
+
+    def read(self, ref: BlobRef) -> bytes: ...
+
+    def path_for(self, ref: BlobRef) -> Path: ...
 
     def verify(self, ref: BlobRef) -> None: ...
 

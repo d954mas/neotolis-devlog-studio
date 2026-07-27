@@ -14,6 +14,7 @@ from .workflow import (
     start_workflow,
     submit_review,
 )
+from .production import advance_production
 from dlstudio.assets.api import MediaFacts
 
 __all__ = [
@@ -22,6 +23,7 @@ __all__ = [
     "LocalDeliveryState",
     "compile_production",
     "advance",
+    "advance_production",
     "deliver_local",
     "get_status",
     "ingest_asset",

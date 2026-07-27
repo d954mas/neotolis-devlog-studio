@@ -795,7 +795,14 @@ class CheckFinding:
     message: str
 
     def __post_init__(self) -> None:
-        DomainId(self.rule)
+        if (
+            not self.rule.startswith("VQ-")
+            or any(
+                character not in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-"
+                for character in self.rule
+            )
+        ):
+            raise ValueError("invalid quality rule id")
         if self.severity not in {"warning", "error"}:
             raise ValueError("unsupported check severity")
         if not self.message.strip():

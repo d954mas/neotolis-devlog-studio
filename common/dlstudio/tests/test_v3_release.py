@@ -225,6 +225,9 @@ def test_application_packages_only_the_accepted_exact_release(
         contract="prepare.v1",
         run_stage=lambda *_: (
             NamedRef("timeline", timeline.ref),  # type: ignore[union-attr]
+            NamedRef("check_policy", values["policy"].ref),  # type: ignore[union-attr]
+            NamedRef("check_report", report.ref),  # type: ignore[union-attr]
+            NamedRef("constraints", constraints.ref),  # type: ignore[union-attr]
         ),
     )
     advance(
@@ -241,8 +244,8 @@ def test_application_packages_only_the_accepted_exact_release(
         contract="final.v1",
         run_stage=lambda *_: (
             NamedRef("artifact", rendered.artifact),  # type: ignore[union-attr]
-            NamedRef("check_report", report.ref),  # type: ignore[union-attr]
-            NamedRef("constraints", constraints.ref),  # type: ignore[union-attr]
+            NamedRef("execution", values["fingerprint"].ref),  # type: ignore[union-attr]
+            NamedRef("render_options", values["options"].ref),  # type: ignore[union-attr]
         ),
     )
     repository.objects.put_bytes(report.canonical_bytes())  # type: ignore[union-attr]
