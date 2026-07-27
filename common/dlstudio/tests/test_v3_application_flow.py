@@ -14,7 +14,6 @@ from dlstudio.application.api import (
     advance_production,
     deliver_local,
     ingest_asset,
-    start_workflow,
     submit_review,
 )
 from dlstudio.assets.api import Approval, License, Provenance
@@ -47,7 +46,6 @@ def _release(
     )
     if seed is not None:
         seed(repository.objects, assets)
-    start_workflow(workflows, run_id="run.main", kind=kind)
     arguments = {
         "authoring_path": authoring,
         "output_root": production / "data" / ".studio" / "outputs",
