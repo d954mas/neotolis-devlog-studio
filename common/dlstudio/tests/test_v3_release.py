@@ -10,7 +10,7 @@ from dlstudio.application.api import (
     submit_review,
 )
 from dlstudio.application.workflow import _advance, _package_release
-from dlstudio.application.release import freeze_release
+from dlstudio.application.release import build_release_gate, freeze_release
 from dlstudio.authoring.api import Edit, SolidLayer, _compile_resolved
 from dlstudio.constraints.api import Constraint, ConstraintSet
 from dlstudio.foundation.api import BlobRef, CanonicalEncodingError
@@ -127,18 +127,7 @@ def _release_inputs(
             standalone_story="A complete standalone fixture.",
         )
     )
-    constraints = ConstraintSet(
-        "fixture.reel",
-        "test",
-        (Constraint("safe.zone", "Keep text inside the safe zone."),),
-    )
-    policy = CheckPolicy(
-        policy_id="studio_v3.release",
-        platform="vertical",
-        constraints=constraints.ref,
-        require_approved_assets=True,
-        require_redistributable_assets=True,
-    )
+    constraints, policy = build_release_gate("fixture.reel", "vertical")
     report = check_timeline(timeline, policy)
     fingerprint = ExecutionFingerprint(
         "ffmpeg",
@@ -195,6 +184,33 @@ def test_freeze_release_validates_and_publishes_exact_chain(
         "licenses.json",
     }
     store.verify(candidate_ref)  # type: ignore[union-attr]
+
+
+def test_freeze_release_rejects_a_constraint_without_executable_policy(
+    tmp_path: Path,
+) -> None:
+    values = _release_inputs(tmp_path)
+    constraints = values["constraints"]
+    assert isinstance(constraints, ConstraintSet)
+    undocumented = ConstraintSet(
+        constraints.production_id,
+        constraints.source,
+        (*constraints.constraints, Constraint("manual.only", "Looks plausible.")),
+    )
+    values["constraints"] = undocumented
+    values["policy"] = replace(values["policy"], constraints=undocumented.ref)
+    values["report"] = check_timeline(
+        values["timeline"],  # type: ignore[arg-type]
+        values["policy"],  # type: ignore[arg-type]
+    )
+    values["verdict"] = replace(
+        values["verdict"],  # type: ignore[arg-type]
+        check_report=values["report"].ref,  # type: ignore[union-attr]
+        constraints=undocumented.ref,
+    )
+
+    with pytest.raises(ValueError, match="executable contract"):
+        freeze_release(**values)  # type: ignore[arg-type]
 
 
 def test_application_packages_only_the_accepted_exact_release(
@@ -270,7 +286,7 @@ def test_application_packages_only_the_accepted_exact_release(
     (
         ("verdict_artifact", "exact final"),
         ("verdict_outcome", "passing review"),
-        ("policy_constraints", "these constraints"),
+        ("policy_constraints", "executable contract"),
         ("render_key", "execution identity"),
     ),
 )

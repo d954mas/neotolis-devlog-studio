@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
-from dlstudio.constraints.api import ConstraintSet
+from dlstudio.constraints.api import Constraint, ConstraintSet
 from dlstudio.foundation.api import BlobRef, canonical_bytes
 from dlstudio.release.api import PackageFile, ReleaseCandidate
 from dlstudio.rendering.api import (
@@ -35,6 +35,44 @@ class BlobStore(Protocol):
     def verify(self, ref: BlobRef) -> None: ...
 
 
+def build_release_gate(
+    production_id: str,
+    platform: Literal["vertical", "landscape"],
+) -> tuple[ConstraintSet, CheckPolicy]:
+    """Build the one executable release gate and its human-readable contract."""
+
+    if platform not in {"vertical", "landscape"}:
+        raise ValueError("release platform must be vertical or landscape")
+    constraints = ConstraintSet(
+        production_id,
+        "studio.v3.defaults",
+        (
+            Constraint(
+                f"platform.{platform}",
+                f"Output must be {platform}.",
+                "blocker",
+            ),
+            Constraint(
+                "assets.approved",
+                "Every referenced asset revision must be approved.",
+                "blocker",
+            ),
+            Constraint(
+                "assets.redistributable",
+                "Every referenced asset must permit release redistribution.",
+                "blocker",
+            ),
+        ),
+    )
+    return constraints, CheckPolicy(
+        policy_id="studio_v3.release",
+        platform=platform,
+        constraints=constraints.ref,
+        require_approved_assets=True,
+        require_redistributable_assets=True,
+    )
+
+
 def freeze_release(
     store: BlobStore,
     *,
@@ -55,6 +93,13 @@ def freeze_release(
         raise ValueError("timeline belongs to another production")
     if constraints.production_id != production_id:
         raise ValueError("constraints belong to another production")
+    platform = "vertical" if timeline.height > timeline.width else "landscape"
+    expected_constraints, expected_policy = build_release_gate(
+        production_id,
+        platform,
+    )
+    if constraints != expected_constraints or policy != expected_policy:
+        raise ValueError("release gate does not match the executable contract")
     if policy.constraints != constraints.ref:
         raise ValueError("check policy does not use these constraints")
     if not policy.require_approved_assets:

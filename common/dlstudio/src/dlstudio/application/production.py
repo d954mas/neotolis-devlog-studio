@@ -6,7 +6,7 @@ from pathlib import Path
 
 from dlstudio.assets.api import AssetReadPort
 from dlstudio.authoring.api import load_edit
-from dlstudio.constraints.api import Constraint, ConstraintSet
+from dlstudio.constraints.api import ConstraintSet
 from dlstudio.foundation.api import BlobRef
 from dlstudio.release.api import PackageFile
 from dlstudio.rendering.api import (
@@ -26,7 +26,7 @@ from dlstudio.timeline.api import (
 from dlstudio.workflow.api import NamedRef, StageId, WorkflowRun, WorkflowStore
 
 from .authoring import compile_production
-from .release import BlobStore
+from .release import BlobStore, build_release_gate
 from .workflow import (
     _advance,
     _package_release,
@@ -68,33 +68,9 @@ def advance_production(
         "longform": "landscape",
         "capture_vo": "landscape",
     }[current.kind]
-    constraints = ConstraintSet(
+    constraints, policy = build_release_gate(
         workflows.production_id,
-        "studio.v3.defaults",
-        (
-            Constraint(
-                f"platform.{expected_platform}",
-                f"Output must be {expected_platform}.",
-                "blocker",
-            ),
-            Constraint(
-                "assets.approved",
-                "Every referenced asset revision must be approved.",
-                "blocker",
-            ),
-            Constraint(
-                "assets.redistributable",
-                "Every referenced asset must permit release redistribution.",
-                "blocker",
-            ),
-        ),
-    )
-    policy = CheckPolicy(
-        policy_id="studio_v3.release",
-        platform=expected_platform,
-        constraints=constraints.ref,
-        require_approved_assets=True,
-        require_redistributable_assets=True,
+        expected_platform,
     )
     report = check_timeline(timeline, policy)
     for raw in (
