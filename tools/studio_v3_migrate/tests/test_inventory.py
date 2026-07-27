@@ -148,6 +148,26 @@ def test_workspace_infrastructure_is_not_discovered_as_project(tmp_path: Path) -
     assert [root.name for root in roots] == ["actual_project"]
 
 
+def test_generated_test_and_review_roots_are_not_projects(tmp_path: Path) -> None:
+    generated = (
+        ".test-tmp-intentional-corruption",
+        ".phase4-review-repro-loader",
+        ".review-phase45-runtime",
+        "_codex_tmp_workflow",
+    )
+    for name in generated:
+        path = tmp_path / name
+        path.mkdir()
+        (path / "broken.json").write_text("{intentional", encoding="utf-8")
+    project = tmp_path / "actual_project"
+    project.mkdir()
+    (project / "product.toml").write_text("[product]\nid='actual'\n", encoding="utf-8")
+
+    manifest = build_before_manifest(tmp_path, _rules())
+
+    assert [root["name"] for root in manifest["project_roots"]] == ["actual_project"]
+
+
 @pytest.mark.parametrize(
     "unsafe_path",
     [
