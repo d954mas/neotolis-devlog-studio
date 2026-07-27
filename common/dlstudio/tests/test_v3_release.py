@@ -5,10 +5,17 @@ from pathlib import Path
 
 import pytest
 
+from dlstudio.application.api import (
+    advance,
+    package_release,
+    start_workflow,
+    submit_review,
+)
 from dlstudio.application.release import freeze_release
 from dlstudio.authoring.api import Edit, SolidLayer, _compile_resolved
 from dlstudio.constraints.api import Constraint, ConstraintSet
 from dlstudio.foundation.api import BlobRef, CanonicalEncodingError
+from dlstudio.persistence import WorkflowRepository
 from dlstudio.persistence.api import ProductionRepository
 from dlstudio.release.api import DeliveryReceipt, PackageFile, ReleaseCandidate
 from dlstudio.rendering.api import (
@@ -19,6 +26,7 @@ from dlstudio.rendering.api import (
 )
 from dlstudio.review.api import ReviewVerdict
 from dlstudio.timeline.api import CheckPolicy, check_timeline
+from dlstudio.workflow.api import NamedRef
 
 
 def _blob(value: str, size: int = 10) -> BlobRef:
@@ -92,14 +100,17 @@ def test_receipt_names_exact_candidate_and_copied_manifest() -> None:
     assert receipt.manifest == candidate.package
 
 
-def _release_inputs(tmp_path: Path) -> dict[str, object]:
-    repository = ProductionRepository(
-        object_root=tmp_path / "objects",
-        state_root=tmp_path / "state",
-        staging_root=tmp_path / "staging",
-        lock_root=tmp_path / "locks",
-        production_id="fixture.reel",
-    )
+def _release_inputs(
+    tmp_path: Path,
+    repository: ProductionRepository | None = None,
+) -> dict[str, object]:
+    repository = repository or ProductionRepository(
+            object_root=tmp_path / "objects",
+            state_root=tmp_path / "state",
+            staging_root=tmp_path / "staging",
+            lock_root=tmp_path / "locks",
+            production_id="fixture.reel",
+        )
     timeline = _compile_resolved(
         Edit(
             production_id="fixture.reel",
@@ -185,6 +196,68 @@ def test_freeze_release_validates_and_publishes_exact_chain(
         "licenses.json",
     }
     store.verify(candidate_ref)  # type: ignore[union-attr]
+
+
+def test_application_packages_only_the_accepted_exact_release(
+    tmp_path: Path,
+) -> None:
+    repository = ProductionRepository(
+        object_root=tmp_path / "objects",
+        state_root=tmp_path / "state",
+        staging_root=tmp_path / "staging",
+        lock_root=tmp_path / "locks",
+        production_id="fixture.reel",
+    )
+    values = _release_inputs(tmp_path, repository)
+    store = values.pop("store")
+    production_id = values.pop("production_id")
+    workflows = WorkflowRepository(repository)
+    start_workflow(workflows, run_id="run.main", kind="reel")
+
+    timeline = values["timeline"]
+    report = values["report"]
+    constraints = values["constraints"]
+    rendered = values["render"]
+    verdict = values["verdict"]
+    advance(
+        workflows,
+        inputs=(),
+        contract="prepare.v1",
+        run_stage=lambda *_: (
+            NamedRef("timeline", timeline.ref),  # type: ignore[union-attr]
+        ),
+    )
+    advance(
+        workflows,
+        inputs=(),
+        contract="draft.v1",
+        run_stage=lambda *_: (
+            NamedRef("artifact", repository.objects.put_bytes(b"draft")),
+        ),
+    )
+    advance(
+        workflows,
+        inputs=(),
+        contract="final.v1",
+        run_stage=lambda *_: (
+            NamedRef("artifact", rendered.artifact),  # type: ignore[union-attr]
+            NamedRef("check_report", report.ref),  # type: ignore[union-attr]
+            NamedRef("constraints", constraints.ref),  # type: ignore[union-attr]
+        ),
+    )
+    repository.objects.put_bytes(report.canonical_bytes())  # type: ignore[union-attr]
+    repository.objects.put_bytes(constraints.canonical_bytes())  # type: ignore[union-attr]
+    submit_review(workflows, verdict)  # type: ignore[arg-type]
+
+    candidate, ready = package_release(
+        workflows,
+        store,  # type: ignore[arg-type]
+        **values,
+    )
+
+    assert ready.eligible_candidate == candidate.ref
+    assert ready.current_stage == "deliver"
+    assert candidate.production_id == production_id
 
 
 @pytest.mark.parametrize(
