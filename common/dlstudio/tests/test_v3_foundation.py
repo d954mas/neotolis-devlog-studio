@@ -217,14 +217,14 @@ def test_root_keeps_only_current_owner_records(tmp_path: Path) -> None:
     for index in range(50):
         current = repo.objects.put_bytes(f"revision-{index}".encode())
         repo.update_records(
-            {"workflow:current": current},
+            {"projection:current": current},
             expected_revision=expected_revision,
         )
         expected_revision += 1
 
     root = repo.read_root()
     assert root.revision == 50
-    assert root.records == {"workflow:current": current}
+    assert root.records == {"projection:current": current}
     assert not any(key.startswith("operation:") for key in root.records)
 
 
