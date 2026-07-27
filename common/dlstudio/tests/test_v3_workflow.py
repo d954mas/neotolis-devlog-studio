@@ -24,13 +24,13 @@ def _complete_through(run: WorkflowRun, last: str) -> WorkflowRun:
         )
         operation_id = run.attempts[-1].operation_id
         outputs = (
-            (NamedRef("receipt", BlobRef("f" * 64, 10)),)
-            if stage == "deliver"
+            (NamedRef("candidate", BlobRef("e" * 64, 10)),)
+            if stage == "package"
             else (NamedRef("output", BlobRef("a" * 64, 10)),)
         )
         run = run.succeed(operation_id, outputs)
         if stage == "package":
-            run = run.allow_delivery(BlobRef("e" * 64, 10))
+            run = run.allow_delivery()
     return run
 
 
@@ -103,14 +103,19 @@ def test_delivery_records_one_exact_receipt() -> None:
         WorkflowRun("run.1", "fixture.reel", "capture_vo"),
         "package",
     )
-    delivering = ready.start(
-        "deliver",
-        (NamedRef("candidate", ready.eligible_candidate),),  # type: ignore[arg-type]
-        contract="local.delivery.v1",
-    )
-    delivered = delivering.succeed(
-        delivering.attempts[-1].operation_id,
-        (NamedRef("receipt", BlobRef("f" * 64, 10)),),
+    receipt = BlobRef("f" * 64, 10)
+    delivered = ready.delivered(
+        ready.eligible_candidate,  # type: ignore[arg-type]
+        receipt,
     )
     assert delivered.completed
-    assert delivered.delivery_receipt == BlobRef("f" * 64, 10)
+    assert delivered.delivery_receipt == receipt
+
+
+def test_generic_stage_api_cannot_bypass_delivery_journal() -> None:
+    ready = _complete_through(
+        WorkflowRun("run.1", "fixture.reel", "reel"),
+        "package",
+    )
+    with pytest.raises(ValueError, match="delivery use case"):
+        ready.start("deliver", (), contract="bypass")

@@ -82,13 +82,18 @@ def _ready_workflow(
     for stage in ("prepare", "draft", "review", "final", "package"):
         started = run.start(stage, (), contract=f"{stage}.v1")  # type: ignore[arg-type]
         _save_next(repository, workflows, run, started)
+        outputs = (
+            (NamedRef("candidate", candidate),)
+            if stage == "package"
+            else (NamedRef("output", _put(repository, stage.encode())),)
+        )
         succeeded = started.succeed(
             started.attempts[-1].operation_id,
-            (NamedRef("output", _put(repository, stage.encode())),),
+            outputs,
         )
         _save_next(repository, workflows, started, succeeded)
         run = succeeded
-    allowed = run.allow_delivery(candidate)
+    allowed = run.allow_delivery()
     return _save_next(repository, workflows, run, allowed)
 
 

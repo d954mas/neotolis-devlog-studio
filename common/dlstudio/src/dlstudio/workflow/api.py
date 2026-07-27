@@ -130,6 +130,8 @@ class WorkflowRun:
     ) -> "WorkflowRun":
         if stage not in STAGES:
             raise ValueError("unsupported workflow stage")
+        if stage == "deliver":
+            raise ValueError("delivery is completed only by the delivery use case")
         if not contract:
             raise ValueError("stage contract fingerprint is required")
         normalized_inputs = tuple(sorted(inputs, key=lambda item: item.name))
@@ -164,9 +166,7 @@ class WorkflowRun:
             self,
             revision=self.revision + 1,
             attempts=(*kept, attempt),
-            eligible_candidate=(
-                self.eligible_candidate if stage == "deliver" else None
-            ),
+            eligible_candidate=None,
             delivery_receipt=None,
         )
 
@@ -193,12 +193,10 @@ class WorkflowRun:
             return self
         if attempt.state != "running":
             raise ValueError("only a running operation can succeed")
-        receipt = self.delivery_receipt
-        if attempt.stage == "deliver":
-            named = {item.name: item.blob for item in outputs}
-            if set(named) != {"receipt"}:
-                raise ValueError("delivery must output exactly one receipt")
-            receipt = named["receipt"]
+        if attempt.stage == "package" and {
+            item.name for item in outputs
+        } != {"candidate"}:
+            raise ValueError("package must output exactly one candidate")
         completed = replace(
             attempt,
             outputs=outputs,
@@ -211,7 +209,7 @@ class WorkflowRun:
                 completed if item.operation_id == operation_id else item
                 for item in self.attempts
             ),
-            delivery_receipt=receipt,
+            delivery_receipt=self.delivery_receipt,
         )
 
     def fail(self, operation_id: str, error: str) -> "WorkflowRun":
@@ -237,7 +235,7 @@ class WorkflowRun:
             ),
         )
 
-    def allow_delivery(self, candidate: BlobRef) -> "WorkflowRun":
+    def allow_delivery(self) -> "WorkflowRun":
         package = next(
             (item for item in self.attempts if item.stage == "package"),
             None,
@@ -246,6 +244,9 @@ class WorkflowRun:
             raise ValueError("package must succeed before delivery is allowed")
         if self.current_stage != "deliver":
             raise ValueError("workflow is not ready for delivery")
+        candidate = next(
+            item.blob for item in package.outputs if item.name == "candidate"
+        )
         if self.eligible_candidate == candidate:
             return self
         return replace(
