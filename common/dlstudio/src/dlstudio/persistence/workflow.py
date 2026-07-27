@@ -31,6 +31,10 @@ class WorkflowRepository:
         except (KeyError, TypeError, ValueError) as exc:
             raise CorruptObject("invalid current workflow") from exc
 
+    def head_revision(self) -> int:
+        head = self.repository.read_head()
+        return 0 if head is None else head.revision
+
     def save(
         self,
         workflow: WorkflowRun,
