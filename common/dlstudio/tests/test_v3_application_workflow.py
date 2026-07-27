@@ -102,7 +102,12 @@ def test_review_must_name_exact_final_outputs(tmp_path: Path) -> None:
         workflows,
         inputs=(),
         contract="prepare.v1",
-        run_stage=lambda *_: (NamedRef("manifest", _put(workflows, b"m")),),
+        run_stage=lambda *_: (
+            NamedRef("timeline", _put(workflows, b"timeline")),
+            NamedRef("check_policy", _put(workflows, b"policy")),
+            NamedRef("check_report", report),
+            NamedRef("constraints", constraints),
+        ),
     )
     advance(
         workflows,
@@ -116,8 +121,8 @@ def test_review_must_name_exact_final_outputs(tmp_path: Path) -> None:
         contract="final.v1",
         run_stage=lambda *_: (
             NamedRef("artifact", artifact),
-            NamedRef("check_report", report),
-            NamedRef("constraints", constraints),
+            NamedRef("execution", _put(workflows, b"execution")),
+            NamedRef("render_options", _put(workflows, b"options")),
         ),
     )
     verdict = ReviewVerdict(

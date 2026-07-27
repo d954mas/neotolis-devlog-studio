@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-
 from dlstudio.constraints.api import ConstraintSet
 from dlstudio.foundation.api import BlobRef, canonical_bytes
 from dlstudio.release.api import PackageFile, ReleaseCandidate
@@ -13,7 +12,11 @@ from dlstudio.rendering.api import (
     RenderResult,
 )
 from dlstudio.review.api import ReviewVerdict
-from dlstudio.timeline.api import CheckPolicy, CheckReport, TimelineIR
+from dlstudio.timeline.api import (
+    CheckPolicy,
+    CheckReport,
+    TimelineIR,
+)
 from dlstudio.workflow.api import (
     NamedRef,
     StageId,
@@ -104,16 +107,22 @@ def submit_review(
     current = get_status(workflows)
     if current.current_stage != "review":
         raise ValueError("workflow is not waiting for review")
+    prepare = next(item for item in current.attempts if item.stage == "prepare")
     final = next(item for item in current.attempts if item.stage == "final")
-    expected = {item.name: item.blob for item in final.outputs}
-    required = {"artifact", "check_report", "constraints"}
-    if set(expected) != required:
-        raise ValueError("final stage output contract is incomplete")
-    if verdict.artifact != expected["artifact"]:
+    prepared = {item.name: item.blob for item in prepare.outputs}
+    finalized = {item.name: item.blob for item in final.outputs}
+    if set(prepared) != {
+        "timeline",
+        "check_policy",
+        "check_report",
+        "constraints",
+    } or set(finalized) != {"artifact", "execution", "render_options"}:
+        raise ValueError("prepare/final stage output contract is incomplete")
+    if verdict.artifact != finalized["artifact"]:
         raise ValueError("review does not name the exact final artifact")
-    if verdict.check_report != expected["check_report"]:
+    if verdict.check_report != prepared["check_report"]:
         raise ValueError("review does not name the exact check report")
-    if verdict.constraints != expected["constraints"]:
+    if verdict.constraints != prepared["constraints"]:
         raise ValueError("review does not name the exact constraints")
     for ref in verdict.reachable_blobs:
         workflows.verify_blob(ref)

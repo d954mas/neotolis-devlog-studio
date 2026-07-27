@@ -32,8 +32,6 @@ class ObjectResolver(Protocol):
 
     def verify(self, ref: BlobRef) -> None: ...
 
-    def verify_metadata(self, ref: BlobRef) -> None: ...
-
 
 @dataclass(frozen=True, slots=True)
 class ExecutionFingerprint:

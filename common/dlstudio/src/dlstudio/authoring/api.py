@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import importlib.util
 from collections.abc import Iterable
 from dataclasses import dataclass
+from hashlib import sha256
+from pathlib import Path
 from typing import Literal
 
 from dlstudio.assets.api import AssetRevision
@@ -147,6 +150,26 @@ class Edit:
         object.__setattr__(self, "video_fades", tuple(self.video_fades))
         if not self.standalone_story:
             raise ValueError("v3 edit requires standalone_story")
+
+
+def load_edit(path: Path) -> Edit:
+    """Load one explicit v3 authoring file without module or cwd fallback."""
+
+    source = path.resolve(strict=True)
+    if not source.is_file():
+        raise ValueError(f"authoring path is not a file: {source}")
+    name = f"_dlstudio_edit_{sha256(str(source).encode('utf-8')).hexdigest()}"
+    spec = importlib.util.spec_from_file_location(name, source)
+    if spec is None or spec.loader is None:
+        raise ValueError(f"cannot load authoring file: {source}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    if hasattr(module, "MIGRATION_ASSETS") or hasattr(module, "EVIDENCE_OBJECTS"):
+        raise ValueError("migration trust data is forbidden in runtime authoring")
+    edit = getattr(module, "EDIT", None)
+    if not isinstance(edit, Edit):
+        raise ValueError("authoring file must expose one v3 EDIT")
+    return edit
 
 
 def _compile_resolved(
