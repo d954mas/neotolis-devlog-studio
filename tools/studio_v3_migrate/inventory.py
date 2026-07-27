@@ -284,7 +284,7 @@ def _is_source_media(relative_path: str) -> bool:
     ) and "finalize" not in (part.casefold() for part in path.parts)
 
 
-def _iter_files(root: Path) -> list[Path]:
+def iter_files(root: Path) -> list[Path]:
     files: list[Path] = []
     for current, directories, names in os.walk(root, followlinks=False):
         symlinked_directories = [
@@ -310,7 +310,7 @@ def build_before_manifest(workspace: Path, rules: DispositionRules) -> dict[str,
             raise InventoryError(
                 f"project root symlink cannot be inventoried safely: {root.name}"
             )
-        for path in _iter_files(root.path):
+        for path in iter_files(root.path):
             workspace_relative = path.relative_to(workspace).as_posix()
             project_relative = path.relative_to(root.path).as_posix()
             selected = _classify_artifact(project_relative, rules)

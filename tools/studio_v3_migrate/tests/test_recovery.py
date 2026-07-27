@@ -153,6 +153,22 @@ def test_existing_backup_does_not_hide_source_drift(tmp_path: Path) -> None:
         create_verified_backup(workspace, backup, manifest)
 
 
+@pytest.mark.parametrize("existing_backup", [False, True])
+def test_backup_rejects_new_file_after_manifest(
+    tmp_path: Path, existing_backup: bool
+) -> None:
+    workspace, manifest = _fixture(tmp_path)
+    backup = tmp_path / "backup"
+    if existing_backup:
+        create_verified_backup(workspace, backup, manifest)
+    (workspace / "video_product/data/recordings/after-manifest.wav").write_bytes(
+        b"new recording"
+    )
+
+    with pytest.raises(RecoveryError, match="source path set changed.*extra"):
+        create_verified_backup(workspace, backup, manifest)
+
+
 def test_backup_rejects_symlinked_staging_root(tmp_path: Path) -> None:
     workspace, manifest = _fixture(tmp_path)
     backup = tmp_path / "backup"

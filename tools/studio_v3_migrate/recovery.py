@@ -7,7 +7,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from .inventory import hash_path, validate_manifest
+from .inventory import hash_path, iter_files, validate_manifest
 
 
 class RecoveryError(RuntimeError):
@@ -63,6 +63,21 @@ def _require_plain_parent(staging: Path, parent: Path) -> None:
 
 
 def _validate_source(source: Path, manifest: dict[str, Any]) -> None:
+    expected = {entry["path"] for entry in manifest["entries"]}
+    actual: set[str] = set()
+    for root in manifest["project_roots"]:
+        project = source / root["name"]
+        if not project.is_dir() or _is_linklike(project):
+            raise RecoveryError(f"invalid source project root: {root['name']}")
+        actual.update(
+            path.relative_to(source).as_posix() for path in iter_files(project)
+        )
+    missing = sorted(expected - actual)
+    extra = sorted(actual - expected)
+    if missing or extra:
+        detail = (missing or extra)[0]
+        kind = "missing" if missing else "extra"
+        raise RecoveryError(f"source path set changed since manifest ({kind}): {detail}")
     for entry in manifest["entries"]:
         source_path = source / Path(entry["path"])
         if not _same_entry(source_path, entry):
