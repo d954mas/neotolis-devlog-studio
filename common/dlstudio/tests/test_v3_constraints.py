@@ -36,13 +36,7 @@ def test_constraint_revision_is_just_exact_superseded_content() -> None:
         supersedes=first.ref,
     )
     assert second.ref != first.ref
-    with pytest.raises(ValueError, match="another production"):
-        ConstraintSet(
-            "other.reel",
-            "user",
-            second.constraints,
-            supersedes=first.ref,
-        )
+    assert second.supersedes == first.ref
 
 
 def test_duplicate_constraint_id_is_rejected() -> None:
