@@ -164,7 +164,9 @@ def _scan_workspace_roots(
         for rule in specs:
             if rule.get("fallback"):
                 continue
-            if candidate.name in rule.get("names", []):
+            if candidate_key in {
+                str(name).casefold() for name in rule.get("names", [])
+            }:
                 matches.append(rule)
                 continue
             marker = rule.get("marker")
@@ -507,7 +509,7 @@ def validate_manifest(
             raise InventoryError(f"{subject} has invalid fields")
         name = _required_nonempty_string(value, "name", subject)
         excluded_by = _required_nonempty_string(value, "rule", subject)
-        _required_nonempty_string(value, "value", subject)
+        excluded_value = _required_nonempty_string(value, "value", subject)
         if excluded_by not in {
             "workspace_excludes",
             "workspace_exclude_prefixes",
@@ -519,6 +521,22 @@ def validate_manifest(
             raise InventoryError(f"{subject} has invalid name") from exc
         if len(root_path.parts) != 1:
             raise InventoryError(f"{subject} has invalid name")
+        if (
+            excluded_value in {".", ".."}
+            or "/" in excluded_value
+            or "\\" in excluded_value
+        ):
+            raise InventoryError(f"{subject} has invalid value")
+        if excluded_by == "workspace_excludes":
+            if name.casefold() != excluded_value.casefold():
+                raise InventoryError(f"{subject} exact value does not match name")
+        elif (
+            len(excluded_value) < 6
+            or excluded_value[0] not in {".", "_"}
+            or excluded_value[-1] not in {"-", "_"}
+            or not name.casefold().startswith(excluded_value.casefold())
+        ):
+            raise InventoryError(f"{subject} prefix value does not match name")
         key = name.casefold()
         if key in project_root_keys or key in excluded_root_keys:
             raise InventoryError(f"duplicate manifest root: {name}")

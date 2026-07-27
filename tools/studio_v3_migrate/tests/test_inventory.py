@@ -59,6 +59,25 @@ def test_product_marker_classifies_project_as_active(tmp_path: Path) -> None:
     ]
 
 
+@pytest.mark.parametrize(
+    ("name", "disposition"),
+    [
+        ("NEOTOLIS_DIARY", "MIGRATE_ACTIVE"),
+        ("TROLLEY3D", "ARCHIVE_READ_ONLY"),
+    ],
+)
+def test_named_project_rules_are_case_insensitive(
+    tmp_path: Path, name: str, disposition: str
+) -> None:
+    (tmp_path / name).mkdir()
+
+    roots = classify_project_roots(tmp_path, _rules())
+
+    assert [(root.name, root.disposition) for root in roots] == [
+        (name, disposition)
+    ]
+
+
 def test_manifest_assigns_exactly_one_rule_and_preserves_media(tmp_path: Path) -> None:
     project = tmp_path / "video_product"
     (project / "data" / "footage").mkdir(parents=True)
@@ -204,6 +223,26 @@ def test_manifest_rejects_selected_excluded_root_overlap(tmp_path: Path) -> None
     manifest["summary"]["excluded"] = 1
 
     with pytest.raises(InventoryError, match="duplicate manifest root"):
+        validate_manifest(manifest)
+
+
+@pytest.mark.parametrize(
+    ("rule", "value"),
+    [
+        ("workspace_excludes", "different-name"),
+        ("workspace_exclude_prefixes", "_codex_tmp_"),
+    ],
+)
+def test_manifest_rejects_false_exclusion_evidence(
+    tmp_path: Path, rule: str, value: str
+) -> None:
+    manifest = _manifest(tmp_path)
+    manifest["excluded_roots"] = [
+        {"name": "hidden-project", "rule": rule, "value": value}
+    ]
+    manifest["summary"]["excluded"] = 1
+
+    with pytest.raises(InventoryError, match="does not match"):
         validate_manifest(manifest)
 
 
