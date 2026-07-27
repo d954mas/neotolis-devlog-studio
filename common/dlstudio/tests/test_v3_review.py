@@ -1,0 +1,51 @@
+from __future__ import annotations
+
+import pytest
+
+from dlstudio.assets.api import BlobRef
+from dlstudio.review.api import ReviewFinding, ReviewVerdict
+
+
+def _verdict(**changes: object) -> ReviewVerdict:
+    values: dict[str, object] = {
+        "artifact": BlobRef("1" * 64, 100),
+        "outcome": "pass",
+        "policy_id": "studio.final",
+        "policy_checks": ("audio", "visual", "constraints"),
+        "reviewer": "video.reviewer",
+        "reviewed_at": "2026-07-27T00:00:00Z",
+    }
+    values.update(changes)
+    return ReviewVerdict(**values)  # type: ignore[arg-type]
+
+
+def test_verdict_round_trip_binds_policy_snapshot_and_exact_artifact() -> None:
+    verdict = _verdict(
+        review_pack=BlobRef("2" * 64, 20),
+        evidence=(BlobRef("3" * 64, 30),),
+    )
+    assert ReviewVerdict.from_canonical_bytes(verdict.canonical_bytes()) == verdict
+    assert verdict.reachable_blobs == (
+        BlobRef("1" * 64, 100),
+        BlobRef("2" * 64, 20),
+        BlobRef("3" * 64, 30),
+    )
+    with pytest.raises(ValueError, match="stale"):
+        verdict.require_artifact(BlobRef("4" * 64, 100))
+
+
+def test_required_findings_are_the_change_requests() -> None:
+    finding = ReviewFinding("safe.zone", "Move the title down.", True)
+    verdict = _verdict(
+        outcome="changes_requested",
+        findings=(finding,),
+    )
+    assert verdict.findings == (finding,)
+    with pytest.raises(ValueError, match="cannot require"):
+        _verdict(findings=(finding,))
+
+
+def test_simple_review_does_not_require_pack_or_roles() -> None:
+    verdict = _verdict()
+    assert verdict.review_pack is None
+    assert verdict.findings == ()
