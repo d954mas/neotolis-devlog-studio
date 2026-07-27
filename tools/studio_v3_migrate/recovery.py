@@ -44,6 +44,31 @@ def _same_entry(path: Path, entry: dict[str, Any]) -> bool:
     )
 
 
+def _is_linklike(path: Path) -> bool:
+    return path.is_symlink() or (
+        hasattr(path, "is_junction") and path.is_junction()
+    )
+
+
+def _require_plain_parent(staging: Path, parent: Path) -> None:
+    relative = parent.relative_to(staging)
+    current = staging
+    for part in relative.parts:
+        current = current / part
+        if current.exists() or current.is_symlink():
+            if _is_linklike(current) or not current.is_dir():
+                raise RecoveryError(f"unsafe staging directory: {current}")
+        else:
+            current.mkdir()
+
+
+def _validate_source(source: Path, manifest: dict[str, Any]) -> None:
+    for entry in manifest["entries"]:
+        source_path = source / Path(entry["path"])
+        if not _same_entry(source_path, entry):
+            raise RecoveryError(f"source changed since manifest: {entry['path']}")
+
+
 def _copy_tree_atomic(
     source: Path,
     destination: Path,
@@ -55,6 +80,7 @@ def _copy_tree_atomic(
     source = source.resolve()
     destination = destination.resolve()
     _validate_destination(source, destination)
+    _validate_source(source, manifest)
     if destination.exists():
         report = verify_tree_against_manifest(destination, manifest)
         if report["verified"]:
@@ -67,16 +93,17 @@ def _copy_tree_atomic(
 
     digest = _manifest_digest(manifest)
     staging = destination.with_name(f".{destination.name}.{digest[:16]}.staging")
-    if staging.exists() and not staging.is_dir():
-        raise RecoveryError(f"invalid {label} staging path: {staging}")
-    staging.mkdir(parents=True, exist_ok=True)
+    if staging.exists() or staging.is_symlink():
+        if _is_linklike(staging) or not staging.is_dir():
+            raise RecoveryError(f"invalid {label} staging path: {staging}")
+    else:
+        staging.mkdir(parents=True)
     resumed = 0
     for entry in manifest["entries"]:
         relative = Path(entry["path"])
         source_path = source / relative
-        if not _same_entry(source_path, entry):
-            raise RecoveryError(f"source changed since manifest: {entry['path']}")
         target = staging / relative
+        _require_plain_parent(staging, target.parent)
         if _same_entry(target, entry):
             resumed += 1
             continue
@@ -84,7 +111,6 @@ def _copy_tree_atomic(
             if target.is_dir() and not target.is_symlink():
                 raise RecoveryError(f"unexpected staging directory: {entry['path']}")
             target.unlink()
-        target.parent.mkdir(parents=True, exist_ok=True)
         temporary = target.with_name(f".{target.name}.tmp")
         if temporary.exists() or temporary.is_symlink():
             temporary.unlink()

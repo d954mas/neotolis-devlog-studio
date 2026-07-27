@@ -143,6 +143,51 @@ def test_verified_existing_backup_is_idempotent(tmp_path: Path) -> None:
     assert second["resumed_entries"] == len(manifest["entries"])
 
 
+def test_existing_backup_does_not_hide_source_drift(tmp_path: Path) -> None:
+    workspace, manifest = _fixture(tmp_path)
+    backup = tmp_path / "backup"
+    create_verified_backup(workspace, backup, manifest)
+    (workspace / "video_product/data/recordings/raw.wav").write_bytes(b"changed")
+
+    with pytest.raises(RecoveryError, match="source changed"):
+        create_verified_backup(workspace, backup, manifest)
+
+
+def test_backup_rejects_symlinked_staging_root(tmp_path: Path) -> None:
+    workspace, manifest = _fixture(tmp_path)
+    backup = tmp_path / "backup"
+    digest = recovery._manifest_digest(manifest)
+    staging = backup.with_name(f".{backup.name}.{digest[:16]}.staging")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    try:
+        staging.symlink_to(outside, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlinks unavailable: {exc}")
+
+    with pytest.raises(RecoveryError, match="staging path"):
+        create_verified_backup(workspace, backup, manifest)
+    assert list(outside.iterdir()) == []
+
+
+def test_backup_rejects_symlinked_staging_parent(tmp_path: Path) -> None:
+    workspace, manifest = _fixture(tmp_path)
+    backup = tmp_path / "backup"
+    digest = recovery._manifest_digest(manifest)
+    staging = backup.with_name(f".{backup.name}.{digest[:16]}.staging")
+    staging.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    try:
+        (staging / "video_product").symlink_to(outside, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlinks unavailable: {exc}")
+
+    with pytest.raises(RecoveryError, match="unsafe staging"):
+        create_verified_backup(workspace, backup, manifest)
+    assert list(outside.iterdir()) == []
+
+
 def test_budget_checks_each_destination_volume(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
