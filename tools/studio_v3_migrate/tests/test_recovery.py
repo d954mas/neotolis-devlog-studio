@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import tools.studio_v3_migrate.recovery as recovery
 
 from tools.studio_v3_migrate.budget import build_disk_budget
 from tools.studio_v3_migrate.inventory import DispositionRules, build_before_manifest
@@ -67,7 +68,7 @@ def test_restore_rehearsal_never_overwrites_destination(tmp_path: Path) -> None:
     restored.mkdir()
     (restored / "user-file.txt").write_text("keep", encoding="utf-8")
 
-    with pytest.raises(RecoveryError, match="empty"):
+    with pytest.raises(RecoveryError, match="differs"):
         rehearse_restore(backup, restored, manifest)
 
 
@@ -78,6 +79,7 @@ def test_disk_budget_never_counts_hardlinks_as_backup(tmp_path: Path) -> None:
         workspace,
         manifest,
         tmp_path / "backup",
+        tmp_path / "restore",
         tmp_path / "clone",
     )
 
@@ -86,3 +88,73 @@ def test_disk_budget_never_counts_hardlinks_as_backup(tmp_path: Path) -> None:
     assert report["restore_rehearsal_copy_bytes"] == total
     assert report["required_additional_peak_bytes"] >= total * 2
     assert report["hardlinks_are_backup"] is False
+
+
+def test_interrupted_backup_resumes_from_staging(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, manifest = _fixture(tmp_path)
+    backup = tmp_path / "backup"
+    original = recovery._copy_entry
+    calls = 0
+
+    def fail_second(source: Path, destination: Path, kind: str) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("injected copy failure")
+        original(source, destination, kind)
+
+    monkeypatch.setattr(recovery, "_copy_entry", fail_second)
+    with pytest.raises(OSError, match="injected"):
+        create_verified_backup(workspace, backup, manifest)
+    assert not backup.exists()
+
+    monkeypatch.setattr(recovery, "_copy_entry", original)
+    report = create_verified_backup(workspace, backup, manifest)
+    assert report["verified"] is True
+    assert report["resumed_entries"] == 1
+
+
+def test_verified_existing_backup_is_idempotent(tmp_path: Path) -> None:
+    workspace, manifest = _fixture(tmp_path)
+    backup = tmp_path / "backup"
+    first = create_verified_backup(workspace, backup, manifest)
+    second = create_verified_backup(workspace, backup, manifest)
+    assert first["verified"] is True
+    assert second["verified"] is True
+    assert second["resumed_entries"] == len(manifest["entries"])
+
+
+def test_budget_checks_each_destination_volume(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, manifest = _fixture(tmp_path)
+
+    def volume(path: Path) -> str:
+        name = path.name
+        if name == "workspace":
+            return "source"
+        if name == "backup":
+            return "backup-volume"
+        return "full-volume"
+
+    monkeypatch.setattr(
+        "tools.studio_v3_migrate.budget._volume_identity", volume
+    )
+    monkeypatch.setattr(
+        "tools.studio_v3_migrate.budget._free_bytes",
+        lambda path: 10**9 if path.name == "backup" else 0,
+    )
+    report = build_disk_budget(
+        workspace,
+        manifest,
+        tmp_path / "backup",
+        tmp_path / "restore",
+        tmp_path / "clone",
+    )
+    assert report["sufficient"] is False
+    assert any(
+        item["id"] == "full-volume" and not item["sufficient"]
+        for item in report["volumes"]
+    )

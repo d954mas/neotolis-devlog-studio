@@ -8,7 +8,7 @@ import re
 import tomllib
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 
@@ -285,11 +285,233 @@ def build_before_manifest(workspace: Path, rules: DispositionRules) -> dict[str,
     }
 
 
-def load_manifest(path: Path) -> dict[str, Any]:
+_MANIFEST_ENTRY_FIELDS = {
+    "path",
+    "project_root",
+    "project_disposition",
+    "project_rule_id",
+    "rule_id",
+    "action",
+    "target_owner",
+    "bytes",
+    "sha256",
+    "kind",
+    "source_media",
+}
+_MANIFEST_ENTRY_STRING_FIELDS = {
+    "project_root",
+    "project_disposition",
+    "project_rule_id",
+    "rule_id",
+    "action",
+    "target_owner",
+}
+_PORTABLE_INVALID_CHARS = frozenset('<>:"|?*')
+
+
+def _portable_manifest_path(value: Any) -> PurePosixPath:
+    if not isinstance(value, str) or not value or "\x00" in value:
+        raise InventoryError("manifest entry path must be a non-empty string")
+    if "\\" in value:
+        raise InventoryError(f"manifest entry path is not portable: {value!r}")
+    components = value.split("/")
+    if any(component in {"", ".", ".."} for component in components):
+        raise InventoryError(f"manifest entry path is not normalized: {value!r}")
+    if any(
+        component.endswith((" ", "."))
+        or any(character in _PORTABLE_INVALID_CHARS for character in component)
+        for component in components
+    ):
+        raise InventoryError(f"manifest entry path is not portable: {value!r}")
+    posix = PurePosixPath(value)
+    windows = PureWindowsPath(value)
+    if (
+        posix.is_absolute()
+        or windows.is_absolute()
+        or bool(windows.drive)
+        or posix.as_posix() != value
+    ):
+        raise InventoryError(
+            f"manifest entry path must be normalized and relative: {value!r}"
+        )
+    return posix
+
+
+def _required_nonempty_string(
+    value: dict[str, Any], field: str, subject: str
+) -> str:
+    selected = value.get(field)
+    if not isinstance(selected, str) or not selected:
+        raise InventoryError(f"{subject} requires non-empty {field}")
+    return selected
+
+
+def validate_manifest(
+    manifest: dict[str, Any], *, expected_workspace: Path | None = None
+) -> dict[str, Any]:
+    if not isinstance(manifest, dict) or manifest.get("schema_version") != 1:
+        raise InventoryError("unsupported or incomplete before-manifest")
+    if (
+        not isinstance(manifest.get("generated_at"), str)
+        or not manifest["generated_at"]
+    ):
+        raise InventoryError("before-manifest requires generated_at")
+    rules_sha256 = manifest.get("rules_sha256")
+    if (
+        not isinstance(rules_sha256, str)
+        or re.fullmatch(r"[0-9a-f]{64}", rules_sha256) is None
+    ):
+        raise InventoryError("before-manifest requires a valid rules_sha256")
+
+    workspace_value = manifest.get("workspace")
+    if not isinstance(workspace_value, str) or not workspace_value:
+        raise InventoryError("before-manifest requires workspace")
+    declared_workspace = Path(workspace_value)
+    if not declared_workspace.is_absolute():
+        raise InventoryError("manifest workspace must be absolute")
+    declared_workspace = declared_workspace.resolve()
+    if expected_workspace is not None and (
+        declared_workspace != expected_workspace.resolve()
+    ):
+        raise InventoryError(
+            "manifest workspace does not match the requested workspace"
+        )
+
+    project_roots_value = manifest.get("project_roots")
+    if not isinstance(project_roots_value, list):
+        raise InventoryError("before-manifest requires project_roots")
+    project_roots: dict[str, dict[str, Any]] = {}
+    project_root_keys: set[str] = set()
+    for index, value in enumerate(project_roots_value):
+        subject = f"manifest project root {index}"
+        if not isinstance(value, dict):
+            raise InventoryError(f"{subject} must be an object")
+        name = _required_nonempty_string(value, "name", subject)
+        try:
+            root_path = _portable_manifest_path(name)
+        except InventoryError as exc:
+            raise InventoryError(f"{subject} has invalid name") from exc
+        if len(root_path.parts) != 1:
+            raise InventoryError(f"{subject} has invalid name")
+        key = name.casefold()
+        if key in project_root_keys:
+            raise InventoryError(f"duplicate manifest project root: {name}")
+        project_root_keys.add(key)
+        _required_nonempty_string(value, "disposition", subject)
+        _required_nonempty_string(value, "rule_id", subject)
+        project_roots[name] = value
+
+    entries_value = manifest.get("entries")
+    if not isinstance(entries_value, list):
+        raise InventoryError("before-manifest requires entries")
+    entries: list[tuple[dict[str, Any], PurePosixPath]] = []
+    exact_paths: set[str] = set()
+    casefold_paths: set[str] = set()
+    for index, value in enumerate(entries_value):
+        subject = f"manifest entry {index}"
+        if not isinstance(value, dict):
+            raise InventoryError(f"{subject} must be an object")
+        missing = sorted(_MANIFEST_ENTRY_FIELDS - value.keys())
+        if missing:
+            raise InventoryError(
+                f"{subject} missing required field {missing[0]}"
+            )
+        relative = _portable_manifest_path(value["path"])
+        raw_path = relative.as_posix()
+        casefold_path = raw_path.casefold()
+        if raw_path in exact_paths or casefold_path in casefold_paths:
+            raise InventoryError(f"duplicate manifest entry path: {raw_path}")
+        exact_paths.add(raw_path)
+        casefold_paths.add(casefold_path)
+
+        for field in _MANIFEST_ENTRY_STRING_FIELDS:
+            _required_nonempty_string(value, field, subject)
+        if value["kind"] not in {"file", "symlink"}:
+            raise InventoryError(f"{subject} has invalid kind")
+        digest = value["sha256"]
+        if (
+            not isinstance(digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+        ):
+            raise InventoryError(f"{subject} has invalid sha256")
+        size = value["bytes"]
+        if (
+            not isinstance(size, int)
+            or isinstance(size, bool)
+            or size < 0
+        ):
+            raise InventoryError(f"{subject} has invalid bytes")
+        if not isinstance(value["source_media"], bool):
+            raise InventoryError(f"{subject} has invalid source_media")
+        entries.append((value, relative))
+
+    symlink_paths = {
+        tuple(part.casefold() for part in relative.parts)
+        for entry, relative in entries
+        if entry["kind"] == "symlink"
+    }
+    for _entry, relative in entries:
+        parts = tuple(part.casefold() for part in relative.parts)
+        if any(parts[:depth] in symlink_paths for depth in range(1, len(parts))):
+            raise InventoryError(
+                f"manifest entry is below a symlink: {relative.as_posix()}"
+            )
+
+    for entry, relative in entries:
+        project_root = entry["project_root"]
+        root = project_roots.get(project_root)
+        if root is None or relative.parts[0] != project_root:
+            raise InventoryError(
+                f"manifest entry project_root mismatch: {relative.as_posix()}"
+            )
+        if (
+            entry["project_disposition"] != root["disposition"]
+            or entry["project_rule_id"] != root["rule_id"]
+        ):
+            raise InventoryError(
+                f"manifest entry project metadata mismatch: {relative.as_posix()}"
+            )
+
+    by_action: dict[str, int] = {}
+    by_disposition: dict[str, int] = {}
+    for entry, _relative in entries:
+        action = entry["action"]
+        disposition = entry["project_disposition"]
+        by_action[action] = by_action.get(action, 0) + 1
+        by_disposition[disposition] = by_disposition.get(disposition, 0) + 1
+    expected_summary = {
+        "projects": len(project_roots),
+        "entries": len(entries),
+        "bytes": sum(entry["bytes"] for entry, _relative in entries),
+        "source_media_bytes": sum(
+            entry["bytes"]
+            for entry, _relative in entries
+            if entry["source_media"]
+        ),
+        "by_action": dict(sorted(by_action.items())),
+        "by_project_disposition": dict(sorted(by_disposition.items())),
+        "unmatched": 0,
+        "ambiguous": 0,
+        "parse_failures": 0,
+    }
+    summary = manifest.get("summary")
+    if not isinstance(summary, dict):
+        raise InventoryError("before-manifest requires summary")
+    for field, expected in expected_summary.items():
+        if json.dumps(
+            summary.get(field), sort_keys=True, separators=(",", ":")
+        ) != json.dumps(expected, sort_keys=True, separators=(",", ":")):
+            raise InventoryError(f"manifest summary mismatch for {field}")
+    return manifest
+
+
+def load_manifest(
+    path: Path, *, expected_workspace: Path | None = None
+) -> dict[str, Any]:
     try:
         manifest = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise InventoryError(f"cannot parse manifest {path}: {exc}") from exc
-    if manifest.get("schema_version") != 1 or not isinstance(manifest.get("entries"), list):
-        raise InventoryError("unsupported or incomplete before-manifest")
-    return manifest
+    return validate_manifest(
+        manifest, expected_workspace=expected_workspace
+    )
