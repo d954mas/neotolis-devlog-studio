@@ -12,25 +12,11 @@ from dlstudio.timeline.api import (
     AnimationInstruction,
     AssetSnapshot,
     AudioInstruction,
-    MediaGeometry as TimelineMediaGeometry,
+    MediaGeometry,
     TimelineIR,
     VideoFadeInstruction,
     VisualInstruction,
 )
-
-
-@dataclass(frozen=True, slots=True)
-class MediaGeometry:
-    """Resolved source-to-output transform captured at compile time."""
-
-    source_width: int
-    source_height: int
-    scaled_width: int
-    scaled_height: int
-    crop_x: int | None = None
-    crop_y: int | None = None
-    pad_x: int | None = None
-    pad_y: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,16 +193,7 @@ def _compile_resolved(
                     geometry=(
                         None
                         if layer.geometry is None
-                        else TimelineMediaGeometry(
-                            source_width=layer.geometry.source_width,
-                            source_height=layer.geometry.source_height,
-                            scaled_width=layer.geometry.scaled_width,
-                            scaled_height=layer.geometry.scaled_height,
-                            crop_x=layer.geometry.crop_x,
-                            crop_y=layer.geometry.crop_y,
-                            pad_x=layer.geometry.pad_x,
-                            pad_y=layer.geometry.pad_y,
-                        )
+                        else layer.geometry
                     ),
                     animations=tuple(
                         AnimationInstruction(
