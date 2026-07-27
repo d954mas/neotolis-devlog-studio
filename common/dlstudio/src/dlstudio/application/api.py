@@ -1,6 +1,6 @@
 """Public application contracts used by CLI, API, and UI adapters."""
 
-from .assets import IngestAssetCommand, ingest_asset
+from .assets import IngestAssetCommand, ingest_asset, resolve_blob
 from .authoring import compile_production
 from .delivery import (
     LocalDeliveryState,
@@ -13,6 +13,7 @@ from .workflow import (
     package_release,
     start_workflow,
     submit_review,
+    submit_review_payload,
 )
 from .production import advance_production
 from dlstudio.assets.api import MediaFacts
@@ -29,6 +30,8 @@ __all__ = [
     "ingest_asset",
     "package_release",
     "recover_local_delivery",
+    "resolve_blob",
     "start_workflow",
     "submit_review",
+    "submit_review_payload",
 ]

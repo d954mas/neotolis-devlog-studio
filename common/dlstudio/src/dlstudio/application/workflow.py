@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from typing import Any
 from dlstudio.constraints.api import ConstraintSet
 from dlstudio.foundation.api import BlobRef, canonical_bytes
 from dlstudio.release.api import PackageFile, ReleaseCandidate
@@ -11,7 +12,7 @@ from dlstudio.rendering.api import (
     RenderOptions,
     RenderResult,
 )
-from dlstudio.review.api import ReviewVerdict
+from dlstudio.review.api import ReviewFinding, ReviewVerdict
 from dlstudio.timeline.api import (
     CheckPolicy,
     CheckReport,
@@ -146,6 +147,39 @@ def submit_review(
     return succeeded
 
 
+def submit_review_payload(
+    workflows: WorkflowStore,
+    payload: Mapping[str, Any],
+) -> WorkflowRun:
+    """Create the exact verdict from a small transport-neutral review payload."""
+
+    required = {"outcome", "scope", "reviewer", "reviewed_at", "findings"}
+    if set(payload) != required:
+        raise ValueError("review payload fields mismatch")
+    current = get_status(workflows)
+    prepared = _stage_outputs(current, "prepare")
+    finalized = _stage_outputs(current, "final")
+    findings = tuple(
+        ReviewFinding(
+            finding_id=str(item["finding_id"]),
+            text=str(item["text"]),
+            requires_change=bool(item.get("requires_change", False)),
+        )
+        for item in payload["findings"]
+    )
+    verdict = ReviewVerdict(
+        artifact=finalized["artifact"],
+        outcome=payload["outcome"],
+        check_report=prepared["check_report"],
+        constraints=prepared["constraints"],
+        scope=tuple(str(item) for item in payload["scope"]),
+        reviewer=str(payload["reviewer"]),
+        reviewed_at=str(payload["reviewed_at"]),
+        findings=findings,
+    )
+    return submit_review(workflows, verdict)
+
+
 def package_release(
     workflows: WorkflowStore,
     store: BlobStore,
@@ -222,6 +256,11 @@ def package_release(
     eligible = succeeded.allow_delivery()
     _save_next(workflows, succeeded, eligible)
     return candidate, eligible
+
+
+def _stage_outputs(workflow: WorkflowRun, stage: StageId) -> dict[str, BlobRef]:
+    attempt = next(item for item in workflow.attempts if item.stage == stage)
+    return {item.name: item.blob for item in attempt.outputs}
 
 
 def _head_revision(workflows: WorkflowStore) -> int:

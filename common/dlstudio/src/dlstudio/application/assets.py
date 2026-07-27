@@ -14,6 +14,9 @@ from dlstudio.assets.api import (
     MediaFacts,
     Provenance,
 )
+from dlstudio.foundation.api import BlobRef
+
+from .release import BlobStore
 
 @dataclass(frozen=True, slots=True)
 class IngestAssetCommand:
@@ -42,3 +45,11 @@ def ingest_asset(
         expected_revision=command.expected_revision,
         inspect_media=inspect_media,
     )
+
+
+def resolve_blob(store: BlobStore, sha256: str, size: int) -> Path:
+    """Resolve one verified immutable blob for streaming adapters."""
+
+    ref = BlobRef(sha256, size)
+    store.verify(ref)
+    return store.path_for(ref)
