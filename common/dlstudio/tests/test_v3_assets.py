@@ -8,7 +8,6 @@ from threading import Event, Thread
 
 import pytest
 
-from dlstudio.application.api import ProductionContext
 from dlstudio.assets.api import (
     Approval,
     AssetIndexRevision,
@@ -26,18 +25,12 @@ from dlstudio.speech.api import SpeechTakeReceipt
 
 
 def _repositories(root: Path) -> tuple[ProductionRepository, AssetRepository]:
-    context = ProductionContext.create(
-        workspace_root=root,
-        project_root=root,
-        production_id="fixture.assets",
-        production_root=root / "fixture.assets",
-    )
-    paths = context.paths
+    studio = root / "fixture.assets" / "data" / ".studio"
     repository = ProductionRepository(
-        object_root=paths.object_root,
-        state_root=paths.state_root,
-        staging_root=paths.staging_root,
-        lock_root=paths.lock_root,
+        object_root=studio / "objects",
+        state_root=studio / "state",
+        staging_root=studio / "staging",
+        lock_root=studio / "locks",
         production_id="fixture.assets",
     )
     return repository, AssetRepository(repository)

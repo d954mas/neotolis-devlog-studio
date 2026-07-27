@@ -12,7 +12,7 @@ from .assets import (
     GarbageCollectionReport,
     MaterializeResult,
 )
-from .workflow import SavedWorkflow, WorkflowRepository
+from .workflow import WorkflowRepository
 
 __all__ = [
     "HeadRef",
@@ -20,7 +20,6 @@ __all__ = [
     "ProductionRepository",
     "ProductionStateRoot",
     "WriterLease",
-    "SavedWorkflow",
     "WorkflowRepository",
     "AssetRepository",
     "GarbageCollectionReport",

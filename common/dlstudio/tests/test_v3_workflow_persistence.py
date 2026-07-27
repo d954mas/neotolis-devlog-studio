@@ -29,9 +29,11 @@ def test_workflow_repository_keeps_one_current_snapshot(tmp_path: Path) -> None:
         expected_head_revision=0,
     )
 
-    assert saved.head.revision == 1
+    assert saved.revision == 1
     assert workflows.read_current() == run
-    assert storage.read_root().records == {"workflow:current": saved.workflow}
+    assert storage.read_root().records == {
+        "workflow:current": storage.objects.put_bytes(run.canonical_bytes())
+    }
 
 
 def test_workflow_repository_rejects_stale_writer(tmp_path: Path) -> None:

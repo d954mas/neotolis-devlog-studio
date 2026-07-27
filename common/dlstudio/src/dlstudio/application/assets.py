@@ -15,9 +15,6 @@ from dlstudio.assets.api import (
     Provenance,
 )
 
-from .context import ProductionContext
-
-
 @dataclass(frozen=True, slots=True)
 class IngestAssetCommand:
     source: Path
@@ -29,7 +26,6 @@ class IngestAssetCommand:
 
 
 def ingest_asset(
-    context: ProductionContext,
     repository: AssetIngestPort,
     command: IngestAssetCommand,
     *,

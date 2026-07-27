@@ -2,18 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 
 from dlstudio.foundation.api import BlobRef, CasConflict, CorruptObject
 from dlstudio.persistence.api import HeadRef, ProductionRepository
 from dlstudio.workflow.api import WorkflowRun
-
-
-@dataclass(frozen=True, slots=True)
-class SavedWorkflow:
-    workflow: BlobRef
-    head: HeadRef
 
 
 class WorkflowRepository:
@@ -44,7 +37,7 @@ class WorkflowRepository:
         *,
         expected_workflow_revision: int,
         expected_head_revision: int,
-    ) -> SavedWorkflow:
+    ) -> HeadRef:
         return self._save(
             workflow,
             expected_workflow_revision=expected_workflow_revision,
@@ -58,7 +51,7 @@ class WorkflowRepository:
         *,
         expected_workflow_revision: int,
         expected_head_revision: int,
-    ) -> SavedWorkflow:
+    ) -> HeadRef:
         if not workflow.completed:
             raise ValueError("delivery workflow must be complete")
         if self.repository.read_pending_delivery() is None:
@@ -121,7 +114,7 @@ class WorkflowRepository:
         expected_workflow_revision: int,
         expected_head_revision: int,
         allow_pending_delivery: bool,
-    ) -> SavedWorkflow:
+    ) -> HeadRef:
         if workflow.production_id != self.repository.production_id:
             raise ValueError("workflow belongs to another production")
         current = self.read_current()
@@ -143,4 +136,4 @@ class WorkflowRepository:
             allowed_reserved_keys=frozenset({self.RECORD_KEY}),
             allow_pending_delivery=allow_pending_delivery,
         )
-        return SavedWorkflow(ref, head)
+        return head

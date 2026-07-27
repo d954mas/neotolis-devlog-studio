@@ -9,7 +9,6 @@ from pathlib import Path
 
 import pytest
 
-from dlstudio.application.api import ProductionContext
 from dlstudio.foundation.api import (
     BlobRef,
     CanonicalEncodingError,
@@ -25,24 +24,15 @@ from dlstudio.persistence import ProductionRepository
 from dlstudio.persistence import api as persistence_api
 
 
-def _context(root: Path, production_id: str = "fixture.reel") -> ProductionContext:
-    return ProductionContext.create(
-        workspace_root=root,
-        project_root=root,
-        production_id=production_id,
-        production_root=root / production_id,
-    )
-
-
 def _repository(
     root: Path, production_id: str = "fixture.reel"
 ) -> ProductionRepository:
-    paths = _context(root, production_id).paths
+    studio = root / production_id / "data" / ".studio"
     return ProductionRepository(
-        object_root=paths.object_root,
-        state_root=paths.state_root,
-        staging_root=paths.staging_root,
-        lock_root=paths.lock_root,
+        object_root=studio / "objects",
+        state_root=studio / "state",
+        staging_root=studio / "staging",
+        lock_root=studio / "locks",
         production_id=production_id,
     )
 
@@ -101,12 +91,6 @@ def test_semantic_mappings_are_defensively_frozen(tmp_path: Path) -> None:
     with pytest.raises(TypeError):
         envelope.payload["new"] = "value"  # type: ignore[index]
 
-    values = {"ffmpeg_build": "one"}
-    bindings = _context(tmp_path).machine_bindings
-    custom = type(bindings)(values=values)
-    values["ffmpeg_build"] = "two"
-    assert custom.values["ffmpeg_build"] == "one"
-
     records: dict[str, BlobRef] = {}
     root = persistence_api.ProductionStateRoot("fixture.reel", 0, records)
     records["late"] = BlobRef("0" * 64, 0)
@@ -123,8 +107,7 @@ def test_logical_paths_are_portable() -> None:
 
 
 def test_real_date_prefixed_production_id_is_valid(tmp_path: Path) -> None:
-    context = _context(tmp_path, "2026_07_18_reel_02")
-    assert str(context.production_id) == "2026_07_18_reel_02"
+    assert str(DomainId("2026_07_18_reel_02")) == "2026_07_18_reel_02"
 
 
 def test_persistence_rejects_noncanonical_production_id(
