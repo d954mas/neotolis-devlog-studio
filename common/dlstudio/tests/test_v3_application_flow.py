@@ -17,6 +17,7 @@ from dlstudio.application.api import (
     submit_review,
 )
 from dlstudio.assets.api import Approval, License, Provenance
+from dlstudio.authoring.api import load_edit
 from dlstudio.foundation.api import BlobRef
 from dlstudio.persistence.api import ObjectStore, open_local_repositories
 from dlstudio.persistence.assets import AssetRepository
@@ -28,6 +29,36 @@ from dlstudio.workflow.api import StageId, WorkflowKind, WorkflowRun
 def _outputs(workflow: WorkflowRun, stage: StageId) -> dict[str, BlobRef]:
     attempt = next(item for item in workflow.attempts if item.stage == stage)
     return {item.name: item.blob for item in attempt.outputs}
+
+
+def test_explicit_authoring_loads_dataclasses_with_postponed_annotations(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "edit.py"
+    source.write_text(
+        "\n".join(
+            (
+                "from __future__ import annotations",
+                "from dataclasses import dataclass",
+                "from dlstudio.authoring.api import Edit, SolidLayer",
+                "@dataclass",
+                "class Note:",
+                "    text: str",
+                "NOTE = Note('valid')",
+                "EDIT = Edit(",
+                "    production_id='fixture.loader',",
+                "    width=64, height=96, fps_num=30, fps_den=1,",
+                "    duration_ns=200_000_000, background='black',",
+                "    visuals=(SolidLayer(0, 200_000_000, 0, 0, 0, 64, 96, 'black'),),",
+                "    standalone_story='A valid explicit authoring file.',",
+                ")",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    assert load_edit(source).production_id == "fixture.loader"
 
 
 def _release(
