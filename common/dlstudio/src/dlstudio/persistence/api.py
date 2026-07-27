@@ -30,7 +30,7 @@ from dlstudio.foundation.api import (
 )
 
 _RESERVED_RECORD_PREFIXES = ("asset_revision:",)
-_RESERVED_RECORD_KEYS = frozenset({"assets:index"})
+_RESERVED_RECORD_KEYS = frozenset({"assets:index", "workflow:current"})
 
 
 def _reserved_record(key: str) -> bool:
@@ -448,8 +448,10 @@ class ProductionRepository:
                     raise CasConflict(
                         f"immutable reserved record cannot change: {key}"
                     )
-                if key == "assets:index" and key not in next_reserved:
-                    raise ValueError("asset index cannot be removed")
+                if key in _RESERVED_RECORD_KEYS and key not in next_reserved:
+                    raise ValueError(
+                        f"current owner record cannot be removed: {key}"
+                    )
             head = {
                 "schema": self.HEAD_SCHEMA,
                 "version": 1,
