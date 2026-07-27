@@ -330,7 +330,9 @@ class VisualInstruction:
             raw = value.get(name)
             if raw is None:
                 return None
-            return AssetRevisionRef(str(raw["asset_id"]), str(raw["revision_hash"]))
+            return AssetRevisionRef(
+                str(raw["asset_id"]), BlobRef.from_payload(raw["object"])
+            )
 
         return cls(
             kind=value["kind"],
@@ -426,7 +428,7 @@ class AudioInstruction:
         asset = value["asset"]
         return cls(
             asset=AssetRevisionRef(
-                str(asset["asset_id"]), str(asset["revision_hash"])
+                str(asset["asset_id"]), BlobRef.from_payload(asset["object"])
             ),
             start_ns=int(value["start_ns"]),
             duration_ns=int(value["duration_ns"]),
@@ -499,7 +501,7 @@ class TimelineIR:
     metadata: Mapping[str, str] = field(default_factory=dict)
 
     DOMAIN = "dlstudio.timeline_ir"
-    VERSION = 2
+    VERSION = 3
 
     def __post_init__(self) -> None:
         DomainId(self.production_id)
