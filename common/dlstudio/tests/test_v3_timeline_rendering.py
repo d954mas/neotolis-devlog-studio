@@ -315,7 +315,7 @@ def test_cache_hit_rejects_changed_executor(tmp_path: Path) -> None:
         cache_root=cache,
     )
     forged = replace(fingerprint, ffmpeg="definitely-no-such-ffmpeg")
-    with pytest.raises(FileNotFoundError, match="unavailable"):
+    with pytest.raises(FileNotFoundError, match="not found"):
         render(
             timeline,
             forged,
@@ -324,6 +324,13 @@ def test_cache_hit_rejects_changed_executor(tmp_path: Path) -> None:
             output=tmp_path / "second.mp4",
             cache_root=cache,
         )
+
+
+def test_executor_rejects_caller_forged_renderer_identity() -> None:
+    fingerprint = ExecutionFingerprint.detect()
+    forged = replace(fingerprint, renderer_source_sha256="0" * 64)
+    with pytest.raises(RuntimeError, match="local renderer differs"):
+        forged.validate_executor()
 
 
 def test_poisoned_cache_is_rebuilt_not_trusted(tmp_path: Path) -> None:
