@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from dlstudio.assets.api import Provenance
-from dlstudio.foundation.api import DomainId, canonical_hash
+from dlstudio.foundation.api import BlobRef, DomainId, canonical_hash
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,7 +70,7 @@ class CaptureReceipt:
     height: int
     head_ns: int
     tail_ns: int
-    audit_sha256: str
+    audit_ref: BlobRef
 
     def provenance_for(self, request: CaptureRequest) -> Provenance:
         if self.request_id != request.request_id:
@@ -95,5 +95,5 @@ class CaptureReceipt:
             build_id=self.build_id,
             native_width=self.width,
             native_height=self.height,
-            provider_receipt_sha256=self.audit_sha256,
+            provider_receipt_ref=self.audit_ref,
         )

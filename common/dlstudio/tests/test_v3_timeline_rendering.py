@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import runpy
 import shutil
 import subprocess
 import sys
@@ -18,11 +19,11 @@ from dlstudio.assets.api import (
     Approval,
     AssetRevision,
     AssetRevisionRef,
-    BlobRef,
     License,
     MediaFacts,
     Provenance,
 )
+from dlstudio.foundation.api import BlobRef
 from dlstudio.authoring.api import (
     Animation,
     AudioClip,
@@ -34,8 +35,8 @@ from dlstudio.authoring.api import (
     VideoFade,
 )
 from dlstudio.authoring.compiler import compile_edit
-from dlstudio.authoring.loader import load_edit
 from dlstudio.foundation.api import canonical_bytes
+from dlstudio.persistence.api import ObjectStore
 from dlstudio.rendering.api import (
     ExecutionFingerprint,
     RenderOptions,
@@ -86,7 +87,7 @@ def _asset(
         blob=BlobRef(digest, len(raw)),
         media=media,
         provenance=Provenance("provided", "test_fixture"),
-        approval=Approval("validated", (digest,)),
+        approval=Approval("validated", (BlobRef(digest, len(raw)),)),
         license=License("test-only", False, redistribution_allowed=False),
     )
 
@@ -827,7 +828,7 @@ def test_invalid_geometry_and_non_base_special_transition_are_rejected() -> None
         blob=BlobRef("1" * 64, 1),
         media=MediaFacts(kind="image", format_name="png", width=10, height=10),
         provenance=Provenance("provided", "test_fixture"),
-        approval=Approval("validated", ("1" * 64,)),
+        approval=Approval("pending"),
         license=License("test-only", False, redistribution_allowed=False),
     )
     with pytest.raises(ValueError, match="resolved crop is outside scaled media"):
@@ -1169,7 +1170,9 @@ def test_fresh_process_renders_ir_without_authoring_import(
     assert "GLOBAL_CHUNK_RESOLVER" not in worker_source
 
 
-def test_representative_vertical_longform_and_voice_ports_compile() -> None:
+def test_representative_vertical_longform_and_voice_ports_compile(
+    tmp_path: Path,
+) -> None:
     repo = Path(__file__).parents[3]
     ports = (
         repo
@@ -1188,7 +1191,32 @@ def test_representative_vertical_longform_and_voice_ports_compile() -> None:
         / "2026_07_17_devlog_01"
         / "v3_port.py",
     )
-    timelines = [compile_edit(load_edit(path)) for path in ports]
+    timelines = []
+    for index, path in enumerate(ports):
+        namespace = runpy.run_path(str(path))
+        edit = namespace["EDIT"]
+        evidence_objects = namespace["EVIDENCE_OBJECTS"]
+        store = ObjectStore(
+            tmp_path / f"objects-{index}",
+            tmp_path / f"staging-{index}",
+        )
+        published = {
+            store.put_bytes(raw)
+            for _expected, raw in evidence_objects
+        }
+        assert published == {expected for expected, _raw in evidence_objects}
+        referenced = {
+            ref
+            for revision in edit.assets
+            for ref in (
+                *revision.provenance.evidence_refs,
+                *revision.approval.evidence_refs,
+            )
+        }
+        assert referenced == published
+        for ref in referenced:
+            store.verify(ref)
+        timelines.append(compile_edit(edit))
     assert [item.metadata["kind"] for item in timelines] == [
         "reel",
         "devlog",

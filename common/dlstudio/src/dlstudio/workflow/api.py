@@ -6,8 +6,12 @@ import json
 from dataclasses import dataclass, replace
 from typing import Any, Literal
 
-from dlstudio.assets.api import BlobRef
-from dlstudio.foundation.api import DomainId, canonical_bytes, canonical_hash
+from dlstudio.foundation.api import (
+    BlobRef,
+    DomainId,
+    canonical_bytes,
+    canonical_hash,
+)
 
 StageId = Literal["prepare", "draft", "review", "final", "package", "deliver"]
 WorkflowKind = Literal["reel", "longform", "capture_vo"]

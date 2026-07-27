@@ -45,7 +45,4 @@ def ingest_asset(
         license=command.license,
         expected_revision=command.expected_revision,
         inspect_media=inspect_media,
-        toolchain=context.machine_bindings.values.get(
-            "ffprobe_fingerprint", context.machine_bindings.ffprobe
-        ),
     )

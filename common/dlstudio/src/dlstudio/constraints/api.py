@@ -6,8 +6,12 @@ import json
 from dataclasses import dataclass
 from typing import Any, Literal, Mapping
 
-from dlstudio.assets.api import BlobRef
-from dlstudio.foundation.api import DomainId, canonical_bytes, canonical_hash
+from dlstudio.foundation.api import (
+    BlobRef,
+    DomainId,
+    canonical_bytes,
+    canonical_hash,
+)
 
 
 @dataclass(frozen=True, slots=True)

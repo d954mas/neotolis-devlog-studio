@@ -10,8 +10,8 @@ from pathlib import Path
 import pytest
 
 from dlstudio.application.api import ProductionContext
-from dlstudio.assets.api import BlobRef
 from dlstudio.foundation.api import (
+    BlobRef,
     CanonicalEncodingError,
     CasConflict,
     CorruptObject,

@@ -321,6 +321,11 @@ def _literal(value: Any) -> str:
     return repr(value)
 
 
+def _blob_ref(path: Path) -> dict[str, Any]:
+    sha256, size = _sha(path)
+    return {"sha256": sha256, "size": size}
+
+
 def _asset_expression(
     *,
     asset_id: str,
@@ -328,25 +333,26 @@ def _asset_expression(
     sha256: str,
     size: int,
     media: dict[str, Any],
-    catalog_sha: str | None,
+    catalog_ref: dict[str, Any] | None,
     catalog_entry: dict[str, Any] | None,
     is_voice: bool,
-    script_sha: str | None,
-    music_license_sha: str | None,
-    derived_source_sha: str | None,
+    script_ref: dict[str, Any] | None,
+    voice_receipt_ref: dict[str, Any] | None,
+    music_license_ref: dict[str, Any] | None,
+    derived_source_ref: dict[str, Any] | None,
 ) -> str:
     catalog_matches = (
-        catalog_sha is not None
+        catalog_ref is not None
         and catalog_entry is not None
         and catalog_entry.get("sha256") == sha256
         and int(catalog_entry.get("size", -1)) == size
     )
-    if derived_source_sha is not None:
+    if derived_source_ref is not None:
         provenance = {
             "origin": "derived",
             "capture_method": "v3_static_raster_port",
             "logical_source": logical_path,
-            "provider_receipt_sha256": derived_source_sha,
+            "provider_receipt_ref": derived_source_ref,
         }
         license_payload = {
             "license_id": "derived-from-legacy-source-license-unverified",
@@ -355,14 +361,18 @@ def _asset_expression(
         }
         approval = {
             "status": "validated",
-            "evidence_sha256": (derived_source_sha,),
+            "evidence_refs": (derived_source_ref,),
         }
     elif is_voice:
+        if script_ref is None or voice_receipt_ref is None:
+            raise RuntimeError(f"voice evidence is incomplete: {logical_path}")
         provenance = {
             "origin": "recorded",
             "capture_method": "voice_take",
             "logical_source": logical_path,
-            "script_sha256": script_sha,
+            "state_id": f"legacy:{logical_path}",
+            "script_ref": script_ref,
+            "provider_receipt_ref": voice_receipt_ref,
         }
         license_payload = {
             "license_id": "creator-owned-voice",
@@ -381,7 +391,7 @@ def _asset_expression(
         }
     elif logical_path.startswith("data/footage/"):
         provenance = {
-            "origin": "recorded",
+            "origin": "migrated",
             "capture_method": "legacy_capture_unverified",
             "logical_source": logical_path,
         }
@@ -401,24 +411,27 @@ def _asset_expression(
             "attribution_required": False,
             "redistribution_allowed": False,
         }
-    if derived_source_sha is not None:
+    if derived_source_ref is not None:
         approval = {
             "status": "validated",
-            "evidence_sha256": (derived_source_sha,),
+            "evidence_refs": (derived_source_ref,),
         }
     else:
-        evidence: tuple[str, ...] = (catalog_sha,) if catalog_matches else ()
+        evidence = (catalog_ref,) if catalog_matches else ()
         approval = {
             "status": "validated" if evidence else "pending",
-            "evidence_sha256": evidence,
+            "evidence_refs": evidence,
             "reason": None if evidence else "no exact v3 migration evidence",
         }
-    if logical_path.endswith("first_day_in_a_loop.ogg") and music_license_sha:
+    if (
+        logical_path.endswith("first_day_in_a_loop.ogg")
+        and music_license_ref is not None
+    ):
         provenance = {
             "origin": "provided",
             "capture_method": "purchased_library",
             "logical_source": logical_path,
-            "provider_receipt_sha256": music_license_sha,
+            "provider_receipt_ref": music_license_ref,
         }
         license_payload = {
             "license_id": "purchased-premium-royalty-free",
@@ -426,9 +439,12 @@ def _asset_expression(
         }
         approval = {
             "status": "approved",
-            "evidence_sha256": tuple(
+            "evidence_refs": tuple(
                 value
-                for value in (catalog_sha if catalog_matches else None, music_license_sha)
+                for value in (
+                    catalog_ref if catalog_matches else None,
+                    music_license_ref,
+                )
                 if value is not None
             ),
         }
@@ -512,18 +528,21 @@ def main() -> int:
         (_ns(placement[beat.id] + beat.duration) for beat in timeline.beats),
         default=0,
     )
-    catalog_sha, catalog = _catalog(project)
+    _catalog_sha, catalog = _catalog(project)
+    catalog_path = project / "data/assets/catalog.json"
+    catalog_ref = _blob_ref(catalog_path) if catalog_path.is_file() else None
     music_license = project / "data/publish/music_license.md"
-    music_license_sha = _sha(music_license)[0] if music_license.is_file() else None
+    music_license_ref = (
+        _blob_ref(music_license) if music_license.is_file() else None
+    )
 
-    voice_scripts = {
-        beat.audio: hashlib.sha256(
-            edit.beats[beat.id].vo.encode("utf-8")
-        ).hexdigest()
+    voice_script_bytes = {
+        beat.audio: edit.beats[beat.id].vo.encode("utf-8")
         for beat in timeline.beats
     }
     paths: dict[str, str] = {}
-    derived_source_receipts: dict[str, str] = {}
+    evidence_objects: dict[str, tuple[dict[str, Any], bytes]] = {}
+    derived_source_receipts: dict[str, dict[str, Any]] = {}
     media_cache: dict[tuple[str, str | None], dict[str, Any]] = {}
     rasterizer_digest = hashlib.sha256()
     rasterizer_root = Path(render_chunk_png.__code__.co_filename).parent
@@ -548,19 +567,52 @@ def main() -> int:
 
     raster_root = project / "data/v3_port/raster"
     raster_root.mkdir(parents=True, exist_ok=True)
+    def publish_evidence(raw: bytes) -> dict[str, Any]:
+        sha256 = hashlib.sha256(raw).hexdigest()
+        ref = {"sha256": sha256, "size": len(raw)}
+        evidence_objects[sha256] = (ref, raw)
+        return ref
 
-    def source_receipt(payload: dict[str, Any]) -> str:
+    voice_evidence: dict[
+        str, tuple[dict[str, Any], dict[str, Any]]
+    ] = {}
+    for logical, script_bytes in voice_script_bytes.items():
+        script_ref = publish_evidence(script_bytes)
+        media_ref = _blob_ref(project / logical)
+        receipt_bytes = json.dumps(
+            {
+                "schema": "studio_v3.legacy_voice_port",
+                "version": 1,
+                "logical_source": logical,
+                "media": media_ref,
+                "script": script_ref,
+                "capture_audit": "unavailable",
+                "approval": "pending",
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        voice_evidence[logical] = (
+            script_ref,
+            publish_evidence(receipt_bytes),
+        )
+
+    def source_receipt(
+        payload: dict[str, Any],
+    ) -> tuple[str, dict[str, Any]]:
         raw = json.dumps(
             payload,
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
         ).encode("utf-8")
-        return hashlib.sha256(raw).hexdigest()
+        ref = publish_evidence(raw)
+        return ref["sha256"], ref
 
     def register_overlay_raster(beat_id: str, overlay: Any) -> str:
         chunk = edit.beats[beat_id].chunks[overlay.chunk_index]
-        receipt = source_receipt(
+        receipt, receipt_ref = source_receipt(
             {
                 "kind": "legacy_chunk_raster",
                 "chunk": chunk.model_dump(mode="json"),
@@ -571,12 +623,12 @@ def main() -> int:
         logical = f"data/v3_port/raster/overlay-{receipt}.png"
         destination = project / logical
         render_chunk_png(chunk, edit.design, destination)
-        derived_source_receipts[logical] = receipt
+        derived_source_receipts[logical] = receipt_ref
         register(logical)
         return logical
 
     def register_caption_raster(text: str) -> str:
-        receipt = source_receipt(
+        receipt, receipt_ref = source_receipt(
             {
                 "kind": "legacy_caption_raster",
                 "text": text,
@@ -587,7 +639,7 @@ def main() -> int:
         logical = f"data/v3_port/raster/caption-{receipt}.png"
         destination = project / logical
         render_caption_png(text, edit.design, destination)
-        derived_source_receipts[logical] = receipt
+        derived_source_receipts[logical] = receipt_ref
         register(logical)
         return logical
 
@@ -798,6 +850,25 @@ def main() -> int:
         emitted_asset_ids.add(asset_id)
         source = project / logical_path
         sha256, size = _sha(source)
+        catalog_entry = catalog.get(logical_path)
+        if (
+            catalog_ref is not None
+            and catalog_entry is not None
+            and catalog_entry.get("sha256") == sha256
+            and int(catalog_entry.get("size", -1)) == size
+        ):
+            evidence_objects[catalog_ref["sha256"]] = (
+                catalog_ref,
+                catalog_path.read_bytes(),
+            )
+        if (
+            music_license_ref is not None
+            and logical_path.endswith("first_day_in_a_loop.ogg")
+        ):
+            evidence_objects[music_license_ref["sha256"]] = (
+                music_license_ref,
+                music_license.read_bytes(),
+            )
         asset_rows.append(
             _asset_expression(
                 asset_id=asset_id,
@@ -806,21 +877,42 @@ def main() -> int:
                 size=size,
                 media=inspect(
                     logical_path,
-                    "audio" if logical_path in voice_scripts else None,
+                    "audio" if logical_path in voice_script_bytes else None,
                 ),
-                catalog_sha=catalog_sha,
-                catalog_entry=catalog.get(logical_path),
-                is_voice=logical_path in voice_scripts,
-                script_sha=voice_scripts.get(logical_path),
-                music_license_sha=music_license_sha,
-                derived_source_sha=derived_source_receipts.get(logical_path),
+                catalog_ref=catalog_ref,
+                catalog_entry=catalog_entry,
+                is_voice=logical_path in voice_script_bytes,
+                script_ref=(
+                    voice_evidence[logical_path][0]
+                    if logical_path in voice_evidence
+                    else None
+                ),
+                voice_receipt_ref=(
+                    voice_evidence[logical_path][1]
+                    if logical_path in voice_evidence
+                    else None
+                ),
+                music_license_ref=music_license_ref,
+                derived_source_ref=derived_source_receipts.get(logical_path),
             )
         )
 
+    evidence_rows = [
+        f"    (BlobRef({ref['sha256']!r}, {ref['size']}), {raw!r}),"
+        for ref, raw in (
+            evidence_objects[sha256]
+            for sha256 in sorted(evidence_objects)
+        )
+    ]
     source = f'''"""Generated static Studio v3 port; no legacy runtime imports."""
 
-from dlstudio.assets.api import Approval, AssetRevision, BlobRef, License, MediaFacts, Provenance
+from dlstudio.assets.api import Approval, AssetRevision, License, MediaFacts, Provenance
 from dlstudio.authoring.api import Animation, AudioClip, Edit, MediaGeometry, MediaLayer, VideoFade
+from dlstudio.foundation.api import BlobRef
+
+EVIDENCE_OBJECTS = (
+{chr(10).join(evidence_rows)}
+)
 
 ASSETS = (
 {chr(10).join(asset_rows)}

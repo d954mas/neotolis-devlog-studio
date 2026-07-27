@@ -21,8 +21,8 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, BinaryIO
 
-from dlstudio.assets.api import BlobRef
 from dlstudio.foundation.api import (
+    BlobRef,
     CasConflict,
     CorruptObject,
     DomainId,
