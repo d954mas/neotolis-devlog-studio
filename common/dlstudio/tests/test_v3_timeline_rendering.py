@@ -128,7 +128,7 @@ def test_compile_produces_standalone_canonical_timeline() -> None:
     raw = timeline.canonical_bytes()
     assert TimelineIR.from_canonical_bytes(raw) == timeline
     assert timeline.timeline_id == (
-        "fc66d169804cce3d28eb1d9d64a9cb16fc7060dbed4872f60be218342ed3a6ea"
+        "11f9c51b53891e50f016abf802af5c65f89088d6322cfaf9c92579dbf37eb3e4"
     )
     assert not check_timeline(timeline).blocking
     assert b"resolver" not in raw
@@ -816,7 +816,9 @@ def test_invalid_geometry_and_non_base_special_transition_are_rejected() -> None
             width=10,
             height=10,
             text="invalid",
-            font_asset=AssetRevisionRef("fixture.font", "0" * 64),
+            font_asset=AssetRevisionRef(
+                "fixture.font", BlobRef("0" * 64, 0)
+            ),
             font_size=10,
             color="white",
             transition="slide_left",  # type: ignore[arg-type]

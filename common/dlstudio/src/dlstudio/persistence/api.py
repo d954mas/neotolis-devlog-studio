@@ -29,14 +29,11 @@ from dlstudio.foundation.api import (
     canonical_bytes,
 )
 
-_RESERVED_RECORD_PREFIXES = ("asset_revision:",)
 _RESERVED_RECORD_KEYS = frozenset({"assets:index", "workflow:current"})
 
 
 def _reserved_record(key: str) -> bool:
-    return key in _RESERVED_RECORD_KEYS or key.startswith(
-        _RESERVED_RECORD_PREFIXES
-    )
+    return key in _RESERVED_RECORD_KEYS
 
 
 def _fsync_dir(path: Path) -> None:
@@ -484,12 +481,6 @@ class ProductionRepository:
                     "reserved record transition does not match its owner"
                 )
             for key in changed_reserved:
-                if key.startswith("asset_revision:") and (
-                    key in previous_reserved or key not in next_reserved
-                ):
-                    raise CasConflict(
-                        f"immutable reserved record cannot change: {key}"
-                    )
                 if key in _RESERVED_RECORD_KEYS and key not in next_reserved:
                     raise ValueError(
                         f"current owner record cannot be removed: {key}"

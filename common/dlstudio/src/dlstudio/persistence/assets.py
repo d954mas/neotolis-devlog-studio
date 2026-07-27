@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
 import tempfile
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +27,6 @@ from dlstudio.foundation.api import BlobRef, CasConflict, CorruptObject
 from .api import ProductionRepository
 
 ASSET_INDEX_KEY = "assets:index"
-ASSET_REVISION_PREFIX = "asset_revision:"
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,21 +65,12 @@ class AssetRepository:
             raise CorruptObject("invalid canonical asset index") from exc
 
     def read_revision(self, ref: AssetRevisionRef) -> AssetRevision:
-        return self._read_revision_from_root(self.repository.read_root(), ref)
+        return self._read_revision(ref)
 
-    def _read_revision_from_root(
-        self, root: Any, ref: AssetRevisionRef
-    ) -> AssetRevision:
-        object_ref = root.records.get(
-            f"{ASSET_REVISION_PREFIX}{ref.revision_hash}"
-        )
-        if object_ref is None:
-            raise CorruptObject(
-                f"asset revision is not reachable: {ref.revision_hash}"
-            )
+    def _read_revision(self, ref: AssetRevisionRef) -> AssetRevision:
         try:
             revision = AssetRevision.from_canonical_bytes(
-                self.repository.objects.read(object_ref)
+                self.repository.objects.read(ref.object)
             )
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             raise CorruptObject("invalid canonical asset revision") from exc
@@ -166,23 +157,13 @@ class AssetRepository:
         snapshot_root = self.repository.read_root(snapshot_head)
         index = self._read_index_from_root(snapshot_root)
         previous = index.entries.get(asset_id)
-        parent = None if previous is None else previous.revision_hash
-        if provenance.parent_revision_hash not in {None, parent}:
-            raise CasConflict("asset parent revision is stale")
         if previous is not None:
-            current_revision = self._read_revision_from_root(
-                snapshot_root, previous
-            )
+            current_revision = self._read_revision(previous)
             repeat_candidate = AssetRevision(
                 asset_id=asset_id,
                 blob=blob,
                 media=media,
-                provenance=replace(
-                    provenance,
-                    parent_revision_hash=(
-                        current_revision.provenance.parent_revision_hash
-                    ),
-                ),
+                provenance=provenance,
                 approval=approval,
                 license=license,
             )
@@ -201,94 +182,30 @@ class AssetRepository:
             asset_id=asset_id,
             blob=blob,
             media=media,
-            provenance=replace(provenance, parent_revision_hash=parent),
+            provenance=provenance,
             approval=approval,
             license=license,
         )
         revision_object = self.repository.objects.put_bytes(
             revision.canonical_bytes()
         )
+        if revision_object != revision.ref.object:
+            raise CorruptObject("asset revision object identity mismatch")
         next_index = AssetIndexRevision(
             {**index.entries, asset_id: revision.ref}
         )
         index_object = self.repository.objects.put_bytes(
             next_index.canonical_bytes()
         )
-        updates = {
-            ASSET_INDEX_KEY: index_object,
-            f"{ASSET_REVISION_PREFIX}{revision.revision_hash}": revision_object,
-        }
+        updates = {ASSET_INDEX_KEY: index_object}
         head = self.repository._update_records(
             updates,
             expected_revision=expected_revision,
-            allowed_reserved_keys=frozenset(updates),
+            allowed_reserved_keys=frozenset({ASSET_INDEX_KEY}),
         )
         return AssetIngestResult(
             revision, head.root_hash, head.revision, True
         )
-
-    def rebuild_index(self) -> AssetIndexRevision:
-        root = self.repository.read_root()
-        revisions: dict[str, AssetRevision] = {}
-        parent_hashes: set[str] = set()
-        for key, object_ref in root.records.items():
-            if not key.startswith(ASSET_REVISION_PREFIX):
-                continue
-            revision = AssetRevision.from_canonical_bytes(
-                self.repository.objects.read(object_ref)
-            )
-            if key != f"{ASSET_REVISION_PREFIX}{revision.revision_hash}":
-                raise CorruptObject("asset revision record key mismatch")
-            revisions[revision.revision_hash] = revision
-            for reachable in revision.reachable_blobs:
-                self.repository.objects.verify(reachable)
-            parent = revision.provenance.parent_revision_hash
-            if parent is not None:
-                parent_hashes.add(parent)
-        by_asset: dict[str, dict[str, AssetRevision]] = {}
-        for revision_hash, revision in revisions.items():
-            by_asset.setdefault(revision.asset_id, {})[revision_hash] = revision
-            parent = revision.provenance.parent_revision_hash
-            if parent is not None:
-                parent_revision = revisions.get(parent)
-                if parent_revision is None:
-                    raise CorruptObject("asset revision parent is missing")
-                if parent_revision.asset_id != revision.asset_id:
-                    raise CorruptObject("asset revision parent crosses assets")
-        leaves: dict[str, AssetRevisionRef] = {}
-        for asset_id, chain in by_asset.items():
-            roots = [
-                revision
-                for revision in chain.values()
-                if revision.provenance.parent_revision_hash is None
-            ]
-            if len(roots) != 1:
-                raise CorruptObject(f"asset chain needs one root: {asset_id}")
-            children: dict[str, list[AssetRevision]] = {}
-            for revision in chain.values():
-                parent = revision.provenance.parent_revision_hash
-                if parent is not None:
-                    children.setdefault(parent, []).append(revision)
-            if any(len(items) != 1 for items in children.values()):
-                raise CorruptObject(f"forked asset revision chain: {asset_id}")
-            visited: set[str] = set()
-            cursor = roots[0]
-            while True:
-                if cursor.revision_hash in visited:
-                    raise CorruptObject(f"cyclic asset revision chain: {asset_id}")
-                visited.add(cursor.revision_hash)
-                next_items = children.get(cursor.revision_hash, [])
-                if not next_items:
-                    break
-                cursor = next_items[0]
-            if visited != set(chain):
-                raise CorruptObject(f"disconnected asset revision chain: {asset_id}")
-            leaves[asset_id] = cursor.ref
-        return AssetIndexRevision(leaves)
-
-    def verify_index_projection(self) -> None:
-        if self.rebuild_index() != self.read_index():
-            raise CorruptObject("asset index differs from rebuilt projection")
 
     def materialize(self, blob: BlobRef, target: Path) -> MaterializeResult:
         self.repository.objects.verify(blob)
@@ -336,7 +253,6 @@ class AssetRepository:
         self, *, apply: bool
     ) -> GarbageCollectionReport:
         with self.repository.writer_lease():
-            root = self.repository.read_root()
             reachable: set[str] = set()
 
             def visit(ref: BlobRef, *, strict: bool = True) -> None:
@@ -375,8 +291,20 @@ class AssetRepository:
 
                 scan(value)
 
-            for direct in root.records.values():
-                visit(direct)
+            if self.repository.roots_path.is_dir():
+                for root_path in self.repository.roots_path.glob("*.json"):
+                    raw = root_path.read_bytes()
+                    if hashlib.sha256(raw).hexdigest() != root_path.stem:
+                        raise CorruptObject("production root hash mismatch")
+                    wrapped = json.loads(raw)
+                    if (
+                        wrapped.get("$domain")
+                        != self.repository.ROOT_SCHEMA
+                        or wrapped.get("$version") != 1
+                    ):
+                        raise CorruptObject("invalid production root schema")
+                    for value in wrapped["payload"]["records"].values():
+                        visit(BlobRef.from_payload(value))
 
             candidates: list[BlobRef] = []
             removed: list[BlobRef] = []

@@ -32,16 +32,19 @@ def _sha256(value: str | None, label: str) -> None:
 @dataclass(frozen=True, slots=True)
 class AssetRevisionRef:
     asset_id: str
-    revision_hash: str
+    object: BlobRef
 
     def __post_init__(self) -> None:
         DomainId(self.asset_id)
-        _sha256(self.revision_hash, "asset revision")
 
-    def as_payload(self) -> dict[str, str]:
+    @property
+    def revision_hash(self) -> str:
+        return self.object.sha256
+
+    def as_payload(self) -> dict[str, object]:
         return {
             "asset_id": self.asset_id,
-            "revision_hash": self.revision_hash,
+            "object": self.object.as_payload(),
         }
 
 
@@ -145,7 +148,6 @@ class Provenance:
     native_height: int | None = None
     script_ref: BlobRef | None = None
     provider_receipt_ref: BlobRef | None = None
-    parent_revision_hash: str | None = None
 
     def __post_init__(self) -> None:
         if self.origin not in {
@@ -165,7 +167,6 @@ class Provenance:
                 "logical_source",
                 normalize_logical_path(self.logical_source),
             )
-        _sha256(self.parent_revision_hash, "parent revision")
         if (self.native_width is None) != (self.native_height is None):
             raise ValueError("native geometry must include width and height")
         if self.native_width is not None and (
@@ -234,7 +235,6 @@ class Provenance:
                 if self.provider_receipt_ref is None
                 else self.provider_receipt_ref.as_payload()
             ),
-            "parent_revision_hash": self.parent_revision_hash,
         }
 
     @classmethod
@@ -344,7 +344,7 @@ class AssetRevision:
     license: License
 
     DOMAIN = "dlstudio.asset_revision"
-    VERSION = 2
+    VERSION = 3
 
     def __post_init__(self) -> None:
         DomainId(self.asset_id)
@@ -384,7 +384,10 @@ class AssetRevision:
 
     @property
     def ref(self) -> AssetRevisionRef:
-        return AssetRevisionRef(self.asset_id, self.revision_hash)
+        raw = self.canonical_bytes()
+        return AssetRevisionRef(
+            self.asset_id, BlobRef(self.revision_hash, len(raw))
+        )
 
     def canonical_bytes(self) -> bytes:
         return canonical_bytes(
@@ -420,7 +423,7 @@ class AssetIndexRevision:
     entries: Mapping[str, AssetRevisionRef] = field(default_factory=dict)
 
     DOMAIN = "dlstudio.asset_index"
-    VERSION = 1
+    VERSION = 2
 
     def __post_init__(self) -> None:
         snapshot = dict(self.entries)
@@ -463,7 +466,7 @@ class AssetIndexRevision:
             {
                 key: AssetRevisionRef(
                     asset_id=str(value["asset_id"]),
-                    revision_hash=str(value["revision_hash"]),
+                    object=BlobRef.from_payload(value["object"]),
                 )
                 for key, value in wrapped["payload"]["entries"].items()
             }

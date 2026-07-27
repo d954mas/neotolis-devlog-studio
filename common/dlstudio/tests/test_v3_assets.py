@@ -13,6 +13,7 @@ from dlstudio.assets.api import (
     Approval,
     AssetIndexRevision,
     AssetRevision,
+    AssetRevisionRef,
     License,
     MediaFacts,
     Provenance,
@@ -219,7 +220,7 @@ def test_ingest_is_source_preserving_idempotent_and_rebuildable(
     assert first.created
     assert (source.read_bytes(), source.stat().st_mtime_ns) == before
     assert assets.read_revision(first.revision.ref) == first.revision
-    assert assets.rebuild_index() == assets.read_index()
+    assert assets.read_index().entries["voice.main"] == first.revision.ref
 
     repeated = assets.ingest(
         source,
@@ -267,10 +268,13 @@ def test_ingest_is_source_preserving_idempotent_and_rebuildable(
         inspect_media=inspector,
     )
     assert second.created
-    assert second.revision.provenance.parent_revision_hash == (
-        first.revision.revision_hash
-    )
-    assets.verify_index_projection()
+    assert assets.read_revision(first.revision.ref) == first.revision
+    assert set(repository.read_root().records) == {
+        "assets:index",
+        "unrelated",
+    }
+    assets.collect_garbage(apply=True)
+    repository.objects.verify(first.revision.ref.object)
 
 
 def test_stale_ingest_leaves_only_collectable_orphans(tmp_path: Path) -> None:
@@ -402,32 +406,13 @@ def test_read_revision_fails_closed_on_missing_approval_evidence(
         assets.read_revision(result.revision.ref)
 
 
-def test_rebuild_rejects_missing_asset_lineage_parent(tmp_path: Path) -> None:
+def test_read_revision_requires_its_exact_object(tmp_path: Path) -> None:
     repository, assets = _repositories(tmp_path)
-    blob = repository.objects.put_bytes(b"revision")
-    broken = AssetRevision(
-        "voice.main",
-        blob,
-        _media(),
-        replace(_provenance(), parent_revision_hash="9" * 64),
-        Approval("pending"),
-        _license(),
+    missing = AssetRevisionRef(
+        "voice.main", BlobRef("9" * 64, 123)
     )
-    revision_object = repository.objects.put_bytes(broken.canonical_bytes())
-    index_object = repository.objects.put_bytes(
-        AssetIndexRevision({}).canonical_bytes()
-    )
-    records = {
-        "assets:index": index_object,
-        f"asset_revision:{broken.revision_hash}": revision_object,
-    }
-    repository._update_records(
-        records,
-        expected_revision=0,
-        allowed_reserved_keys=frozenset(records),
-    )
-    with pytest.raises(Exception, match="parent is missing"):
-        assets.rebuild_index()
+    with pytest.raises(Exception, match="missing or wrong-sized"):
+        assets.read_revision(missing)
 
 
 def test_materialize_uses_isolated_verified_copy(
