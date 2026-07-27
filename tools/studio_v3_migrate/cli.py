@@ -51,6 +51,7 @@ def _parser() -> argparse.ArgumentParser:
         inventory.add_argument("--manifest", type=Path, required=True)
         inventory.add_argument("--budget", type=Path)
         inventory.add_argument("--backup-destination", type=Path)
+        inventory.add_argument("--restore-destination", type=Path)
         inventory.add_argument("--clone-destination", type=Path)
 
     backup = subparsers.add_parser("backup")
@@ -99,10 +100,15 @@ def main(argv: list[str] | None = None) -> int:
             if args.budget:
                 if not args.backup_destination:
                     raise InventoryError("--budget requires --backup-destination")
+                if not args.restore_destination:
+                    raise InventoryError("--budget requires --restore-destination")
+                if not args.clone_destination:
+                    raise InventoryError("--budget requires --clone-destination")
                 budget = build_disk_budget(
                     args.workspace,
                     manifest,
                     args.backup_destination,
+                    args.restore_destination,
                     args.clone_destination,
                 )
                 _write_json(args.budget, budget)
