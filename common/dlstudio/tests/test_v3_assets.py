@@ -73,17 +73,24 @@ def _approval(
 
 
 def test_asset_revision_is_canonical_owner_of_trust() -> None:
+    provenance_evidence = _ref(b"capture results")
+    license_evidence = _ref(b"license proof")
     revision = AssetRevision(
         asset_id="voice.main",
         blob=BlobRef("1" * 64, 10),
         media=_media(),
-        provenance=_provenance(),
+        provenance=replace(
+            _provenance(),
+            supporting_evidence=(provenance_evidence,),
+        ),
         approval=Approval("validated", (_ref(b"validation evidence"),)),
-        license=_license(),
+        license=replace(_license(), evidence_ref=license_evidence),
     )
     assert AssetRevision.from_canonical_bytes(revision.canonical_bytes()) == revision
     assert revision.ref.revision_hash == revision.revision_hash
     assert len(revision.revision_hash) == 64
+    assert provenance_evidence in revision.reachable_blobs
+    assert license_evidence in revision.reachable_blobs
 
 
 def test_media_facts_reject_cross_kind_fields() -> None:
@@ -130,6 +137,14 @@ def test_trust_evidence_refs_must_be_non_empty() -> None:
             capture_method="generator",
             provider_receipt_ref=empty,
         )
+    with pytest.raises(ValueError, match="provenance evidence.*non-empty"):
+        Provenance(
+            origin="provided",
+            capture_method="file",
+            supporting_evidence=(empty,),
+        )
+    with pytest.raises(ValueError, match="license evidence.*non-empty"):
+        License("owned", False, evidence_ref=empty)
 
 
 def test_ingest_rejects_unreachable_approval_evidence(tmp_path: Path) -> None:

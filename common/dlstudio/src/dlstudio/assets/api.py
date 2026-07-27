@@ -148,6 +148,7 @@ class Provenance:
     native_height: int | None = None
     script_ref: BlobRef | None = None
     provider_receipt_ref: BlobRef | None = None
+    supporting_evidence: tuple[BlobRef, ...] = ()
 
     def __post_init__(self) -> None:
         if self.origin not in {
@@ -179,6 +180,15 @@ class Provenance:
         ):
             if ref is not None and ref.size == 0:
                 raise ValueError(f"{label} must be non-empty")
+        evidence = tuple(
+            sorted(
+                set(self.supporting_evidence),
+                key=lambda ref: (ref.sha256, ref.size),
+            )
+        )
+        if any(ref.size == 0 for ref in evidence):
+            raise ValueError("provenance evidence must be non-empty")
+        object.__setattr__(self, "supporting_evidence", evidence)
         recorded_methods = {
             "realtime_window",
             "deterministic_devapi",
@@ -235,6 +245,9 @@ class Provenance:
                 if self.provider_receipt_ref is None
                 else self.provider_receipt_ref.as_payload()
             ),
+            "supporting_evidence": [
+                ref.as_payload() for ref in self.supporting_evidence
+            ],
         }
 
     @classmethod
@@ -250,13 +263,21 @@ class Provenance:
             if value.get("provider_receipt_ref") is None
             else BlobRef.from_payload(value["provider_receipt_ref"])
         )
+        payload["supporting_evidence"] = tuple(
+            BlobRef.from_payload(item)
+            for item in value.get("supporting_evidence", ())
+        )
         return cls(**payload)
 
     @property
     def evidence_refs(self) -> tuple[BlobRef, ...]:
         return tuple(
             ref
-            for ref in (self.script_ref, self.provider_receipt_ref)
+            for ref in (
+                self.script_ref,
+                self.provider_receipt_ref,
+                *self.supporting_evidence,
+            )
             if ref is not None
         )
 
@@ -314,12 +335,15 @@ class License:
     attribution_required: bool
     attribution: str | None = None
     redistribution_allowed: bool = True
+    evidence_ref: BlobRef | None = None
 
     def __post_init__(self) -> None:
         if not self.license_id:
             raise ValueError("license_id is required")
         if self.attribution_required and not self.attribution:
             raise ValueError("attribution-required license needs copy text")
+        if self.evidence_ref is not None and self.evidence_ref.size == 0:
+            raise ValueError("license evidence must be non-empty")
 
     def as_payload(self) -> dict[str, Any]:
         return {
@@ -327,11 +351,22 @@ class License:
             "attribution_required": self.attribution_required,
             "attribution": self.attribution,
             "redistribution_allowed": self.redistribution_allowed,
+            "evidence_ref": (
+                None
+                if self.evidence_ref is None
+                else self.evidence_ref.as_payload()
+            ),
         }
 
     @classmethod
     def from_payload(cls, value: Mapping[str, Any]) -> "License":
-        return cls(**dict(value))
+        payload = dict(value)
+        payload["evidence_ref"] = (
+            None
+            if value.get("evidence_ref") is None
+            else BlobRef.from_payload(value["evidence_ref"])
+        )
+        return cls(**payload)
 
 
 @dataclass(frozen=True, slots=True)
@@ -344,7 +379,7 @@ class AssetRevision:
     license: License
 
     DOMAIN = "dlstudio.asset_revision"
-    VERSION = 3
+    VERSION = 4
 
     def __post_init__(self) -> None:
         DomainId(self.asset_id)
@@ -364,6 +399,7 @@ class AssetRevision:
             self.blob,
             *self.provenance.evidence_refs,
             *self.approval.evidence_refs,
+            *((self.license.evidence_ref,) if self.license.evidence_ref else ()),
         )
 
     def as_payload(self) -> dict[str, Any]:
