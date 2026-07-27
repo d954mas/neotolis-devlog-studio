@@ -19,7 +19,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, BinaryIO
+from typing import TYPE_CHECKING, Any, BinaryIO
 
 from dlstudio.foundation.api import (
     BlobRef,
@@ -28,6 +28,10 @@ from dlstudio.foundation.api import (
     DomainId,
     canonical_bytes,
 )
+
+if TYPE_CHECKING:
+    from .assets import AssetRepository
+    from .workflow import WorkflowRepository
 
 _RESERVED_RECORD_KEYS = frozenset({"assets:index", "workflow:current"})
 
@@ -546,3 +550,27 @@ class ProductionRepository:
             allowed_reserved_keys=allowed_reserved_keys,
             allow_pending_delivery=allow_pending_delivery,
         )
+
+
+def open_local_repositories(
+    production_root: Path,
+    production_id: str,
+) -> tuple[ProductionRepository, AssetRepository, WorkflowRepository]:
+    """Wire the three concrete filesystem repositories for one production."""
+
+    from .assets import AssetRepository
+    from .workflow import WorkflowRepository
+
+    studio = production_root / "data" / ".studio"
+    repository = ProductionRepository(
+        object_root=studio / "objects",
+        state_root=studio / "state",
+        staging_root=studio / "staging",
+        lock_root=studio / "locks",
+        production_id=production_id,
+    )
+    return (
+        repository,
+        AssetRepository(repository),
+        WorkflowRepository(repository),
+    )

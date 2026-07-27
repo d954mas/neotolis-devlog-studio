@@ -35,7 +35,7 @@
     "release": ["foundation", "assets", "timeline", "review", "constraints"],
     "application": ["foundation", "authoring", "timeline", "rendering", "assets", "capture", "speech", "review", "constraints", "workflow", "release"],
     "persistence": ["foundation", "assets", "capture", "speech", "review", "constraints", "workflow", "release"],
-    "adapters": ["application"]
+    "adapters": ["application", "persistence"]
   },
   "always_forbidden_import_prefixes": [
     "tools.studio_v3_migrate",
@@ -93,4 +93,3 @@
     }
   ]
 }
-
