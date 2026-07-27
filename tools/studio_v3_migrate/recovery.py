@@ -26,7 +26,7 @@ def _copy_entry(source: Path, destination: Path, kind: str) -> None:
     if kind == "symlink":
         os.symlink(os.readlink(source), destination)
     else:
-        shutil.copy2(source, destination)
+        shutil.copyfile(source, destination)
 
 
 def _manifest_digest(manifest: dict[str, Any]) -> str:
