@@ -47,7 +47,28 @@ class WorkflowRepository:
             expected_workflow_revision=expected_workflow_revision,
             expected_head_revision=expected_head_revision,
             allow_pending_delivery=False,
+            allow_package=False,
         )
+
+    def _complete_package(
+        self,
+        workflow: WorkflowRun,
+        operation_id: str,
+        candidate: BlobRef,
+        *,
+        expected_workflow_revision: int,
+        expected_head_revision: int,
+    ) -> WorkflowRun:
+        self.repository.objects.verify(candidate)
+        completed = workflow._succeed_package(operation_id, candidate)
+        self._save(
+            completed,
+            expected_workflow_revision=expected_workflow_revision,
+            expected_head_revision=expected_head_revision,
+            allow_pending_delivery=False,
+            allow_package=True,
+        )
+        return completed
 
     def complete_delivery(
         self,
@@ -65,6 +86,7 @@ class WorkflowRepository:
             expected_workflow_revision=expected_workflow_revision,
             expected_head_revision=expected_head_revision,
             allow_pending_delivery=True,
+            allow_package=False,
         )
 
     def snapshot(self) -> tuple[WorkflowRun, int]:
@@ -118,6 +140,7 @@ class WorkflowRepository:
         expected_workflow_revision: int,
         expected_head_revision: int,
         allow_pending_delivery: bool,
+        allow_package: bool,
     ) -> HeadRef:
         if workflow.production_id != self.repository.production_id:
             raise ValueError("workflow belongs to another production")
@@ -132,6 +155,17 @@ class WorkflowRepository:
             raise ValueError("workflow revision must advance exactly once")
         if current is not None and workflow.run_id != current.run_id:
             raise ValueError("cannot replace the current workflow run")
+        previous_candidate = (
+            None if current is None else current.eligible_candidate
+        )
+        if (
+            workflow.eligible_candidate is not None
+            and workflow.eligible_candidate != previous_candidate
+            and not allow_package
+        ):
+            raise ValueError(
+                "delivery eligibility is written only by the package use case"
+            )
 
         ref = self.repository.objects.put_bytes(workflow.canonical_bytes())
         head = self.repository._update_records(

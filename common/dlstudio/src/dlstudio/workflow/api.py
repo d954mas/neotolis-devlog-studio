@@ -193,10 +193,8 @@ class WorkflowRun:
             return self
         if attempt.state != "running":
             raise ValueError("only a running operation can succeed")
-        if attempt.stage == "package" and {
-            item.name for item in outputs
-        } != {"candidate"}:
-            raise ValueError("package must output exactly one candidate")
+        if attempt.stage == "package":
+            raise ValueError("package completion is owned by the package use case")
         completed = replace(
             attempt,
             outputs=outputs,
@@ -209,6 +207,40 @@ class WorkflowRun:
                 completed if item.operation_id == operation_id else item
                 for item in self.attempts
             ),
+            eligible_candidate=self.eligible_candidate,
+            delivery_receipt=self.delivery_receipt,
+        )
+
+    def _succeed_package(
+        self,
+        operation_id: str,
+        candidate: BlobRef,
+    ) -> "WorkflowRun":
+        attempt = next(
+            (
+                item
+                for item in self.attempts
+                if item.operation_id == operation_id
+            ),
+            None,
+        )
+        if attempt is None or attempt.stage != "package":
+            raise ValueError("unknown package operation")
+        if attempt.state != "running":
+            raise ValueError("only a running package can complete")
+        completed = replace(
+            attempt,
+            outputs=(NamedRef("candidate", candidate),),
+            state="succeeded",
+        )
+        return replace(
+            self,
+            revision=self.revision + 1,
+            attempts=tuple(
+                completed if item.operation_id == operation_id else item
+                for item in self.attempts
+            ),
+            eligible_candidate=candidate,
             delivery_receipt=self.delivery_receipt,
         )
 
@@ -233,27 +265,6 @@ class WorkflowRun:
                 failed if item.operation_id == operation_id else item
                 for item in self.attempts
             ),
-        )
-
-    def allow_delivery(self) -> "WorkflowRun":
-        package = next(
-            (item for item in self.attempts if item.stage == "package"),
-            None,
-        )
-        if package is None or package.state != "succeeded":
-            raise ValueError("package must succeed before delivery is allowed")
-        if self.current_stage != "deliver":
-            raise ValueError("workflow is not ready for delivery")
-        candidate = next(
-            item.blob for item in package.outputs if item.name == "candidate"
-        )
-        if self.eligible_candidate == candidate:
-            return self
-        return replace(
-            self,
-            revision=self.revision + 1,
-            eligible_candidate=candidate,
-            delivery_receipt=None,
         )
 
     def delivered(
@@ -385,6 +396,16 @@ class WorkflowStore(Protocol):
         expected_workflow_revision: int,
         expected_head_revision: int,
     ) -> object: ...
+
+    def _complete_package(
+        self,
+        workflow: WorkflowRun,
+        operation_id: str,
+        candidate: BlobRef,
+        *,
+        expected_workflow_revision: int,
+        expected_head_revision: int,
+    ) -> WorkflowRun: ...
 
     def put_blob(self, data: bytes) -> BlobRef: ...
 

@@ -23,14 +23,15 @@ def _complete_through(run: WorkflowRun, last: str) -> WorkflowRun:
             contract=f"{stage}.v1",
         )
         operation_id = run.attempts[-1].operation_id
-        outputs = (
-            (NamedRef("candidate", BlobRef("e" * 64, 10)),)
-            if stage == "package"
-            else (NamedRef("output", BlobRef("a" * 64, 10)),)
-        )
-        run = run.succeed(operation_id, outputs)
         if stage == "package":
-            run = run.allow_delivery()
+            run = run._succeed_package(
+                operation_id, BlobRef("e" * 64, 10)
+            )
+        else:
+            run = run.succeed(
+                operation_id,
+                (NamedRef("output", BlobRef("a" * 64, 10)),),
+            )
     return run
 
 
@@ -85,6 +86,27 @@ def test_changed_upstream_input_invalidates_downstream_and_eligibility() -> None
     assert [item.stage for item in restarted.attempts] == ["prepare", "draft"]
     assert restarted.eligible_candidate is None
     assert restarted.current_stage == "draft"
+
+
+def test_package_success_is_an_owner_only_atomic_transition() -> None:
+    before = _complete_through(
+        WorkflowRun("run.1", "fixture.reel", "reel"),
+        "review",
+    )
+    running = before.start("package", (), contract="package.v1")
+    candidate = BlobRef("e" * 64, 10)
+
+    operation_id = running.attempts[-1].operation_id
+    with pytest.raises(ValueError, match="package use case"):
+        running.succeed(
+            operation_id,
+            (NamedRef("candidate", candidate),),
+        )
+    succeeded = running._succeed_package(operation_id, candidate)
+
+    assert succeeded.revision == running.revision + 1
+    assert succeeded.current_stage == "deliver"
+    assert succeeded.eligible_candidate == candidate
 
 
 def test_failed_stage_retries_without_keeping_attempt_ledger() -> None:

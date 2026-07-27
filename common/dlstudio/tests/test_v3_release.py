@@ -6,11 +6,10 @@ from pathlib import Path
 import pytest
 
 from dlstudio.application.api import (
-    advance,
-    package_release,
     start_workflow,
     submit_review,
 )
+from dlstudio.application.workflow import _advance, _package_release
 from dlstudio.application.release import freeze_release
 from dlstudio.authoring.api import Edit, SolidLayer, _compile_resolved
 from dlstudio.constraints.api import Constraint, ConstraintSet
@@ -219,7 +218,7 @@ def test_application_packages_only_the_accepted_exact_release(
     constraints = values["constraints"]
     rendered = values["render"]
     verdict = values["verdict"]
-    advance(
+    _advance(
         workflows,
         inputs=(),
         contract="prepare.v1",
@@ -230,7 +229,7 @@ def test_application_packages_only_the_accepted_exact_release(
             NamedRef("constraints", constraints.ref),  # type: ignore[union-attr]
         ),
     )
-    advance(
+    _advance(
         workflows,
         inputs=(),
         contract="draft.v1",
@@ -238,7 +237,7 @@ def test_application_packages_only_the_accepted_exact_release(
             NamedRef("artifact", repository.objects.put_bytes(b"draft")),
         ),
     )
-    advance(
+    _advance(
         workflows,
         inputs=(),
         contract="final.v1",
@@ -251,8 +250,10 @@ def test_application_packages_only_the_accepted_exact_release(
     repository.objects.put_bytes(report.canonical_bytes())  # type: ignore[union-attr]
     repository.objects.put_bytes(constraints.canonical_bytes())  # type: ignore[union-attr]
     submit_review(workflows, verdict)  # type: ignore[arg-type]
+    before_package = workflows.read_current()
+    assert before_package is not None
 
-    candidate, ready = package_release(
+    candidate, ready = _package_release(
         workflows,
         store,  # type: ignore[arg-type]
         **values,
@@ -260,6 +261,7 @@ def test_application_packages_only_the_accepted_exact_release(
 
     assert ready.eligible_candidate == candidate.ref
     assert ready.current_stage == "deliver"
+    assert ready.revision == before_package.revision + 2
     assert candidate.production_id == production_id
 
 

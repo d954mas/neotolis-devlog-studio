@@ -86,19 +86,25 @@ def _ready_workflow(
     for stage in ("prepare", "draft", "final", "review", "package"):
         started = run.start(stage, (), contract=f"{stage}.v1")  # type: ignore[arg-type]
         _save_next(repository, workflows, run, started)
-        outputs = (
-            (NamedRef("candidate", candidate),)
-            if stage == "package"
-            else (NamedRef("output", _put(repository, stage.encode())),)
-        )
-        succeeded = started.succeed(
-            started.attempts[-1].operation_id,
-            outputs,
-        )
-        _save_next(repository, workflows, started, succeeded)
+        operation_id = started.attempts[-1].operation_id
+        if stage == "package":
+            head = repository.read_head()
+            assert head is not None
+            succeeded = workflows._complete_package(
+                started,
+                operation_id,
+                candidate,
+                expected_workflow_revision=started.revision,
+                expected_head_revision=head.revision,
+            )
+        else:
+            succeeded = started.succeed(
+                operation_id,
+                (NamedRef("output", _put(repository, stage.encode())),),
+            )
+            _save_next(repository, workflows, started, succeeded)
         run = succeeded
-    allowed = run.allow_delivery()
-    return _save_next(repository, workflows, run, allowed)
+    return run
 
 
 def test_local_delivery_copies_only_the_frozen_package_and_retries(
