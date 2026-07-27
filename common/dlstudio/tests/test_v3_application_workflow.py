@@ -137,3 +137,37 @@ def test_review_must_name_exact_final_outputs(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="waiting for review"):
         submit_review(workflows, verdict)
+
+
+def test_generic_advance_cannot_publish_an_arbitrary_candidate(
+    tmp_path: Path,
+) -> None:
+    workflows = _workflows(tmp_path)
+    run = start_workflow(workflows, run_id="run.main", kind="reel")
+    for stage in ("prepare", "draft", "final", "review"):
+        running = run.start(stage, (), contract=f"{stage}.v1")  # type: ignore[arg-type]
+        workflows.save(
+            running,
+            expected_workflow_revision=run.revision,
+            expected_head_revision=workflows.head_revision(),
+        )
+        outputs = (
+            (NamedRef("verdict", _put(workflows, b"verdict")),)
+            if stage == "review"
+            else (NamedRef("output", _put(workflows, stage.encode())),)
+        )
+        run = running.succeed(running.attempts[-1].operation_id, outputs)
+        workflows.save(
+            run,
+            expected_workflow_revision=running.revision,
+            expected_head_revision=workflows.head_revision(),
+        )
+    with pytest.raises(ValueError, match="package_release"):
+        advance(
+            workflows,
+            inputs=(),
+            contract="package.v1",
+            run_stage=lambda *_: (
+                NamedRef("candidate", _put(workflows, b"arbitrary")),
+            ),
+        )

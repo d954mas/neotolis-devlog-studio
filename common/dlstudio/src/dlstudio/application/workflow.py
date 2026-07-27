@@ -4,8 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from dlstudio.foundation.api import BlobRef
+from dlstudio.constraints.api import ConstraintSet
+from dlstudio.foundation.api import BlobRef, canonical_bytes
+from dlstudio.release.api import PackageFile, ReleaseCandidate
+from dlstudio.rendering.api import (
+    ExecutionFingerprint,
+    RenderOptions,
+    RenderResult,
+)
 from dlstudio.review.api import ReviewVerdict
+from dlstudio.timeline.api import CheckPolicy, CheckReport, TimelineIR
 from dlstudio.workflow.api import (
     NamedRef,
     StageId,
@@ -13,6 +21,8 @@ from dlstudio.workflow.api import (
     WorkflowKind,
     WorkflowRun,
 )
+
+from .release import BlobStore, freeze_release
 
 
 def get_status(workflows: WorkflowStore) -> WorkflowRun:
@@ -63,6 +73,8 @@ def advance(
         raise ValueError("use deliver for the delivery stage")
     if stage == "review":
         raise ValueError("use submit_review for the review stage")
+    if stage == "package":
+        raise ValueError("use package_release for the package stage")
 
     running = current.start(stage, inputs, contract=contract)
     if running is not current:
@@ -80,11 +92,7 @@ def advance(
         raise
     succeeded = running.succeed(operation_id, outputs)
     _save_next(workflows, running, succeeded)
-    if stage != "package":
-        return succeeded
-    eligible = succeeded.allow_delivery()
-    _save_next(workflows, succeeded, eligible)
-    return eligible
+    return succeeded
 
 
 def submit_review(
@@ -127,6 +135,84 @@ def submit_review(
     )
     _save_next(workflows, running, succeeded)
     return succeeded
+
+
+def package_release(
+    workflows: WorkflowStore,
+    store: BlobStore,
+    *,
+    timeline: TimelineIR,
+    policy: CheckPolicy,
+    report: CheckReport,
+    fingerprint: ExecutionFingerprint,
+    options: RenderOptions,
+    render: RenderResult,
+    constraints: ConstraintSet,
+    verdict: ReviewVerdict,
+    package: tuple[PackageFile, ...],
+) -> tuple[ReleaseCandidate, WorkflowRun]:
+    """Freeze the exact release and make only that candidate deliverable."""
+
+    current = get_status(workflows)
+    if current.current_stage != "package":
+        raise ValueError("workflow is not ready to package")
+    review = next(item for item in current.attempts if item.stage == "review")
+    if review.outputs != (NamedRef("verdict", verdict.ref),):
+        raise ValueError("package does not use the accepted review verdict")
+    package_manifest = workflows.put_blob(
+        canonical_bytes(
+            {"files": [item.as_payload() for item in package]},
+            domain="dlstudio.release_package_input",
+            version=1,
+        )
+    )
+    inputs = (
+        NamedRef("check_policy", policy.ref),
+        NamedRef("check_report", report.ref),
+        NamedRef("constraints", constraints.ref),
+        NamedRef("execution", fingerprint.ref),
+        NamedRef("package_manifest", package_manifest),
+        NamedRef("render_options", options.ref),
+        NamedRef("review_verdict", verdict.ref),
+        NamedRef("timeline", timeline.ref),
+    )
+    running = current.start(
+        "package",
+        inputs,
+        contract=f"{ReleaseCandidate.DOMAIN}.v{ReleaseCandidate.VERSION}",
+    )
+    if running is not current:
+        _save_next(workflows, current, running)
+    operation_id = next(
+        item.operation_id
+        for item in running.attempts
+        if item.stage == "package"
+    )
+    try:
+        candidate, candidate_ref = freeze_release(
+            store,
+            production_id=workflows.production_id,
+            timeline=timeline,
+            policy=policy,
+            report=report,
+            fingerprint=fingerprint,
+            options=options,
+            render=render,
+            constraints=constraints,
+            verdict=verdict,
+            package=package,
+        )
+    except Exception as exc:
+        failed = running.fail(operation_id, str(exc))
+        _save_next(workflows, running, failed)
+        raise
+    succeeded = running.succeed(
+        operation_id, (NamedRef("candidate", candidate_ref),)
+    )
+    _save_next(workflows, running, succeeded)
+    eligible = succeeded.allow_delivery()
+    _save_next(workflows, succeeded, eligible)
+    return candidate, eligible
 
 
 def _head_revision(workflows: WorkflowStore) -> int:
