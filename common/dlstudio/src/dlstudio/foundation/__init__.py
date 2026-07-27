@@ -1,6 +1,7 @@
 """Studio v3 foundation public surface."""
 
 from .api import (
+    BlobRef,
     CanonicalEncodingError,
     CasConflict,
     CorruptObject,
@@ -13,6 +14,7 @@ from .api import (
 )
 
 __all__ = [
+    "BlobRef",
     "CanonicalEncodingError",
     "CasConflict",
     "CorruptObject",

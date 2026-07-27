@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from dlstudio.assets.api import BlobRef
-from dlstudio.foundation.api import CasConflict, CorruptObject
+from dlstudio.foundation.api import BlobRef, CasConflict, CorruptObject
 from dlstudio.persistence.api import HeadRef, ProductionRepository
 from dlstudio.workflow.api import WorkflowRun
 

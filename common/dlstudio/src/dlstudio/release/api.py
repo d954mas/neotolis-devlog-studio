@@ -6,8 +6,8 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from dlstudio.assets.api import BlobRef
 from dlstudio.foundation.api import (
+    BlobRef,
     DomainId,
     canonical_bytes,
     canonical_hash,

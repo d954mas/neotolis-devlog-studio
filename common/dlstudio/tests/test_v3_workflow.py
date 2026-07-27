@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from dlstudio.assets.api import BlobRef
+from dlstudio.foundation.api import BlobRef
 from dlstudio.workflow.api import NamedRef, STAGES, WorkflowRun
 
 

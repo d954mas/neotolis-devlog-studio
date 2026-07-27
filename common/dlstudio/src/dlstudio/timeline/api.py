@@ -12,12 +12,12 @@ from dlstudio.assets.api import (
     Approval,
     AssetRevision,
     AssetRevisionRef,
-    BlobRef,
     License,
     MediaFacts,
     Provenance,
 )
 from dlstudio.foundation.api import (
+    BlobRef,
     CorruptObject,
     DomainId,
     canonical_bytes,

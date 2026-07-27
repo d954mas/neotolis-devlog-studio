@@ -39,7 +39,29 @@ class CorruptObject(StudioError):
 
 _SCHEMA_RE = re.compile(r"^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$")
 _DOMAIN_ID_RE = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 T = TypeVar("T")
+
+
+@dataclass(frozen=True, slots=True)
+class BlobRef:
+    """Exact identity of immutable bytes in an object store."""
+
+    sha256: str
+    size: int
+
+    def __post_init__(self) -> None:
+        if _SHA256_RE.fullmatch(self.sha256) is None:
+            raise ValueError("invalid blob sha256")
+        if self.size < 0:
+            raise ValueError("negative blob size")
+
+    def as_payload(self) -> dict[str, object]:
+        return {"sha256": self.sha256, "size": self.size}
+
+    @classmethod
+    def from_payload(cls, value: Mapping[str, Any]) -> "BlobRef":
+        return cls(sha256=str(value["sha256"]), size=int(value["size"]))
 
 
 @dataclass(frozen=True, slots=True)

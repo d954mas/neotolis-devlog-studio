@@ -17,14 +17,13 @@ from dlstudio.assets.api import (
     AssetIngestResult,
     AssetRevision,
     AssetRevisionRef,
-    BlobRef,
     License,
     MediaFacts,
     Provenance,
 )
-from dlstudio.foundation.api import CasConflict, CorruptObject
+from dlstudio.foundation.api import BlobRef, CasConflict, CorruptObject
 
-from .api import OperationTransaction, ProductionRepository
+from .api import ProductionRepository
 
 ASSET_INDEX_KEY = "assets:index"
 ASSET_REVISION_PREFIX = "asset_revision:"
@@ -52,7 +51,9 @@ class AssetRepository:
         self.repository = repository
 
     def read_index(self) -> AssetIndexRevision:
-        root = self.repository.read_root()
+        return self._read_index_from_root(self.repository.read_root())
+
+    def _read_index_from_root(self, root: Any) -> AssetIndexRevision:
         ref = root.records.get(ASSET_INDEX_KEY)
         if ref is None:
             return AssetIndexRevision()
@@ -64,7 +65,11 @@ class AssetRepository:
             raise CorruptObject("invalid canonical asset index") from exc
 
     def read_revision(self, ref: AssetRevisionRef) -> AssetRevision:
-        root = self.repository.read_root()
+        return self._read_revision_from_root(self.repository.read_root(), ref)
+
+    def _read_revision_from_root(
+        self, root: Any, ref: AssetRevisionRef
+    ) -> AssetRevision:
         object_ref = root.records.get(
             f"{ASSET_REVISION_PREFIX}{ref.revision_hash}"
         )
@@ -80,7 +85,8 @@ class AssetRepository:
             raise CorruptObject("invalid canonical asset revision") from exc
         if revision.ref != ref:
             raise CorruptObject("asset revision ref/payload mismatch")
-        self.repository.objects.verify(revision.blob)
+        for reachable in revision.reachable_blobs:
+            self.repository.objects.verify(reachable)
         return revision
 
     def ingest(
@@ -94,8 +100,6 @@ class AssetRepository:
         license: License,
         expected_revision: int,
         inspect_media: Callable[[Path], MediaFacts],
-        implementation: str = "assets.ingest.v1",
-        toolchain: str = "python-3.12",
     ) -> AssetIngestResult:
         from .api import WriterLease
 
@@ -109,8 +113,6 @@ class AssetRepository:
                 license=license,
                 expected_revision=expected_revision,
                 inspect_media=inspect_media,
-                implementation=implementation,
-                toolchain=toolchain,
             )
 
     def _ingest_under_gc_barrier(
@@ -124,8 +126,6 @@ class AssetRepository:
         license: License,
         expected_revision: int,
         inspect_media: Callable[[Path], MediaFacts],
-        implementation: str,
-        toolchain: str,
     ) -> AssetIngestResult:
         source = source.resolve(strict=True)
         before = (source.stat().st_size, source.stat().st_mtime_ns)
@@ -136,14 +136,43 @@ class AssetRepository:
         inspected = inspect_media(self.repository.objects.path_for(blob))
         if inspected != media:
             raise ValueError("declared media facts differ from inspected blob")
+        for evidence in (
+            *provenance.evidence_refs,
+            *approval.evidence_refs,
+        ):
+            self.repository.objects.verify(evidence)
+        return self._commit_ingest_with_cas(
+            asset_id=asset_id,
+            blob=blob,
+            media=media,
+            provenance=provenance,
+            approval=approval,
+            license=license,
+            expected_revision=expected_revision,
+        )
 
-        index = self.read_index()
+    def _commit_ingest_with_cas(
+        self,
+        *,
+        asset_id: str,
+        blob: BlobRef,
+        media: MediaFacts,
+        provenance: Provenance,
+        approval: Approval,
+        license: License,
+        expected_revision: int,
+    ) -> AssetIngestResult:
+        snapshot_head = self.repository.read_head()
+        snapshot_root = self.repository.read_root(snapshot_head)
+        index = self._read_index_from_root(snapshot_root)
         previous = index.entries.get(asset_id)
         parent = None if previous is None else previous.revision_hash
         if provenance.parent_revision_hash not in {None, parent}:
             raise CasConflict("asset parent revision is stale")
         if previous is not None:
-            current_revision = self.read_revision(previous)
+            current_revision = self._read_revision_from_root(
+                snapshot_root, previous
+            )
             repeat_candidate = AssetRevision(
                 asset_id=asset_id,
                 blob=blob,
@@ -158,43 +187,15 @@ class AssetRepository:
                 license=license,
             )
             if repeat_candidate.ref == previous:
-                operation_parent = (
-                    current_revision.provenance.parent_revision_hash or ""
-                )
-                operation_inputs = {
-                    "asset_id": asset_id,
-                    "blob": blob.sha256,
-                    "revision": current_revision.revision_hash,
-                    "previous": operation_parent,
-                }
-                operation_id = OperationTransaction.derive_id(
-                    production_id=self.repository.production_id,
-                    contract="asset_ingest.v1",
-                    inputs=operation_inputs,
-                    implementation=implementation,
-                    toolchain=toolchain,
-                )
-                transaction = OperationTransaction(
-                    self.repository,
-                    operation_id=operation_id,
-                    inputs=operation_inputs,
-                )
-                transaction._prepare_after_gc_barrier()
-                committed_outputs = transaction.committed_outputs
-                committed_updates = transaction.committed_record_updates
-                if committed_outputs is None or committed_updates is None:
-                    transaction.close()
-                    raise CorruptObject(
-                        "indexed revision lacks committed ingest operation"
-                    )
-                head = transaction._commit_with_records(
-                    outputs=committed_outputs,
-                    record_updates=committed_updates,
-                    expected_revision=expected_revision,
-                    owned_record_keys=frozenset(committed_updates),
-                )
+                if snapshot_head is None:
+                    raise CorruptObject("indexed revision has no canonical head")
+                if self.repository.read_head() != snapshot_head:
+                    raise CasConflict("head changed during idempotence check")
                 return AssetIngestResult(
-                    current_revision, head.root_hash, head.revision, False
+                    current_revision,
+                    snapshot_head.root_hash,
+                    snapshot_head.revision,
+                    False,
                 )
         revision = AssetRevision(
             asset_id=asset_id,
@@ -213,55 +214,14 @@ class AssetRepository:
         index_object = self.repository.objects.put_bytes(
             next_index.canonical_bytes()
         )
-        operation_id = OperationTransaction.derive_id(
-            production_id=self.repository.production_id,
-            contract="asset_ingest.v1",
-            inputs={
-                "asset_id": asset_id,
-                "blob": blob.sha256,
-                "revision": revision.revision_hash,
-                "previous": parent or "",
-            },
-            implementation=implementation,
-            toolchain=toolchain,
-        )
-        transaction = OperationTransaction(
-            self.repository,
-            operation_id=operation_id,
-            inputs={
-                "asset_id": asset_id,
-                "blob": blob.sha256,
-                "revision": revision.revision_hash,
-                "previous": parent or "",
-            },
-        )
-        transaction._prepare_after_gc_barrier()
         updates = {
             ASSET_INDEX_KEY: index_object,
             f"{ASSET_REVISION_PREFIX}{revision.revision_hash}": revision_object,
         }
-        outputs = {
-            "blob": blob,
-            "revision": revision_object,
-            "index": index_object,
-        }
-        if transaction.committed_outputs is not None:
-            committed_head = transaction.committed_head
-            transaction.close()
-            if committed_head is None:
-                raise CorruptObject("committed ingest has no exact head")
-            committed = self.read_revision(revision.ref)
-            return AssetIngestResult(
-                committed,
-                committed_head.root_hash,
-                committed_head.revision,
-                False,
-            )
-        head = transaction._commit_with_records(
-            outputs=outputs,
-            record_updates=updates,
+        head = self.repository._update_records(
+            updates,
             expected_revision=expected_revision,
-            owned_record_keys=frozenset(updates),
+            allowed_reserved_keys=frozenset(updates),
         )
         return AssetIngestResult(
             revision, head.root_hash, head.revision, True
@@ -280,7 +240,8 @@ class AssetRepository:
             if key != f"{ASSET_REVISION_PREFIX}{revision.revision_hash}":
                 raise CorruptObject("asset revision record key mismatch")
             revisions[revision.revision_hash] = revision
-            self.repository.objects.verify(revision.blob)
+            for reachable in revision.reachable_blobs:
+                self.repository.objects.verify(reachable)
             parent = revision.provenance.parent_revision_hash
             if parent is not None:
                 parent_hashes.add(parent)
@@ -369,11 +330,6 @@ class AssetRepository:
         from .api import WriterLease
 
         with WriterLease(gc_barrier):
-            for operation_lock in sorted(
-                self.repository.lock_root.glob("operation.*.writer")
-            ):
-                with WriterLease(operation_lock):
-                    pass
             return self._collect_garbage_under_barrier(apply=apply)
 
     def _collect_garbage_under_barrier(
@@ -400,7 +356,6 @@ class AssetRepository:
                     in {
                         AssetRevision.DOMAIN,
                         AssetIndexRevision.DOMAIN,
-                        OperationTransaction.RECORD_SCHEMA,
                     }
                 )
 

@@ -17,8 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, Protocol
 
-from dlstudio.assets.api import BlobRef
-from dlstudio.foundation.api import canonical_hash
+from dlstudio.foundation.api import BlobRef, canonical_hash
 from dlstudio.timeline.api import (
     AnimationInstruction,
     AssetSnapshot,
