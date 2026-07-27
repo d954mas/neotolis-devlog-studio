@@ -18,8 +18,8 @@ WorkflowKind = Literal["reel", "longform", "capture_vo"]
 STAGES: tuple[StageId, ...] = (
     "prepare",
     "draft",
-    "review",
     "final",
+    "review",
     "package",
     "deliver",
 )

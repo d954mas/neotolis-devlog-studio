@@ -83,7 +83,7 @@ def _ready_workflow(
         None,
         WorkflowRun("run.main", repository.production_id, "reel"),
     )
-    for stage in ("prepare", "draft", "review", "final", "package"):
+    for stage in ("prepare", "draft", "final", "review", "package"):
         started = run.start(stage, (), contract=f"{stage}.v1")  # type: ignore[arg-type]
         _save_next(repository, workflows, run, started)
         outputs = (
