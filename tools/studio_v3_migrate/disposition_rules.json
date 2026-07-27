@@ -10,6 +10,7 @@
     ".npm-cache-devlogs",
     ".playwright-cli",
     ".pytest_cache",
+    ".review-phase45-runtime",
     ".runtime",
     ".test-tmp",
     "__pycache__",
@@ -21,8 +22,7 @@
   ],
   "workspace_exclude_prefixes": [
     ".phase4-review-repro-",
-    ".review-phase",
-    ".test-tmp",
+    ".test-tmp-",
     "_codex_tmp_"
   ],
   "project_rules": [

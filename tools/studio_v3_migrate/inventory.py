@@ -49,7 +49,55 @@ class DispositionRules:
         ):
             if key not in payload:
                 raise InventoryError(f"disposition rules missing {key}")
+        _validate_workspace_exclusions(payload)
         return cls(source_path=path.resolve(), payload=payload)
+
+
+def _validate_workspace_exclusions(payload: dict[str, Any]) -> None:
+    exact = payload["workspace_excludes"]
+    prefixes = payload["workspace_exclude_prefixes"]
+    if not isinstance(exact, list) or not isinstance(prefixes, list):
+        raise InventoryError("workspace exclusions must be lists")
+
+    def validate_names(values: list[Any], label: str) -> list[str]:
+        if any(
+            not isinstance(value, str)
+            or not value
+            or value in {".", ".."}
+            or "/" in value
+            or "\\" in value
+            for value in values
+        ):
+            raise InventoryError(f"{label} must contain top-level basenames")
+        normalized = [value.casefold() for value in values]
+        if len(normalized) != len(set(normalized)):
+            raise InventoryError(f"{label} contains duplicate values")
+        return normalized
+
+    exact_keys = validate_names(exact, "workspace_excludes")
+    prefix_keys = validate_names(prefixes, "workspace_exclude_prefixes")
+    if any(
+        len(prefix) < 6
+        or prefix[0] not in {".", "_"}
+        or prefix[-1] not in {"-", "_"}
+        for prefix in prefixes
+    ):
+        raise InventoryError(
+            "workspace exclusion prefixes must be narrow generated namespaces"
+        )
+    named_projects = {
+        str(name).casefold()
+        for rule in payload["project_rules"]
+        for name in rule.get("names", [])
+    }
+    if named_projects & set(exact_keys):
+        raise InventoryError("workspace exclusion overlaps a named project")
+    if any(
+        project.startswith(prefix)
+        for project in named_projects
+        for prefix in prefix_keys
+    ):
+        raise InventoryError("workspace exclusion prefix overlaps a named project")
 
 
 def _winning_rule(
@@ -65,11 +113,15 @@ def _winning_rule(
     return winners[0]
 
 
-def classify_project_roots(workspace: Path, rules: DispositionRules) -> list[ProjectRoot]:
+def _scan_workspace_roots(
+    workspace: Path, rules: DispositionRules
+) -> tuple[list[ProjectRoot], list[dict[str, str]]]:
     workspace = workspace.resolve()
     if not workspace.is_dir():
         raise InventoryError(f"workspace is not a directory: {workspace}")
-    excludes = set(rules.payload["workspace_excludes"])
+    excludes = {
+        value.casefold(): value for value in rules.payload["workspace_excludes"]
+    }
     exclude_prefixes = tuple(rules.payload["workspace_exclude_prefixes"])
     specs = rules.payload["project_rules"]
     fallbacks = [rule for rule in specs if rule.get("fallback")]
@@ -77,12 +129,36 @@ def classify_project_roots(workspace: Path, rules: DispositionRules) -> list[Pro
         raise InventoryError("project rules require exactly one safe fallback")
     fallback = fallbacks[0]
     roots: list[ProjectRoot] = []
+    excluded: list[dict[str, str]] = []
     for candidate in sorted(workspace.iterdir(), key=lambda item: item.name.casefold()):
-        if (
-            candidate.name in excludes
-            or candidate.name.startswith(exclude_prefixes)
-            or not candidate.is_dir()
-        ):
+        if not candidate.is_dir():
+            continue
+        candidate_key = candidate.name.casefold()
+        if candidate_key in excludes:
+            excluded.append(
+                {
+                    "name": candidate.name,
+                    "rule": "workspace_excludes",
+                    "value": excludes[candidate_key],
+                }
+            )
+            continue
+        prefix = next(
+            (
+                value
+                for value in exclude_prefixes
+                if candidate_key.startswith(value.casefold())
+            ),
+            None,
+        )
+        if prefix is not None:
+            excluded.append(
+                {
+                    "name": candidate.name,
+                    "rule": "workspace_exclude_prefixes",
+                    "value": prefix,
+                }
+            )
             continue
         matches: list[dict[str, Any]] = []
         for rule in specs:
@@ -110,11 +186,15 @@ def classify_project_roots(workspace: Path, rules: DispositionRules) -> list[Pro
                 rule_id=selected["id"],
             )
         )
-    return roots
+    return roots, excluded
+
+
+def classify_project_roots(workspace: Path, rules: DispositionRules) -> list[ProjectRoot]:
+    return _scan_workspace_roots(workspace, rules)[0]
 
 
 def project_roots_report(workspace: Path, rules: DispositionRules) -> dict[str, Any]:
-    roots = classify_project_roots(workspace, rules)
+    roots, excluded = _scan_workspace_roots(workspace, rules)
     by_disposition: dict[str, int] = {}
     for root in roots:
         by_disposition[root.disposition] = by_disposition.get(root.disposition, 0) + 1
@@ -130,8 +210,10 @@ def project_roots_report(workspace: Path, rules: DispositionRules) -> dict[str, 
             }
             for root in roots
         ],
+        "excluded_roots": excluded,
         "summary": {
             "roots": len(roots),
+            "excluded": len(excluded),
             "unmatched": 0,
             "ambiguous": 0,
             "by_disposition": dict(sorted(by_disposition.items())),
@@ -218,7 +300,7 @@ def _iter_files(root: Path) -> list[Path]:
 
 def build_before_manifest(workspace: Path, rules: DispositionRules) -> dict[str, Any]:
     workspace = workspace.resolve()
-    roots = classify_project_roots(workspace, rules)
+    roots, excluded = _scan_workspace_roots(workspace, rules)
     entries: list[dict[str, Any]] = []
     parse_failures: list[str] = []
     for root in roots:
@@ -278,9 +360,11 @@ def build_before_manifest(workspace: Path, rules: DispositionRules) -> dict[str,
             }
             for root in roots
         ],
+        "excluded_roots": excluded,
         "entries": entries,
         "summary": {
             "projects": len(roots),
+            "excluded": len(excluded),
             "entries": len(entries),
             "bytes": sum(int(entry["bytes"]) for entry in entries),
             "source_media_bytes": sum(
@@ -411,6 +495,35 @@ def validate_manifest(
         _required_nonempty_string(value, "rule_id", subject)
         project_roots[name] = value
 
+    excluded_roots_value = manifest.get("excluded_roots")
+    if not isinstance(excluded_roots_value, list):
+        raise InventoryError("before-manifest requires excluded_roots")
+    excluded_root_keys: set[str] = set()
+    for index, value in enumerate(excluded_roots_value):
+        subject = f"manifest excluded root {index}"
+        if not isinstance(value, dict):
+            raise InventoryError(f"{subject} must be an object")
+        if set(value) != {"name", "rule", "value"}:
+            raise InventoryError(f"{subject} has invalid fields")
+        name = _required_nonempty_string(value, "name", subject)
+        excluded_by = _required_nonempty_string(value, "rule", subject)
+        _required_nonempty_string(value, "value", subject)
+        if excluded_by not in {
+            "workspace_excludes",
+            "workspace_exclude_prefixes",
+        }:
+            raise InventoryError(f"{subject} has invalid rule")
+        try:
+            root_path = _portable_manifest_path(name)
+        except InventoryError as exc:
+            raise InventoryError(f"{subject} has invalid name") from exc
+        if len(root_path.parts) != 1:
+            raise InventoryError(f"{subject} has invalid name")
+        key = name.casefold()
+        if key in project_root_keys or key in excluded_root_keys:
+            raise InventoryError(f"duplicate manifest root: {name}")
+        excluded_root_keys.add(key)
+
     entries_value = manifest.get("entries")
     if not isinstance(entries_value, list):
         raise InventoryError("before-manifest requires entries")
@@ -491,6 +604,7 @@ def validate_manifest(
         by_disposition[disposition] = by_disposition.get(disposition, 0) + 1
     expected_summary = {
         "projects": len(project_roots),
+        "excluded": len(excluded_root_keys),
         "entries": len(entries),
         "bytes": sum(entry["bytes"] for entry, _relative in entries),
         "source_media_bytes": sum(

@@ -152,7 +152,6 @@ def test_generated_test_and_review_roots_are_not_projects(tmp_path: Path) -> Non
     generated = (
         ".test-tmp-intentional-corruption",
         ".phase4-review-repro-loader",
-        ".review-phase45-runtime",
         "_codex_tmp_workflow",
     )
     for name in generated:
@@ -166,6 +165,46 @@ def test_generated_test_and_review_roots_are_not_projects(tmp_path: Path) -> Non
     manifest = build_before_manifest(tmp_path, _rules())
 
     assert [root["name"] for root in manifest["project_roots"]] == ["actual_project"]
+    assert {root["name"] for root in manifest["excluded_roots"]} == set(generated)
+    assert manifest["summary"]["excluded"] == len(generated)
+
+
+@pytest.mark.parametrize("prefix", ["", ".", "x", "project"])
+def test_broad_workspace_exclusion_prefix_is_rejected(
+    tmp_path: Path, prefix: str
+) -> None:
+    payload = json.loads(_rules().source_path.read_text(encoding="utf-8"))
+    payload["workspace_exclude_prefixes"] = [prefix]
+    rules_path = tmp_path / "rules.json"
+    rules_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(InventoryError, match="prefix"):
+        DispositionRules.load(rules_path)
+
+
+def test_workspace_exclusion_cannot_overlap_named_project(tmp_path: Path) -> None:
+    payload = json.loads(_rules().source_path.read_text(encoding="utf-8"))
+    payload["workspace_excludes"].append("trolley")
+    rules_path = tmp_path / "rules.json"
+    rules_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(InventoryError, match="overlaps"):
+        DispositionRules.load(rules_path)
+
+
+def test_manifest_rejects_selected_excluded_root_overlap(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path)
+    manifest["excluded_roots"] = [
+        {
+            "name": "video_product",
+            "rule": "workspace_excludes",
+            "value": "video_product",
+        }
+    ]
+    manifest["summary"]["excluded"] = 1
+
+    with pytest.raises(InventoryError, match="duplicate manifest root"):
+        validate_manifest(manifest)
 
 
 @pytest.mark.parametrize(
