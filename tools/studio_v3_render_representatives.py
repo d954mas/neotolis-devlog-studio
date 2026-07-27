@@ -505,9 +505,11 @@ def main() -> int:
                 raise RuntimeError(
                     f"representative {snapshot.ref.asset_id} source hash mismatch"
                 )
-            target = objects / snapshot.blob.sha256
-            if not target.exists():
-                shutil.copy2(source, target)
+            for reachable in snapshot.revision.reachable_blobs:
+                repository.objects.verify(reachable)
+                target = objects / reachable.sha256
+                if not target.exists():
+                    shutil.copy2(repository.objects.path_for(reachable), target)
         ir = work / f"{name}.timeline.json"
         ir.write_bytes(timeline.canonical_bytes())
         output = work / f"{name}.mp4"

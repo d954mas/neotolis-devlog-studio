@@ -100,18 +100,11 @@ class ExecutionFingerprint:
             ),
         )
 
-    def validate_executor(self) -> None:
-        executable = shutil.which(self.ffmpeg)
-        if executable is None:
-            raise FileNotFoundError(
-                f"fingerprinted FFmpeg executable is unavailable: {self.ffmpeg}"
-            )
-        digest = hashlib.sha256()
-        with Path(executable).open("rb") as handle:
-            while chunk := handle.read(1024 * 1024):
-                digest.update(chunk)
-        if digest.hexdigest() != self.ffmpeg_binary_sha256:
-            raise RuntimeError("FFmpeg executable differs from its fingerprint")
+    def validate_executor(self) -> "ExecutionFingerprint":
+        current = self.detect(self.ffmpeg)
+        if current.as_payload() != self.as_payload():
+            raise RuntimeError("local renderer differs from its fingerprint")
+        return current
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,7 +196,11 @@ class _CacheLease:
 def _reachable_blobs(timeline: TimelineIR) -> tuple[BlobRef, ...]:
     return tuple(
         sorted(
-            {snapshot.blob for snapshot in timeline.assets},
+            {
+                blob
+                for snapshot in timeline.assets
+                for blob in snapshot.revision.reachable_blobs
+            },
             key=lambda ref: (ref.sha256, ref.size),
         )
     )
@@ -927,7 +924,7 @@ def render(
     output: Path,
     cache_root: Path | None = None,
 ) -> RenderResult:
-    fingerprint.validate_executor()
+    fingerprint = fingerprint.validate_executor()
     report = check_timeline(timeline)
     if report.blocking:
         raise ValueError(f"timeline checks failed: {report.findings}")
