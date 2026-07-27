@@ -41,6 +41,23 @@ def test_verified_backup_and_restore_rehearsal_match_manifest(tmp_path: Path) ->
     )
 
 
+def test_backup_copies_verified_bytes_without_filesystem_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, manifest = _fixture(tmp_path)
+    monkeypatch.setattr(
+        recovery.shutil,
+        "copy2",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("metadata copy is outside the recovery contract")
+        ),
+    )
+
+    report = create_verified_backup(workspace, tmp_path / "backup", manifest)
+
+    assert report["verified"] is True
+
+
 def test_backup_refuses_nonempty_destination(tmp_path: Path) -> None:
     workspace, manifest = _fixture(tmp_path)
     backup = tmp_path / "backup"
