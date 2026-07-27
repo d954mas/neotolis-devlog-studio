@@ -69,6 +69,9 @@ def verification_environment(repo_root: Path) -> dict[str, str]:
     env["PYTHONUTF8"] = "1"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
+    env["PATH"] = os.pathsep.join(
+        (str(Path(sys.executable).parent), env.get("PATH", ""))
+    )
     return env
 
 
@@ -120,7 +123,10 @@ def run(
             check_architecture(source_root, config),
             check_banned_surfaces(source_root, repo_root, config, cutover=cutover),
             validate_canonical_vectors(vector_root),
-            check_performance_contract(config["performance_hooks"]),
+            check_performance_contract(
+                config["performance_hooks"],
+                repo_root / "common" / "dlstudio" / "tests",
+            ),
         ]
     )
     if scope == "static" or any(result.status is GateStatus.FAIL for result in results):
