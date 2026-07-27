@@ -271,7 +271,7 @@ def test_canonical_ir_cannot_rebind_revision_ref_to_other_blob(
 
 
 @pytest.mark.performance_smoke
-def test_cache_hit_skips_ffmpeg_and_returns_verified_bytes(tmp_path: Path) -> None:
+def test_cache_hit_no_ffmpeg_full_read(tmp_path: Path) -> None:
     timeline = compile_edit(_edit())
     fingerprint = ExecutionFingerprint.detect()
     options = RenderOptions(crf=28, preset="ultrafast")
@@ -331,6 +331,22 @@ def test_executor_rejects_caller_forged_renderer_identity() -> None:
     forged = replace(fingerprint, renderer_source_sha256="0" * 64)
     with pytest.raises(RuntimeError, match="local renderer differs"):
         forged.validate_executor()
+
+
+def test_filter_helper_bytes_are_part_of_execution_fingerprint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    helper = Path(rendering_api.__file__).with_name("_filters.py").resolve()
+    original_read_bytes = Path.read_bytes
+    original = ExecutionFingerprint.detect()
+
+    def changed_helper(path: Path) -> bytes:
+        raw = original_read_bytes(path)
+        return raw + b"\n# simulated semantic change\n" if path.resolve() == helper else raw
+
+    monkeypatch.setattr(Path, "read_bytes", changed_helper)
+    changed = ExecutionFingerprint.detect()
+    assert changed.renderer_source_sha256 != original.renderer_source_sha256
 
 
 def test_poisoned_cache_is_rebuilt_not_trusted(tmp_path: Path) -> None:
@@ -685,6 +701,63 @@ def test_resolved_media_geometry_is_replayed_exactly(tmp_path: Path) -> None:
     assert timeline.visuals[0].transition_intent == "motivated_cut"
 
 
+def test_contain_geometry_uses_timeline_background_in_every_media_branch(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "frame.bin"
+    source.write_bytes(b"frame")
+    revision = _asset(
+        "fixture.contain",
+        source,
+        MediaFacts(kind="image", format_name="raw", width=10, height=5),
+    )
+    objects = tmp_path / "objects"
+    _install_object(source, revision, objects)
+
+    def graph(z: int) -> str:
+        timeline = compile_edit(
+            Edit(
+                production_id=f"fixture.contain-{z}",
+                width=20,
+                height=20,
+                fps_num=30,
+                fps_den=1,
+                duration_ns=1_000_000_000,
+                background="0x123456",
+                visuals=(
+                    MediaLayer(
+                        revision.asset_id,
+                        0,
+                        1_000_000_000,
+                        z,
+                        0,
+                        0,
+                        20,
+                        20,
+                        fit="contain",
+                    ),
+                ),
+                standalone_story="Contain padding keeps one canvas background.",
+            ),
+            (revision,),
+        )
+        command = rendering_api._build_command(
+            timeline,
+            ExecutionFingerprint.detect(),
+            RenderOptions(preset="ultrafast"),
+            FileResolver(objects),
+            tmp_path / f"contain-{z}.mp4",
+        )
+        return command[command.index("-filter_complex") + 1]
+
+    expected = (
+        "scale=20:20:force_original_aspect_ratio=decrease,"
+        "pad=20:20:(ow-iw)/2:(oh-ih)/2:color=0x123456"
+    )
+    assert expected in graph(0)
+    assert expected in graph(1)
+
+
 def test_base_track_uses_native_xfade_not_alpha_overlay(tmp_path: Path) -> None:
     revisions: list[AssetRevision] = []
     objects = tmp_path / "objects"
@@ -762,6 +835,69 @@ def test_base_track_uses_native_xfade_not_alpha_overlay(tmp_path: Path) -> None:
     graph = command[command.index("-filter_complex") + 1]
     assert "xfade=transition=fade:duration=0.2:offset=1" in graph
     assert "fade=t=in:st=1" not in graph
+
+
+def test_special_transition_rejects_competing_lower_layer(tmp_path: Path) -> None:
+    source = tmp_path / "frame.bin"
+    source.write_bytes(b"frame")
+    revision = _asset(
+        "fixture.special-transition",
+        source,
+        MediaFacts(kind="image", format_name="raw", width=20, height=20),
+    )
+    with pytest.raises(
+        ValueError,
+        match="special transitions require a contiguous full-canvas base track",
+    ):
+        compile_edit(
+            Edit(
+                production_id="fixture.competing-base",
+                width=20,
+                height=20,
+                fps_num=30,
+                fps_den=1,
+                duration_ns=1_000_000_000,
+                background="black",
+                visuals=(
+                    SolidLayer(
+                        0,
+                        1_000_000_000,
+                        -1,
+                        0,
+                        0,
+                        20,
+                        20,
+                        "black",
+                    ),
+                    MediaLayer(
+                        revision.asset_id,
+                        0,
+                        600_000_000,
+                        0,
+                        0,
+                        0,
+                        20,
+                        20,
+                        fit="stretch",
+                    ),
+                    MediaLayer(
+                        revision.asset_id,
+                        400_000_000,
+                        600_000_000,
+                        0,
+                        0,
+                        0,
+                        20,
+                        20,
+                        fit="stretch",
+                        transition="slide_left",
+                        transition_ns=200_000_000,
+                    ),
+                ),
+                standalone_story="A competing lower layer cannot erase a transition.",
+            ),
+            (revision,),
+        )
 
 
 def test_duck_amount_changes_sidechain_render_graph(tmp_path: Path) -> None:
