@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Literal, Mapping
 
+from dlstudio.assets.api import BlobRef
 from dlstudio.foundation.api import DomainId, canonical_bytes, canonical_hash
 
 
@@ -31,30 +32,11 @@ class Constraint:
 
 
 @dataclass(frozen=True, slots=True)
-class ConstraintSetRef:
-    production_id: str
-    sha256: str
-
-    def __post_init__(self) -> None:
-        DomainId(self.production_id)
-        if len(self.sha256) != 64 or any(
-            character not in "0123456789abcdef" for character in self.sha256
-        ):
-            raise ValueError("invalid constraint set hash")
-
-    def as_payload(self) -> dict[str, str]:
-        return {
-            "production_id": self.production_id,
-            "sha256": self.sha256,
-        }
-
-
-@dataclass(frozen=True, slots=True)
 class ConstraintSet:
     production_id: str
     source: str
     constraints: tuple[Constraint, ...]
-    supersedes: ConstraintSetRef | None = None
+    supersedes: BlobRef | None = None
 
     DOMAIN = "dlstudio.constraint_set"
     VERSION = 1
@@ -69,11 +51,6 @@ class ConstraintSet:
         identifiers = [item.constraint_id for item in ordered]
         if len(identifiers) != len(set(identifiers)):
             raise ValueError("duplicate constraint id")
-        if (
-            self.supersedes is not None
-            and self.supersedes.production_id != self.production_id
-        ):
-            raise ValueError("superseded constraints belong to another production")
         object.__setattr__(self, "constraints", ordered)
 
     def as_payload(self) -> dict[str, Any]:
@@ -87,12 +64,13 @@ class ConstraintSet:
         }
 
     @property
-    def ref(self) -> ConstraintSetRef:
-        return ConstraintSetRef(
-            self.production_id,
+    def ref(self) -> BlobRef:
+        raw = self.canonical_bytes()
+        return BlobRef(
             canonical_hash(
                 self.as_payload(), domain=self.DOMAIN, version=self.VERSION
             ),
+            len(raw),
         )
 
     def canonical_bytes(self) -> bytes:
@@ -124,10 +102,7 @@ class ConstraintSet:
             supersedes=(
                 None
                 if supersedes is None
-                else ConstraintSetRef(
-                    str(supersedes["production_id"]),
-                    str(supersedes["sha256"]),
-                )
+                else BlobRef.from_payload(supersedes)
             ),
         )
         if result.canonical_bytes() != raw:

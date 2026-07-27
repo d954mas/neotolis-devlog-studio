@@ -30,17 +30,6 @@ class ReviewFinding:
 
 
 @dataclass(frozen=True, slots=True)
-class ReviewVerdictRef:
-    sha256: str
-
-    def __post_init__(self) -> None:
-        if len(self.sha256) != 64 or any(
-            character not in "0123456789abcdef" for character in self.sha256
-        ):
-            raise ValueError("invalid review verdict hash")
-
-
-@dataclass(frozen=True, slots=True)
 class ReviewVerdict:
     artifact: BlobRef
     outcome: Literal["pass", "changes_requested", "block"]
@@ -99,11 +88,13 @@ class ReviewVerdict:
         }
 
     @property
-    def ref(self) -> ReviewVerdictRef:
-        return ReviewVerdictRef(
+    def ref(self) -> BlobRef:
+        raw = self.canonical_bytes()
+        return BlobRef(
             canonical_hash(
                 self.as_payload(), domain=self.DOMAIN, version=self.VERSION
-            )
+            ),
+            len(raw),
         )
 
     @property
