@@ -623,37 +623,13 @@ class TimelineIR:
             for visual in self.visuals
             if visual.transition in {"dip_black", "slide_left", "slide_right"}
         }
-        if special:
-            base_media = sorted(
-                (
-                    visual
-                    for visual in self.visuals
-                    if visual.kind == "media" and visual.z == 0
-                ),
-                key=lambda visual: visual.start_ns,
+        base_track = _base_transition_track(self)
+        if special and (
+            base_track is None or not special.issubset(set(base_track))
+        ):
+            raise ValueError(
+                "special transitions require a contiguous full-canvas base track"
             )
-            valid_base = bool(base_media) and base_media[0].start_ns == 0
-            valid_base = valid_base and all(
-                visual.x == 0
-                and visual.y == 0
-                and visual.width == self.width
-                and visual.height == self.height
-                and visual.opacity_milli == 1000
-                and not visual.animations
-                for visual in base_media
-            )
-            valid_base = valid_base and all(
-                left.end_ns
-                - (right.transition_ns if right.transition != "cut" else 0)
-                == right.start_ns
-                for left, right in zip(base_media, base_media[1:])
-            )
-            valid_base = valid_base and base_media[-1].end_ns == self.duration_ns
-            valid_base = valid_base and special.issubset(set(base_media))
-            if not valid_base:
-                raise ValueError(
-                    "special transitions require a contiguous full-canvas base track"
-                )
         for item in self.audio:
             if item.end_ns > self.duration_ns:
                 raise ValueError("audio exceeds timeline duration")
@@ -786,6 +762,44 @@ class TimelineIR:
         if timeline.canonical_bytes() != raw:
             raise CorruptObject("TimelineIR is not canonically encoded")
         return timeline
+
+
+def _base_transition_track(
+    timeline: TimelineIR,
+) -> tuple[VisualInstruction, ...] | None:
+    base_media = tuple(
+        visual
+        for visual in timeline.visuals
+        if visual.kind == "media" and visual.z == 0
+    )
+    if not base_media or base_media[0].start_ns != 0:
+        return None
+    if any(
+        visual.kind != "media" or visual.z != 0
+        for visual in timeline.visuals
+        if visual.z <= 0
+    ):
+        return None
+    if not all(
+        visual.x == 0
+        and visual.y == 0
+        and visual.width == timeline.width
+        and visual.height == timeline.height
+        and visual.opacity_milli == 1000
+        and not visual.animations
+        for visual in base_media
+    ):
+        return None
+    if any(
+        left.end_ns
+        - (right.transition_ns if right.transition != "cut" else 0)
+        != right.start_ns
+        for left, right in zip(base_media, base_media[1:])
+    ):
+        return None
+    if base_media[-1].end_ns != timeline.duration_ns:
+        return None
+    return base_media
 
 
 @dataclass(frozen=True, slots=True)

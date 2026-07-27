@@ -18,11 +18,13 @@ from pathlib import Path
 from typing import BinaryIO, Protocol
 
 from dlstudio.foundation.api import BlobRef, canonical_bytes, canonical_hash
+from dlstudio.rendering._filters import media_geometry_filter
 from dlstudio.timeline.api import (
     AnimationInstruction,
     AssetSnapshot,
     AudioInstruction,
     TimelineIR,
+    _base_transition_track,
     check_timeline,
 )
 
@@ -75,6 +77,7 @@ class ExecutionFingerprint:
         )
         semantic_sources = (
             Path(__file__),
+            Path(__file__).with_name("_filters.py"),
             Path(__file__).with_name("worker.py"),
             Path(__file__).parents[1] / "timeline" / "api.py",
         )
@@ -517,40 +520,9 @@ def _build_command(
     ordered_visuals = sorted(
         timeline.visuals, key=lambda item: (item.z, item.start_ns, item.kind)
     )
-    base_media = [
-        item
-        for item in ordered_visuals
-        if item.kind == "media" and item.z == 0
-    ]
-    base_track_geometry_is_full_canvas = all(
-        item.x == 0
-        and item.y == 0
-        and item.width == timeline.width
-        and item.height == timeline.height
-        and item.opacity_milli == 1000
-        and not item.animations
-        for item in base_media
-    )
-    base_track_is_contiguous = bool(base_media) and base_media[0].start_ns == 0
-    for left, right in zip(base_media, base_media[1:]):
-        outgoing_tail_ns = (
-            right.transition_ns if right.transition != "cut" else 0
-        )
-        if left.end_ns - outgoing_tail_ns != right.start_ns:
-            base_track_is_contiguous = False
-            break
-    if base_media and base_media[-1].end_ns != timeline.duration_ns:
-        base_track_is_contiguous = False
-    no_competing_base_layers = all(
-        item.kind == "media" and item.z == 0 for item in ordered_visuals if item.z <= 0
-    )
-    use_xfade_track = (
-        base_track_is_contiguous
-        and base_track_geometry_is_full_canvas
-        and no_competing_base_layers
-    )
+    base_media = _base_transition_track(timeline)
     base_instruction_ids: set[int] = set()
-    if use_xfade_track:
+    if base_media is not None:
         filters.append("[v0]nullsink")
         base_labels: list[str] = []
         for position, instruction in enumerate(base_media):
@@ -559,38 +531,10 @@ def _build_command(
             snapshot = snapshots[instruction.asset]
             index = input_index[(instruction.asset, instruction.loop)]
             duration = _seconds(instruction.duration_ns)
-            if instruction.geometry is not None:
-                resolved = instruction.geometry
-                geometry = (
-                    f"scale={resolved.scaled_width}:{resolved.scaled_height}"
-                )
-                if resolved.crop_x is not None:
-                    geometry += (
-                        f",crop={instruction.width}:{instruction.height}:"
-                        f"{resolved.crop_x}:{resolved.crop_y}"
-                    )
-                elif resolved.pad_x is not None:
-                    geometry += (
-                        f",pad={instruction.width}:{instruction.height}:"
-                        f"{resolved.pad_x}:{resolved.pad_y}:"
-                        f"color={timeline.background}"
-                    )
-            elif instruction.fit == "stretch":
-                geometry = f"scale={instruction.width}:{instruction.height}"
-            elif instruction.fit == "cover":
-                geometry = (
-                    f"scale={instruction.width}:{instruction.height}:"
-                    "force_original_aspect_ratio=increase,"
-                    f"crop={instruction.width}:{instruction.height}"
-                )
-            else:
-                geometry = (
-                    f"scale={instruction.width}:{instruction.height}:"
-                    "force_original_aspect_ratio=decrease,"
-                    f"pad={instruction.width}:{instruction.height}:"
-                    "(ow-iw)/2:(oh-ih)/2:"
-                    f"color={timeline.background}"
-                )
+            geometry = media_geometry_filter(
+                instruction,
+                background=timeline.background,
+            )
             padding = ""
             if instruction.freeze_at_end:
                 padding = (
@@ -700,38 +644,10 @@ def _build_command(
             index = input_index[(instruction.asset, instruction.loop)]
             layer = f"layer{media_counter}"
             duration = _seconds(instruction.duration_ns)
-            if instruction.geometry is not None:
-                resolved = instruction.geometry
-                geometry = (
-                    f"scale={resolved.scaled_width}:{resolved.scaled_height}"
-                )
-                if resolved.crop_x is not None:
-                    geometry += (
-                        f",crop={instruction.width}:{instruction.height}:"
-                        f"{resolved.crop_x}:{resolved.crop_y}"
-                    )
-                elif resolved.pad_x is not None:
-                    geometry += (
-                        f",pad={instruction.width}:{instruction.height}:"
-                        f"{resolved.pad_x}:{resolved.pad_y}:"
-                        f"color={timeline.background}"
-                    )
-            elif instruction.fit == "stretch":
-                geometry = f"scale={instruction.width}:{instruction.height}"
-            else:
-                mode = "increase" if instruction.fit == "cover" else "decrease"
-                geometry = (
-                    f"scale={instruction.width}:{instruction.height}:"
-                    f"force_original_aspect_ratio={mode},"
-                    f"crop={instruction.width}:{instruction.height}"
-                    if instruction.fit == "cover"
-                    else (
-                        f"scale={instruction.width}:{instruction.height}:"
-                        f"force_original_aspect_ratio=decrease,"
-                        f"pad={instruction.width}:{instruction.height}:"
-                        "(ow-iw)/2:(oh-ih)/2:color=black"
-                    )
-                )
+            geometry = media_geometry_filter(
+                instruction,
+                background=timeline.background,
+            )
             motion = ""
             if instruction.ken_burns:
                 motion = (
