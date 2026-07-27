@@ -3,7 +3,6 @@
 from .api import (
     HeadRef,
     ObjectStore,
-    OperationTransaction,
     ProductionRepository,
     ProductionStateRoot,
     WriterLease,
@@ -17,7 +16,6 @@ from .assets import (
 __all__ = [
     "HeadRef",
     "ObjectStore",
-    "OperationTransaction",
     "ProductionRepository",
     "ProductionStateRoot",
     "WriterLease",

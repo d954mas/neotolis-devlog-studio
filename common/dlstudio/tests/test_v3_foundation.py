@@ -5,7 +5,6 @@ import hashlib
 import multiprocessing
 import os
 import unicodedata
-from collections.abc import Iterator, Mapping
 from pathlib import Path
 
 import pytest
@@ -22,10 +21,7 @@ from dlstudio.foundation.api import (
     canonical_hash,
     normalize_logical_path,
 )
-from dlstudio.persistence import (
-    OperationTransaction,
-    ProductionRepository,
-)
+from dlstudio.persistence import ProductionRepository
 from dlstudio.persistence import api as persistence_api
 
 
@@ -215,216 +211,21 @@ def test_two_contexts_share_no_state(tmp_path: Path) -> None:
     assert two.objects.read(two.read_root().records["x"]) == b"two"
 
 
-def test_operation_prepare_is_idempotent_and_input_bound(tmp_path: Path) -> None:
+def test_root_keeps_only_current_owner_records(tmp_path: Path) -> None:
     repo = _repository(tmp_path)
-    operation_id = OperationTransaction.derive_id(
-        production_id="fixture.reel",
-        contract="compile.v1",
-        inputs={"asset": "abc"},
-        implementation="source-1",
-        toolchain="python-3.12",
-    )
-    tx = OperationTransaction(
-        repo, operation_id=operation_id, inputs={"asset": "abc"}
-    )
-    assert tx.prepare() == tx.prepare()
-    payload = json.loads(tx.record_path.read_text(encoding="utf-8"))
-    assert payload["state"] == "prepared"
-    with pytest.raises(TypeError):
-        tx.inputs["asset"] = "different"  # type: ignore[index]
-    tx.close()
-
-
-@pytest.mark.parametrize(
-    "operation_id",
-    ["../outside", "A" * 64, "a" * 63, "/absolute", r"..\outside"],
-)
-def test_operation_id_cannot_escape_staging(
-    tmp_path: Path, operation_id: str
-) -> None:
-    repo = _repository(tmp_path)
-    with pytest.raises(ValueError, match="64 lowercase hex"):
-        OperationTransaction(repo, operation_id=operation_id, inputs={})
-
-
-def test_prepare_reconciles_unrecorded_crash_stage(tmp_path: Path) -> None:
-    repo = _repository(tmp_path)
-    tx = OperationTransaction(
-        repo, operation_id="a" * 64, inputs={"asset": "abc"}
-    )
-    tx.stage.mkdir(parents=True)
-    (tx.stage / "partial.bin").write_bytes(b"untrusted")
-    tx.prepare()
-    assert not (tx.stage / "partial.bin").exists()
-    assert tx.record_path.is_file()
-    tx.close()
-
-
-def test_operation_commit_and_resume_have_one_canonical_attempt(
-    tmp_path: Path,
-) -> None:
-    repo = _repository(tmp_path)
-    operation_id = OperationTransaction.derive_id(
-        production_id="fixture.reel",
-        contract="render.v1",
-        inputs={"ir": "abc"},
-        implementation="source-1",
-        toolchain="ffmpeg-7",
-    )
-    tx = OperationTransaction(
-        repo, operation_id=operation_id, inputs={"ir": "abc"}
-    )
-    stage = tx.prepare()
-    artifact_path = stage / "artifact.mp4"
-    artifact_path.write_bytes(b"rendered")
-    artifact = tx.publish_file(artifact_path)
-    head = tx.commit(outputs={"artifact": artifact}, expected_revision=0)
-    assert head.revision == 1
-
-    resumed = OperationTransaction(
-        repo, operation_id=operation_id, inputs={"ir": "abc"}
-    )
-    resumed.prepare()
-    assert resumed.committed_outputs == {"artifact": artifact}
-    later = repo.objects.put_bytes(b"later")
-    later_head = repo.update_records({"later": later}, expected_revision=1)
-    assert later_head.revision == 2
-    assert resumed.commit(outputs={"artifact": artifact}, expected_revision=0) == head
-    resumed.prepare()
-    with pytest.raises(CasConflict, match="outputs differ"):
-        resumed.commit(
-            outputs={"artifact": later},
-            expected_revision=0,
-        )
-    resumed.prepare()
-    with pytest.raises(CasConflict, match="expected revision"):
-        resumed.commit(outputs={"artifact": artifact}, expected_revision=1)
-    resumed.close()
-
-
-def test_operation_mutation_requires_live_lease(tmp_path: Path) -> None:
-    repo = _repository(tmp_path)
-    tx = OperationTransaction(repo, operation_id="b" * 64, inputs={})
-    stage = tx.prepare()
-    artifact_path = stage / "artifact.bin"
-    artifact_path.write_bytes(b"bytes")
-    artifact = tx.publish_file(artifact_path)
-    tx.close()
-
-    with pytest.raises(RuntimeError, match="lease"):
-        tx.commit(outputs={"artifact": artifact}, expected_revision=0)
-    with pytest.raises(RuntimeError, match="prepare"):
-        tx.publish_file(artifact_path)
-
-    owner = OperationTransaction(repo, operation_id="b" * 64, inputs={})
-    owner.prepare()
-    tx._lease.timeout = 0.1
-    tx._lease.poll_interval = 0.01
-    with pytest.raises(TimeoutError):
-        tx.abandon()
-    assert owner.stage.is_dir()
-    owner.close()
-    tx.abandon()
-    assert not tx.stage.exists()
-
-
-def test_distinct_operations_can_execute_in_parallel(tmp_path: Path) -> None:
-    repo = _repository(tmp_path)
-    first = OperationTransaction(repo, operation_id="1" * 64, inputs={})
-    second = OperationTransaction(repo, operation_id="2" * 64, inputs={})
-    first.prepare()
-    second._lease.timeout = 0.2
-    second.prepare()
-    assert first._lease.held
-    assert second._lease.held
-    second.close()
-    first.close()
-
-
-def test_failed_operation_commit_releases_lease_and_reserves_namespace(
-    tmp_path: Path,
-) -> None:
-    repo = _repository(tmp_path)
-    tx = OperationTransaction(repo, operation_id="c" * 64, inputs={})
-    tx.prepare()
-    with pytest.raises(ValueError, match="namespace"):
-        tx.commit(
-            outputs={},
-            record_updates={"operation:" + "d" * 64: BlobRef("0" * 64, 0)},
-            expected_revision=0,
-        )
-    with OperationTransaction(
-        repo, operation_id="c" * 64, inputs={}
-    ) as resumed:
-        assert resumed.stage.is_dir()
-
-    with pytest.raises(ValueError, match="namespace"):
+    expected_revision = 0
+    for index in range(50):
+        current = repo.objects.put_bytes(f"revision-{index}".encode())
         repo.update_records(
-            {"operation:" + "d" * 64: BlobRef("0" * 64, 0)},
-            expected_revision=0,
+            {"workflow:current": current},
+            expected_revision=expected_revision,
         )
-    with pytest.raises(ValueError, match="namespace"):
-        repo.update_records(
-            {"assets:index": repo.objects.put_bytes(b"fake")},
-            expected_revision=0,
-        )
-    assert not hasattr(repo, "commit_root")
+        expected_revision += 1
 
-
-def test_internal_root_transition_cannot_remove_operation_record(
-    tmp_path: Path,
-) -> None:
-    repo = _repository(tmp_path)
-    tx = OperationTransaction(repo, operation_id="f" * 64, inputs={})
-    tx.prepare()
-    committed_head = tx.commit(outputs={}, expected_revision=0)
-    committed_root = repo.read_root(committed_head)
-    stripped = persistence_api.ProductionStateRoot(
-        "fixture.reel",
-        2,
-        {
-            key: ref
-            for key, ref in committed_root.records.items()
-            if not key.startswith("operation:")
-        },
-        committed_head.root_hash,
-    )
-    with pytest.raises(ValueError, match="reserved record transition"):
-        repo._commit_root(
-            stripped,
-            expected_revision=1,
-            allowed_reserved_keys=frozenset(),
-        )
-    assert repo.read_head() == committed_head
-
-
-def test_operation_snapshots_adversarial_output_mapping(
-    tmp_path: Path,
-) -> None:
-    repo = _repository(tmp_path)
-    good = repo.objects.put_bytes(b"good")
-    missing = BlobRef("0" * 64, 1)
-
-    class ChangingOutputs(Mapping[str, BlobRef]):
-        calls = 0
-
-        def __getitem__(self, key: str) -> BlobRef:
-            self.calls += 1
-            return good if self.calls == 1 else missing
-
-        def __iter__(self) -> Iterator[str]:
-            yield "artifact"
-
-        def __len__(self) -> int:
-            return 1
-
-    tx = OperationTransaction(repo, operation_id="e" * 64, inputs={})
-    tx.prepare()
-    outputs = ChangingOutputs()
-    head = tx.commit(outputs=outputs, expected_revision=0)
-    committed = repo.read_root(head).records[tx.root_record_key]
-    record = json.loads(repo.objects.read(committed))
-    assert record["payload"]["outputs"]["artifact"]["sha256"] == good.sha256
+    root = repo.read_root()
+    assert root.revision == 50
+    assert root.records == {"workflow:current": current}
+    assert not any(key.startswith("operation:") for key in root.records)
 
 
 def test_writer_lease_blocks_spawned_process(tmp_path: Path) -> None:
