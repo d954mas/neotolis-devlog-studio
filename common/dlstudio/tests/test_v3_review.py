@@ -10,8 +10,9 @@ def _verdict(**changes: object) -> ReviewVerdict:
     values: dict[str, object] = {
         "artifact": BlobRef("1" * 64, 100),
         "outcome": "pass",
-        "policy_id": "studio.final",
-        "policy_checks": ("audio", "visual", "constraints"),
+        "check_report": BlobRef("9" * 64, 90),
+        "constraints": BlobRef("8" * 64, 80),
+        "scope": ("audio", "visual", "constraints"),
         "reviewer": "video.reviewer",
         "reviewed_at": "2026-07-27T00:00:00Z",
     }
@@ -27,6 +28,8 @@ def test_verdict_round_trip_binds_policy_snapshot_and_exact_artifact() -> None:
     assert ReviewVerdict.from_canonical_bytes(verdict.canonical_bytes()) == verdict
     assert verdict.reachable_blobs == (
         BlobRef("1" * 64, 100),
+        BlobRef("9" * 64, 90),
+        BlobRef("8" * 64, 80),
         BlobRef("2" * 64, 20),
         BlobRef("3" * 64, 30),
     )

@@ -34,7 +34,10 @@ def _candidate(repository: ProductionRepository) -> tuple[ReleaseCandidate, Blob
     candidate = ReleaseCandidate(
         production_id=repository.production_id,
         timeline=_put(repository, b"timeline"),
+        check_policy=_put(repository, b"policy"),
         execution=_put(repository, b"execution"),
+        render_options=_put(repository, b"options"),
+        execution_key="d" * 64,
         final_output=final,
         check_report=_put(repository, b"checks"),
         review_verdict=_put(repository, b"review"),
@@ -43,6 +46,7 @@ def _candidate(repository: ProductionRepository) -> tuple[ReleaseCandidate, Blob
         license_bundle=_put(repository, b"licenses"),
         package=(
             PackageFile("video.mp4", final),
+            PackageFile("licenses.json", _put(repository, b"licenses")),
             PackageFile("youtube/metadata.md", metadata),
         ),
     )

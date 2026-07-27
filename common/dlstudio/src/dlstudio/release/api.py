@@ -31,7 +31,10 @@ class PackageFile:
 class ReleaseCandidate:
     production_id: str
     timeline: BlobRef
+    check_policy: BlobRef
     execution: BlobRef
+    render_options: BlobRef
+    execution_key: str
     final_output: BlobRef
     check_report: BlobRef
     review_verdict: BlobRef
@@ -41,7 +44,7 @@ class ReleaseCandidate:
     package: tuple[PackageFile, ...]
 
     DOMAIN = "dlstudio.release_candidate"
-    VERSION = 1
+    VERSION = 2
 
     def __post_init__(self) -> None:
         DomainId(self.production_id)
@@ -53,6 +56,13 @@ class ReleaseCandidate:
             raise ValueError("duplicate release package path")
         if self.final_output not in {item.blob for item in package}:
             raise ValueError("release package must contain the exact final output")
+        if self.license_bundle not in {item.blob for item in package}:
+            raise ValueError("release package must contain the exact license bundle")
+        if len(self.execution_key) != 64 or any(
+            character not in "0123456789abcdef"
+            for character in self.execution_key
+        ):
+            raise ValueError("invalid release execution key")
         revisions = tuple(
             sorted(
                 set(self.asset_revisions),
@@ -66,7 +76,10 @@ class ReleaseCandidate:
         return {
             "production_id": self.production_id,
             "timeline": self.timeline.as_payload(),
+            "check_policy": self.check_policy.as_payload(),
             "execution": self.execution.as_payload(),
+            "render_options": self.render_options.as_payload(),
+            "execution_key": self.execution_key,
             "final_output": self.final_output.as_payload(),
             "check_report": self.check_report.as_payload(),
             "review_verdict": self.review_verdict.as_payload(),
@@ -93,7 +106,9 @@ class ReleaseCandidate:
     def reachable_blobs(self) -> tuple[BlobRef, ...]:
         refs = {
             self.timeline,
+            self.check_policy,
             self.execution,
+            self.render_options,
             self.final_output,
             self.check_report,
             self.review_verdict,
@@ -121,7 +136,10 @@ class ReleaseCandidate:
         result = cls(
             production_id=str(value["production_id"]),
             timeline=BlobRef.from_payload(value["timeline"]),
+            check_policy=BlobRef.from_payload(value["check_policy"]),
             execution=BlobRef.from_payload(value["execution"]),
+            render_options=BlobRef.from_payload(value["render_options"]),
+            execution_key=str(value["execution_key"]),
             final_output=BlobRef.from_payload(value["final_output"]),
             check_report=BlobRef.from_payload(value["check_report"]),
             review_verdict=BlobRef.from_payload(value["review_verdict"]),

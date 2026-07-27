@@ -722,6 +722,11 @@ class TimelineIR:
             self.as_payload(), domain=self.DOMAIN, version=self.VERSION
         )
 
+    @property
+    def ref(self) -> BlobRef:
+        raw = self.canonical_bytes()
+        return BlobRef(self.timeline_id, len(raw))
+
     def canonical_bytes(self) -> bytes:
         return canonical_bytes(
             self.as_payload(), domain=self.DOMAIN, version=self.VERSION
@@ -789,6 +794,20 @@ class CheckFinding:
     severity: Literal["warning", "error"]
     message: str
 
+    def __post_init__(self) -> None:
+        DomainId(self.rule)
+        if self.severity not in {"warning", "error"}:
+            raise ValueError("unsupported check severity")
+        if not self.message.strip():
+            raise ValueError("check finding message is required")
+
+    def as_payload(self) -> dict[str, str]:
+        return {
+            "rule": self.rule,
+            "severity": self.severity,
+            "message": self.message,
+        }
+
 
 @dataclass(frozen=True, slots=True)
 class CheckPolicy:
@@ -797,37 +816,136 @@ class CheckPolicy:
     policy_id: str = "studio_v3.draft"
     ruleset_revision: str = "studio-v3-foundation"
     platform: Literal["generic", "vertical", "landscape"] = "generic"
-    constraint_revision: str = "unconstrained"
+    constraints: BlobRef | None = None
     require_approved_assets: bool = False
     require_redistributable_assets: bool = False
+
+    DOMAIN = "dlstudio.timeline_check_policy"
+    VERSION = 1
 
     def __post_init__(self) -> None:
         DomainId(self.policy_id)
         if self.platform not in {"generic", "vertical", "landscape"}:
             raise ValueError("unsupported check platform")
-        if not self.ruleset_revision or not self.constraint_revision:
-            raise ValueError("check policy revisions are required")
+        if not self.ruleset_revision:
+            raise ValueError("check ruleset revision is required")
 
     def as_payload(self) -> dict[str, Any]:
         return {
             "policy_id": self.policy_id,
             "ruleset_revision": self.ruleset_revision,
             "platform": self.platform,
-            "constraint_revision": self.constraint_revision,
+            "constraints": (
+                None
+                if self.constraints is None
+                else self.constraints.as_payload()
+            ),
             "require_approved_assets": self.require_approved_assets,
             "require_redistributable_assets": self.require_redistributable_assets,
         }
 
+    @property
+    def ref(self) -> BlobRef:
+        raw = self.canonical_bytes()
+        return BlobRef(
+            canonical_hash(
+                self.as_payload(), domain=self.DOMAIN, version=self.VERSION
+            ),
+            len(raw),
+        )
+
+    def canonical_bytes(self) -> bytes:
+        return canonical_bytes(
+            self.as_payload(), domain=self.DOMAIN, version=self.VERSION
+        )
+
+    @classmethod
+    def from_canonical_bytes(cls, raw: bytes) -> "CheckPolicy":
+        wrapped = json.loads(raw)
+        if (
+            wrapped.get("$domain") != cls.DOMAIN
+            or wrapped.get("$version") != cls.VERSION
+        ):
+            raise ValueError("invalid check policy schema")
+        value = wrapped["payload"]
+        result = cls(
+            policy_id=str(value["policy_id"]),
+            ruleset_revision=str(value["ruleset_revision"]),
+            platform=value["platform"],
+            constraints=(
+                None
+                if value["constraints"] is None
+                else BlobRef.from_payload(value["constraints"])
+            ),
+            require_approved_assets=bool(value["require_approved_assets"]),
+            require_redistributable_assets=bool(
+                value["require_redistributable_assets"]
+            ),
+        )
+        if result.canonical_bytes() != raw:
+            raise ValueError("check policy is not canonical")
+        return result
+
 
 @dataclass(frozen=True, slots=True)
 class CheckReport:
-    timeline_id: str
-    policy_hash: str
+    timeline: BlobRef
+    policy: BlobRef
     findings: tuple[CheckFinding, ...]
+
+    DOMAIN = "dlstudio.timeline_check_report"
+    VERSION = 1
 
     @property
     def blocking(self) -> bool:
         return any(item.severity == "error" for item in self.findings)
+
+    def as_payload(self) -> dict[str, Any]:
+        return {
+            "timeline": self.timeline.as_payload(),
+            "policy": self.policy.as_payload(),
+            "findings": [item.as_payload() for item in self.findings],
+        }
+
+    @property
+    def ref(self) -> BlobRef:
+        raw = self.canonical_bytes()
+        return BlobRef(
+            canonical_hash(
+                self.as_payload(), domain=self.DOMAIN, version=self.VERSION
+            ),
+            len(raw),
+        )
+
+    def canonical_bytes(self) -> bytes:
+        return canonical_bytes(
+            self.as_payload(), domain=self.DOMAIN, version=self.VERSION
+        )
+
+    @classmethod
+    def from_canonical_bytes(cls, raw: bytes) -> "CheckReport":
+        wrapped = json.loads(raw)
+        if (
+            wrapped.get("$domain") != cls.DOMAIN
+            or wrapped.get("$version") != cls.VERSION
+        ):
+            raise ValueError("invalid check report schema")
+        value = wrapped["payload"]
+        result = cls(
+            timeline=BlobRef.from_payload(value["timeline"]),
+            policy=BlobRef.from_payload(value["policy"]),
+            findings=tuple(
+                CheckFinding(
+                    rule=str(item["rule"]),
+                    severity=item["severity"],
+                    message=str(item["message"]),
+                )
+                for item in value["findings"]
+            ),
+        )
+        if result.canonical_bytes() != raw:
+            raise ValueError("check report is not canonical")
+        return result
 
 
 def check_timeline(
@@ -946,7 +1064,4 @@ def check_timeline(
         findings.append(
             CheckFinding("VQ-RES", "error", "landscape policy requires landscape")
         )
-    policy_hash = canonical_hash(
-        policy.as_payload(), domain="dlstudio.timeline_check_policy"
-    )
-    return CheckReport(timeline.timeline_id, policy_hash, tuple(findings))
+    return CheckReport(timeline.ref, policy.ref, tuple(findings))

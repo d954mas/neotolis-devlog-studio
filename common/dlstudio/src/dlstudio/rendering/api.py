@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, Protocol
 
-from dlstudio.foundation.api import BlobRef, canonical_hash
+from dlstudio.foundation.api import BlobRef, canonical_bytes, canonical_hash
 from dlstudio.timeline.api import (
     AnimationInstruction,
     AssetSnapshot,
@@ -46,6 +46,9 @@ class ExecutionFingerprint:
     raster_contract: str = "ffmpeg-filtergraph-v1"
     video_encoder: str = "libx264"
     audio_encoder: str = "aac"
+
+    DOMAIN = "dlstudio.execution_fingerprint"
+    VERSION = 1
 
     def as_payload(self) -> dict[str, str]:
         return {
@@ -106,6 +109,47 @@ class ExecutionFingerprint:
             raise RuntimeError("local renderer differs from its fingerprint")
         return current
 
+    @property
+    def ref(self) -> BlobRef:
+        raw = self.canonical_bytes()
+        return BlobRef(
+            canonical_hash(
+                self.as_payload(), domain=self.DOMAIN, version=self.VERSION
+            ),
+            len(raw),
+        )
+
+    def canonical_bytes(self) -> bytes:
+        return canonical_bytes(
+            self.as_payload(), domain=self.DOMAIN, version=self.VERSION
+        )
+
+    @classmethod
+    def from_canonical_bytes(
+        cls, raw: bytes, *, ffmpeg: str = "ffmpeg"
+    ) -> "ExecutionFingerprint":
+        wrapped = json.loads(raw)
+        if (
+            wrapped.get("$domain") != cls.DOMAIN
+            or wrapped.get("$version") != cls.VERSION
+        ):
+            raise ValueError("invalid execution fingerprint schema")
+        value = wrapped["payload"]
+        result = cls(
+            ffmpeg=ffmpeg,
+            ffmpeg_version=str(value["ffmpeg_version"]),
+            renderer_source_sha256=str(value["renderer_source_sha256"]),
+            ffmpeg_build_sha256=str(value["ffmpeg_build_sha256"]),
+            ffmpeg_binary_sha256=str(value["ffmpeg_binary_sha256"]),
+            runtime=str(value["runtime"]),
+            raster_contract=str(value["raster_contract"]),
+            video_encoder=str(value["video_encoder"]),
+            audio_encoder=str(value["audio_encoder"]),
+        )
+        if result.canonical_bytes() != raw:
+            raise ValueError("execution fingerprint is not canonical")
+        return result
+
 
 @dataclass(frozen=True, slots=True)
 class RenderOptions:
@@ -113,6 +157,9 @@ class RenderOptions:
     preset: str = "veryfast"
     pixel_format: str = "yuv420p"
     audio_bitrate: str = "192k"
+
+    DOMAIN = "dlstudio.render_options"
+    VERSION = 1
 
     def __post_init__(self) -> None:
         if not 0 <= self.crf <= 51:
@@ -125,6 +172,40 @@ class RenderOptions:
             "pixel_format": self.pixel_format,
             "audio_bitrate": self.audio_bitrate,
         }
+
+    @property
+    def ref(self) -> BlobRef:
+        raw = self.canonical_bytes()
+        return BlobRef(
+            canonical_hash(
+                self.as_payload(), domain=self.DOMAIN, version=self.VERSION
+            ),
+            len(raw),
+        )
+
+    def canonical_bytes(self) -> bytes:
+        return canonical_bytes(
+            self.as_payload(), domain=self.DOMAIN, version=self.VERSION
+        )
+
+    @classmethod
+    def from_canonical_bytes(cls, raw: bytes) -> "RenderOptions":
+        wrapped = json.loads(raw)
+        if (
+            wrapped.get("$domain") != cls.DOMAIN
+            or wrapped.get("$version") != cls.VERSION
+        ):
+            raise ValueError("invalid render options schema")
+        value = wrapped["payload"]
+        result = cls(
+            crf=int(value["crf"]),
+            preset=str(value["preset"]),
+            pixel_format=str(value["pixel_format"]),
+            audio_bitrate=str(value["audio_bitrate"]),
+        )
+        if result.canonical_bytes() != raw:
+            raise ValueError("render options are not canonical")
+        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -915,6 +996,21 @@ def _hash_file(path: Path) -> BlobRef:
     return BlobRef(digest.hexdigest(), size)
 
 
+def execution_key(
+    timeline: TimelineIR,
+    fingerprint: ExecutionFingerprint,
+    options: RenderOptions,
+) -> str:
+    return canonical_hash(
+        {
+            "timeline_id": timeline.timeline_id,
+            "execution": fingerprint.as_payload(),
+            "options": options.as_payload(),
+        },
+        domain="dlstudio.render_cache",
+    )
+
+
 def render(
     timeline: TimelineIR,
     fingerprint: ExecutionFingerprint,
@@ -928,14 +1024,7 @@ def render(
     report = check_timeline(timeline)
     if report.blocking:
         raise ValueError(f"timeline checks failed: {report.findings}")
-    cache_key = canonical_hash(
-        {
-            "timeline_id": timeline.timeline_id,
-            "execution": fingerprint.as_payload(),
-            "options": options.as_payload(),
-        },
-        domain="dlstudio.render_cache",
-    )
+    cache_key = execution_key(timeline, fingerprint, options)
     output = output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     for blob in _reachable_blobs(timeline):
