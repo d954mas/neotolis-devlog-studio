@@ -41,7 +41,12 @@ class DispositionRules:
             raise InventoryError(f"cannot parse disposition rules {path}: {exc}") from exc
         if payload.get("schema_version") != 1:
             raise InventoryError("unsupported disposition rules schema")
-        for key in ("project_rules", "artifact_rules", "workspace_excludes"):
+        for key in (
+            "project_rules",
+            "artifact_rules",
+            "workspace_excludes",
+            "workspace_exclude_prefixes",
+        ):
             if key not in payload:
                 raise InventoryError(f"disposition rules missing {key}")
         return cls(source_path=path.resolve(), payload=payload)
@@ -65,6 +70,7 @@ def classify_project_roots(workspace: Path, rules: DispositionRules) -> list[Pro
     if not workspace.is_dir():
         raise InventoryError(f"workspace is not a directory: {workspace}")
     excludes = set(rules.payload["workspace_excludes"])
+    exclude_prefixes = tuple(rules.payload["workspace_exclude_prefixes"])
     specs = rules.payload["project_rules"]
     fallbacks = [rule for rule in specs if rule.get("fallback")]
     if len(fallbacks) != 1:
@@ -72,7 +78,11 @@ def classify_project_roots(workspace: Path, rules: DispositionRules) -> list[Pro
     fallback = fallbacks[0]
     roots: list[ProjectRoot] = []
     for candidate in sorted(workspace.iterdir(), key=lambda item: item.name.casefold()):
-        if candidate.name in excludes or not candidate.is_dir():
+        if (
+            candidate.name in excludes
+            or candidate.name.startswith(exclude_prefixes)
+            or not candidate.is_dir()
+        ):
             continue
         matches: list[dict[str, Any]] = []
         for rule in specs:

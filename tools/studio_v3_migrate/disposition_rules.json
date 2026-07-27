@@ -19,6 +19,12 @@
     "tmp",
     "tools"
   ],
+  "workspace_exclude_prefixes": [
+    ".phase4-review-repro-",
+    ".review-phase",
+    ".test-tmp",
+    "_codex_tmp_"
+  ],
   "project_rules": [
     {
       "id": "active_product",
@@ -179,4 +185,3 @@
     }
   ]
 }
-
