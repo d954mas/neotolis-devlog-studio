@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Literal
 from dlstudio.constraints.api import ConstraintSet
 from dlstudio.foundation.api import BlobRef, canonical_bytes
 from dlstudio.release.api import PackageFile, ReleaseCandidate
@@ -20,6 +21,7 @@ from dlstudio.timeline.api import (
 )
 from dlstudio.workflow.api import (
     NamedRef,
+    STAGES,
     StageId,
     WorkflowStore,
     WorkflowKind,
@@ -27,6 +29,63 @@ from dlstudio.workflow.api import (
 )
 
 from .release import BlobStore, freeze_release
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowStatus:
+    """Read-only application projection shared by every adapter."""
+
+    production_id: str
+    workflow: WorkflowRun | None
+    stage_order: tuple[StageId, ...]
+    current_stage: StageId | None
+    completed: bool
+    action: Literal["advance", "review", "deliver"] | None
+
+    def as_payload(self) -> dict[str, Any]:
+        return {
+            "production_id": self.production_id,
+            "workflow": (
+                None if self.workflow is None else self.workflow.as_payload()
+            ),
+            "stage_order": list(self.stage_order),
+            "current_stage": self.current_stage,
+            "completed": self.completed,
+            "action": self.action,
+        }
+
+
+def project_status(workflow: WorkflowRun) -> WorkflowStatus:
+    stage = workflow.current_stage
+    action = (
+        None
+        if stage is None
+        else stage
+        if stage in {"review", "deliver"}
+        else "advance"
+    )
+    return WorkflowStatus(
+        workflow.production_id,
+        workflow,
+        STAGES,
+        stage,
+        workflow.completed,
+        action,
+    )
+
+
+def query_status(workflows: WorkflowStore) -> WorkflowStatus:
+    workflow = workflows.read_current()
+    if workflow is None:
+        return WorkflowStatus(
+            workflows.production_id,
+            None,
+            STAGES,
+            "prepare",
+            False,
+            "advance",
+        )
+    return project_status(workflow)
 
 
 def get_status(workflows: WorkflowStore) -> WorkflowRun:
