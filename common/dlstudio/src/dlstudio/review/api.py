@@ -160,8 +160,3 @@ class ReviewVerdict:
         if result.canonical_bytes() != raw:
             raise ValueError("review verdict is not canonical")
         return result
-        scope = tuple(sorted(set(self.scope)))
-        if not scope:
-            raise ValueError("review scope is required")
-        for item in scope:
-            DomainId(item)

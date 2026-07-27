@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, replace
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 from dlstudio.foundation.api import (
     BlobRef,
@@ -13,7 +13,7 @@ from dlstudio.foundation.api import (
     canonical_hash,
 )
 
-StageId = Literal["prepare", "draft", "review", "final", "package", "deliver"]
+StageId = Literal["prepare", "draft", "final", "review", "package", "deliver"]
 WorkflowKind = Literal["reel", "longform", "capture_vo"]
 STAGES: tuple[StageId, ...] = (
     "prepare",
@@ -366,3 +366,26 @@ class WorkflowRun:
         if result.canonical_bytes() != raw:
             raise ValueError("workflow run is not canonical")
         return result
+
+
+class WorkflowStore(Protocol):
+    """Storage operations required by application workflow use cases."""
+
+    @property
+    def production_id(self) -> str: ...
+
+    def read_current(self) -> WorkflowRun | None: ...
+
+    def head_revision(self) -> int: ...
+
+    def save(
+        self,
+        workflow: WorkflowRun,
+        *,
+        expected_workflow_revision: int,
+        expected_head_revision: int,
+    ) -> object: ...
+
+    def put_blob(self, data: bytes) -> BlobRef: ...
+
+    def verify_blob(self, ref: BlobRef) -> None: ...
