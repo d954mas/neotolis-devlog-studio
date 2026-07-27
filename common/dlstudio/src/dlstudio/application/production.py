@@ -27,7 +27,13 @@ from dlstudio.workflow.api import NamedRef, StageId, WorkflowRun, WorkflowStore
 
 from .authoring import compile_production
 from .release import BlobStore
-from .workflow import advance, get_status, package_release, _save_next
+from .workflow import (
+    _save_next,
+    advance,
+    get_status,
+    package_release,
+    start_workflow,
+)
 
 
 def advance_production(
@@ -40,10 +46,19 @@ def advance_production(
     cache_root: Path | None = None,
     fingerprint: ExecutionFingerprint | None = None,
 ) -> WorkflowRun:
-    """Advance compile/check/render/package by one user-visible step."""
+    """Start when needed, then advance one user-visible production step."""
 
-    current = get_status(workflows)
     edit = load_edit(authoring_path)
+    workflow_kind = "longform" if edit.kind == "devlog" else edit.kind
+    current = workflows.read_current()
+    if current is None:
+        current = start_workflow(
+            workflows,
+            run_id="run.main",
+            kind=workflow_kind,
+        )
+    elif current.kind != workflow_kind:
+        raise ValueError("authoring kind does not match the current workflow")
     timeline = compile_production(edit, assets)
     timeline_ref = store.put_bytes(timeline.canonical_bytes())
     constraints = ConstraintSet(
