@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -36,6 +37,24 @@ def test_status_is_a_direct_workflow_projection(tmp_path: Path) -> None:
     created = start_workflow(workflows, run_id="run.main", kind="reel")
     assert get_status(workflows) == created
     assert start_workflow(workflows, run_id="run.main", kind="reel") == created
+
+
+@pytest.mark.performance_smoke
+def test_status_no_compile_scan_subprocess(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workflows = _workflows(tmp_path)
+    expected = start_workflow(workflows, run_id="run.main", kind="reel")
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("status performed forbidden work")
+
+    monkeypatch.setattr(Path, "rglob", forbidden)
+    monkeypatch.setattr(subprocess, "run", forbidden)
+    monkeypatch.setattr(
+        "dlstudio.application.authoring.compile_production", forbidden
+    )
+    assert get_status(workflows) == expected
 
 
 def test_advance_hides_attempt_bookkeeping_and_resumes_running_stage(

@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from dlstudio.foundation.api import BlobRef
-from dlstudio.review.api import ReviewFinding, ReviewVerdict
+from dlstudio.review.api import (
+    REVIEW_PACK_MAX_BYTES,
+    REVIEW_PACK_MAX_ITEMS,
+    ReviewFinding,
+    ReviewVerdict,
+    build_review_pack,
+)
 
 
 def _verdict(**changes: object) -> ReviewVerdict:
@@ -52,3 +60,14 @@ def test_simple_review_does_not_require_pack_or_roles() -> None:
     verdict = _verdict()
     assert verdict.review_pack is None
     assert verdict.findings == ()
+
+
+@pytest.mark.performance_smoke
+def test_review_pack_bounded() -> None:
+    evidence = tuple(
+        BlobRef(f"{index:064x}", 300_000) for index in range(100)
+    )
+    wrapped = json.loads(build_review_pack(BlobRef("a" * 64, 10), evidence))
+    payload = wrapped["payload"]
+    assert len(payload["evidence"]) <= REVIEW_PACK_MAX_ITEMS
+    assert payload["evidence_bytes"] <= REVIEW_PACK_MAX_BYTES

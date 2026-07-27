@@ -13,6 +13,35 @@ from dlstudio.foundation.api import (
     canonical_hash,
 )
 
+REVIEW_PACK_MAX_ITEMS = 12
+REVIEW_PACK_MAX_BYTES = 2 * 1024 * 1024
+
+
+def build_review_pack(
+    artifact: BlobRef,
+    evidence: tuple[BlobRef, ...],
+) -> bytes:
+    """Build a deterministic compact evidence manifest with hard size caps."""
+
+    selected: list[BlobRef] = []
+    total = 0
+    for ref in sorted(set(evidence), key=lambda item: (item.sha256, item.size)):
+        if len(selected) == REVIEW_PACK_MAX_ITEMS:
+            break
+        if total + ref.size > REVIEW_PACK_MAX_BYTES:
+            continue
+        selected.append(ref)
+        total += ref.size
+    return canonical_bytes(
+        {
+            "artifact": artifact.as_payload(),
+            "evidence": [ref.as_payload() for ref in selected],
+            "evidence_bytes": total,
+        },
+        domain="dlstudio.review_pack",
+        version=1,
+    )
+
 
 @dataclass(frozen=True, slots=True)
 class ReviewFinding:
