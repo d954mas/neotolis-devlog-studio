@@ -15,7 +15,6 @@ _FIELDS = frozenset(
         "schema",
         "version",
         "id",
-        "workflow_kind",
         "authoring",
         "delivery_root",
     }
@@ -28,7 +27,6 @@ class LocalProduction:
 
     manifest_path: Path
     production_id: str
-    workflow_kind: str
     authoring_path: Path
     delivery_root: Path
 
@@ -109,9 +107,6 @@ def load_local_production(manifest_path: str | Path) -> LocalProduction:
     repository, _, _ = open_local_repositories(
         production_root, payload["id"]
     )
-    workflow_kind = payload["workflow_kind"]
-    if workflow_kind not in {"reel", "longform", "capture_vo"}:
-        raise ValueError(f"unsupported workflow_kind: {workflow_kind!r}")
     authoring_path = _resolve_contained_path(
         production_root=production_root,
         configured_path=payload["authoring"],
@@ -130,7 +125,6 @@ def load_local_production(manifest_path: str | Path) -> LocalProduction:
     return LocalProduction(
         manifest_path=manifest,
         production_id=repository.production_id,
-        workflow_kind=workflow_kind,
         authoring_path=authoring_path,
         delivery_root=delivery_root,
     )

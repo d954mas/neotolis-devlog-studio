@@ -1,6 +1,6 @@
 import { defineConfig } from "vite";
 
-// Studio v2 Web UI build config.
+// Studio v3 Web UI build config.
 // - Preact JSX via esbuild's automatic runtime (no extra preset dependency).
 // - Build output lands in the Python package's static dir so FastAPI can
 //   serve it (`vite build --outDir` equivalent, set here).
@@ -24,8 +24,8 @@ export default defineConfig({
     },
   },
   build: {
-    // Written into the dlstudio package so `import dlstudio.api` can serve it.
-    outDir: "../src/dlstudio/api/static",
+    // Co-located with the thin v3 HTTP adapter that serves it.
+    outDir: "../src/dlstudio/adapters/static",
     emptyOutDir: true,
     sourcemap: false,
   },

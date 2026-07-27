@@ -1,0 +1,132 @@
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from dlstudio.application.api import start_workflow
+from dlstudio.persistence.api import open_local_repositories
+
+
+def _production(root: Path, *, prestart: bool = True) -> Path:
+    root.mkdir()
+    (root / "edit.py").write_text(
+        "\n".join(
+            (
+                "from dlstudio.authoring.api import Edit, SolidLayer",
+                "EDIT = Edit(",
+                "    production_id='fixture.reel',",
+                "    width=64, height=96, fps_num=30, fps_den=1,",
+                "    duration_ns=200_000_000, background='black',",
+                "    visuals=(SolidLayer(0, 200_000_000, 0, 0, 0, 64, 96, 'black'),),",
+                "    standalone_story='A complete synthetic release.',",
+                ")",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+    manifest = root / "production.toml"
+    manifest.write_text(
+        "\n".join(
+            (
+                'schema = "dlstudio.production"',
+                "version = 3",
+                'id = "fixture.reel"',
+                'authoring = "edit.py"',
+                'delivery_root = "delivery"',
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+    if prestart:
+        _, _, workflows = open_local_repositories(root, "fixture.reel")
+        start_workflow(workflows, run_id="run.main", kind="reel")
+    return manifest
+
+
+def _cli_json(manifest: Path, command: str, capsys) -> dict[str, object]:
+    from dlstudio.adapters.cli import main
+
+    assert main(["--manifest", str(manifest), command]) == 0
+    return json.loads(capsys.readouterr().out)
+
+
+def test_cli_and_http_status_are_the_same_workflow_projection(
+    tmp_path: Path, capsys
+) -> None:
+    from dlstudio.adapters.http import create_app
+
+    manifest = _production(tmp_path / "production", prestart=False)
+    cli = _cli_json(manifest, "status", capsys)
+    response = TestClient(create_app(manifest)).get("/api/v3/status")
+
+    assert response.status_code == 200
+    assert response.json() == cli
+
+
+def test_cli_and_http_advance_call_the_same_application_flow(
+    tmp_path: Path, capsys
+) -> None:
+    from dlstudio.adapters.http import create_app
+
+    cli_manifest = _production(tmp_path / "cli", prestart=False)
+    http_manifest = _production(tmp_path / "http", prestart=False)
+
+    cli = _cli_json(cli_manifest, "advance", capsys)
+    response = TestClient(create_app(http_manifest)).post("/api/v3/advance")
+
+    assert response.status_code == 200
+    assert response.json() == cli
+
+
+@pytest.mark.performance_smoke
+def test_cli_api_no_heavy_provider_import() -> None:
+    command = (
+        "import sys; "
+        "import dlstudio.adapters.cli, dlstudio.adapters.http; "
+        "assert 'dlstudio.adapters.providers.media' not in sys.modules"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", command],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_openapi_has_no_path_file_or_job_queue_surface(tmp_path: Path) -> None:
+    from dlstudio.adapters.http import create_app
+
+    paths = create_app(_production(tmp_path / "production")).openapi()["paths"]
+
+    assert set(paths) == {
+        "/api/v3/status",
+        "/api/v3/advance",
+        "/api/v3/review",
+        "/api/v3/deliver",
+        "/api/v3/blobs/{sha256}",
+    }
+    assert all("job" not in path and "file" not in path for path in paths)
+
+
+def test_openapi_generation_is_deterministic(tmp_path: Path) -> None:
+    from tools.studio_v3_openapi import openapi_bytes
+
+    manifest = _production(tmp_path / "production")
+    checked_in = (
+        Path(__file__).parents[1]
+        / "webui"
+        / "src"
+        / "api"
+        / "openapi.v3.json"
+    ).read_bytes()
+
+    assert openapi_bytes(manifest) == checked_in
+    assert openapi_bytes(manifest) == openapi_bytes(manifest)

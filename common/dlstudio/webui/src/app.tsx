@@ -1,500 +1,179 @@
-import { useEffect, useRef, useState } from "preact/hooks";
-import { api, pollJob } from "./api/client";
-import type {
-  CheckReport,
-  AutopilotCheckpointData,
-  AutopilotRequestAction,
-  Feedback,
-  Project,
-  Timeline,
-} from "./api/types";
-import {
-  restoreUploadedTakes,
-  serializeUploadedTakes,
-  takesStorageKey,
-} from "./lib/takes";
-import type { SessionTake } from "./lib/takes";
-import { CheckBanner } from "./components/CheckBanner";
-import { Sidebar } from "./components/Sidebar";
-import { ScriptTab } from "./components/ScriptTab";
-import { RecordTab } from "./components/RecordTab";
-import { FeedbackPanel } from "./components/FeedbackPanel";
-import { IRInspector } from "./components/IRInspector";
-import { AutopilotCheckpoint } from "./components/AutopilotCheckpoint";
-import { ProductOverview } from "./components/ProductOverview";
+import { useEffect, useState } from "preact/hooks";
+import { studioV3 } from "./api/v3.client";
+import type { components } from "./api/v3.gen";
 
-type Tab = "autopilot" | "script" | "record" | "feedback" | "ir";
-type RenderState = "idle" | "running" | "done" | "error";
+type Status = components["schemas"]["WorkflowStatus"];
+type BlobRef = components["schemas"]["BlobRef"];
+type Outcome = components["schemas"]["ReviewVerdictBody"]["outcome"];
 
-interface RenderInfo {
-  state: RenderState;
-  msg: string;
+function readStatus(data: Status | undefined, error: unknown): Status {
+  if (error) throw new Error(JSON.stringify(error));
+  if (!data) throw new Error("The API returned no workflow projection.");
+  return data;
 }
 
-function resultPath(result: unknown): string | null {
-  if (typeof result === "string") return result;
-  if (result && typeof result === "object") {
-    const o = result as Record<string, unknown>;
-    for (const k of ["path", "output", "mp4", "file", "preview"]) {
-      if (typeof o[k] === "string") return o[k] as string;
-    }
-  }
-  return null;
+function shortHash(ref: BlobRef | null | undefined): string {
+  return ref ? `${ref.sha256.slice(0, 12)} · ${ref.size.toLocaleString()} bytes` : "—";
 }
 
 export function App() {
-  const [project, setProject] = useState<Project | null>(null);
-  const [projectErr, setProjectErr] = useState<string | null>(null);
-  const [ir, setIr] = useState<Timeline | null>(null);
-  const [irErr, setIrErr] = useState<string | null>(null);
-  const [check, setCheck] = useState<CheckReport | null>(null);
-  const [checkErr, setCheckErr] = useState<string | null>(null);
-  const [feedback, setFeedback] = useState<Feedback>({});
-  const [checkpoint, setCheckpoint] = useState<AutopilotCheckpointData | null>(null);
-  const [checkpointErr, setCheckpointErr] = useState<string | null>(null);
-  const [checkpointBusy, setCheckpointBusy] = useState(false);
+  const [status, setStatus] = useState<Status | null>(null);
+  const [busy, setBusy] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [outcome, setOutcome] = useState<Outcome>("pass");
+  const [reviewer, setReviewer] = useState("author");
+  const [scope, setScope] = useState("visual,audio,constraints");
+  const [finding, setFinding] = useState("");
+  const [destination, setDestination] = useState("local.delivery");
 
-  const [activeBeatId, setActiveBeatId] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>("script");
-
-  const [takesByBeat, setTakesByBeat] = useState<Record<string, SessionTake[]>>(
-    {},
-  );
-  const hydratedTakesKey = useRef<string | null>(null);
-  const skipNextTakesPersist = useRef(false);
-  const [renderInfo, setRenderInfo] = useState<Record<string, RenderInfo>>({});
-  const [renderPreview, setRenderPreview] = useState<Record<string, string>>(
-    {},
-  );
-  // Cache-buster token, set ONCE per completed render job (not per render
-  // pass) so the preview <video> src is stable across re-renders and only
-  // reloads when a fresh render actually lands. (L4)
-  const [renderToken, setRenderToken] = useState<Record<string, number>>({});
-
-  // In-flight render job pollers, aborted on unmount so pollJob loops don't
-  // leak past the component's life. (L2)
-  const renderAborters = useRef<Set<AbortController>>(new Set());
-  useEffect(
-    () => () => {
-      renderAborters.current.forEach((a) => a.abort());
-      renderAborters.current.clear();
-    },
-    [],
-  );
-
-  // Revoke recorded-take object URLs on unmount so their blobs are freed. (L3)
-  const takesRef = useRef(takesByBeat);
-  takesRef.current = takesByBeat;
-  useEffect(
-    () => () => {
-      for (const list of Object.values(takesRef.current)) {
-        for (const t of list) if (t.url) URL.revokeObjectURL(t.url);
-      }
-    },
-    [],
-  );
-
-  // ── loaders ──────────────────────────────────────────────────────────────
-  async function loadProject() {
+  async function perform(request: () => Promise<Status>) {
+    setBusy(true);
+    setError(null);
     try {
-      setProject(await api.project());
-      setProjectErr(null);
-    } catch (e) {
-      setProjectErr((e as Error).message);
-    }
-  }
-  async function loadIR() {
-    try {
-      setIr(await api.ir());
-      setIrErr(null);
-    } catch (e) {
-      setIrErr((e as Error).message);
-    }
-  }
-  async function loadCheck() {
-    try {
-      setCheck(await api.check());
-      setCheckErr(null);
-    } catch (e) {
-      setCheckErr((e as Error).message);
-    }
-  }
-  async function loadFeedback() {
-    try {
-      setFeedback(await api.feedback());
-    } catch {
-      /* feedback may not exist yet; keep quiet */
-    }
-  }
-  async function loadCheckpoint() {
-    try {
-      setCheckpoint(await api.autopilotCheckpoint());
-      setCheckpointErr(null);
-    } catch (e) {
-      setCheckpointErr((e as Error).message);
-    }
-  }
-
-  async function approveScript() {
-    try {
-      await api.approveScript("author");
-      await loadProject();
-    } catch (e) {
-      setProjectErr((e as Error).message);
-    }
-  }
-
-  useEffect(() => {
-    loadProject();
-    loadIR();
-    loadCheck();
-    loadFeedback();
-    loadCheckpoint();
-  }, []);
-
-  // Uploaded takes and in-flight job ids survive a browser reload. The key is
-  // edit-scoped so two Studio productions on the same origin cannot leak take
-  // paths into one another.
-  useEffect(() => {
-    if (!project?.storage_identity) return;
-    const key = takesStorageKey(project.storage_identity);
-    if (hydratedTakesKey.current !== key) {
-      skipNextTakesPersist.current = true;
-      setTakesByBeat(restoreUploadedTakes(localStorage.getItem(key), api.fileUrl));
-      hydratedTakesKey.current = key;
-    }
-  }, [project?.storage_identity]);
-
-  useEffect(() => {
-    const key = hydratedTakesKey.current;
-    if (!key) return;
-    if (skipNextTakesPersist.current) {
-      skipNextTakesPersist.current = false;
-      return;
-    }
-    localStorage.setItem(key, serializeUploadedTakes(takesByBeat));
-  }, [takesByBeat]);
-
-  async function approveCheckpoint() {
-    setCheckpointBusy(true);
-    try {
-      if (!checkpoint?.checkpoint_digest) {
-        throw new Error("checkpoint digest is missing; reload the checkpoint");
-      }
-      const result = await api.approveAutopilotCheckpoint(
-        checkpoint.checkpoint_digest,
-        "author",
-      );
-      setCheckpoint(result.checkpoint);
-      setCheckpointErr(null);
-    } catch (e) {
-      setCheckpointErr((e as Error).message);
+      setStatus(await request());
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
-      setCheckpointBusy(false);
+      setBusy(false);
     }
   }
 
-  async function requestCheckpointChange(
-    action: AutopilotRequestAction,
-    shotId: string,
-  ) {
-    const label = action.replaceAll("_", " ");
-    const reason = window.prompt(`Reason for ${label} (${shotId}):`);
-    if (!reason?.trim()) return;
-    setCheckpointBusy(true);
-    try {
-      await api.requestAutopilotChange(action, shotId, reason.trim(), "author");
-      setCheckpointErr(null);
-      await loadCheckpoint();
-    } catch (e) {
-      setCheckpointErr((e as Error).message);
-    } finally {
-      setCheckpointBusy(false);
-    }
-  }
-
-  // Select first beat once the project arrives.
-  useEffect(() => {
-    if (project && !activeBeatId && project.beats.length) {
-      setActiveBeatId(project.beats[0].id);
-    }
-  }, [project]);
-
-  // Agents write feedback asynchronously — poll gently.
-  useEffect(() => {
-    const id = window.setInterval(loadFeedback, 7000);
-    return () => clearInterval(id);
-  }, []);
-
-  // Script source can be hot-edited outside Studio. Refresh its hash-bound
-  // approval while the UI is open instead of leaving Record enabled forever.
-  useEffect(() => {
-    const refresh = () => { void loadProject(); };
-    const id = window.setInterval(refresh, 3000);
-    window.addEventListener("focus", refresh);
-    return () => {
-      clearInterval(id);
-      window.removeEventListener("focus", refresh);
-    };
-  }, []);
-
-  // ── take state ─────────────────────────────────────────────────────────
-  function addTake(t: SessionTake) {
-    setTakesByBeat((m) => ({ ...m, [t.beatId]: [...(m[t.beatId] || []), t] }));
-  }
-  function updateTake(id: string, patch: Partial<SessionTake>) {
-    setTakesByBeat((m) => {
-      const out: Record<string, SessionTake[]> = {};
-      for (const bid of Object.keys(m)) {
-        out[bid] = m[bid].map((t) => (t.id === id ? { ...t, ...patch } : t));
-      }
-      return out;
+  function refresh() {
+    return perform(async () => {
+      const result = await studioV3.GET("/api/v3/status");
+      return readStatus(result.data, result.error);
     });
   }
-  function afterProcess() {
-    loadProject();
-    loadIR();
-    loadCheck();
-    loadFeedback();
-  }
 
-  // ── render action ────────────────────────────────────────────────────────
-  async function renderBeat(beatId: string) {
-    // Named profile, resolved server-side through the ONE orientation-aware
-    // table the CLI uses (defect 0.6) — the webui never computes pixels.
-    const width = "540p";
-    const ctrl = new AbortController();
-    renderAborters.current.add(ctrl);
-    setRenderInfo((s) => ({
-      ...s,
-      [beatId]: { state: "running", msg: "rendering…" },
-    }));
-    try {
-      const { job_id } = await api.renderBeat({
-        beat_id: beatId,
-        width,
-        quality: "draft",
-      });
-      const final = await pollJob(job_id, {
-        signal: ctrl.signal,
-        onStatus: (st) =>
-          setRenderInfo((s) => ({
-            ...s,
-            [beatId]: { state: "running", msg: st.status },
-          })),
-      });
-      if (final.status === "done") {
-        const p = resultPath(final.result) ?? `data/finalize/${beatId}.mp4`;
-        setRenderPreview((s) => ({ ...s, [beatId]: p }));
-        // one fresh cache-buster per completed render (L4)
-        setRenderToken((s) => ({ ...s, [beatId]: Date.now() }));
-        setRenderInfo((s) => ({
-          ...s,
-          [beatId]: { state: "done", msg: "done" },
-        }));
-        loadProject();
-        loadCheck();
-        loadIR();
-      } else {
-        setRenderInfo((s) => ({
-          ...s,
-          [beatId]: { state: "error", msg: final.error || "render failed" },
-        }));
-      }
-    } catch (e) {
-      if (ctrl.signal.aborted) return; // unmounted mid-poll — drop silently
-      setRenderInfo((s) => ({
-        ...s,
-        [beatId]: { state: "error", msg: (e as Error).message },
-      }));
-    } finally {
-      renderAborters.current.delete(ctrl);
-    }
-  }
+  useEffect(() => {
+    void refresh();
+  }, []);
 
-  // ── render ─────────────────────────────────────────────────────────────
-  const apiOk = !projectErr && project != null;
-  const beat = project?.beats.find((b) => b.id === activeBeatId) || null;
-  const irBeat = ir?.beats.find((b) => b.id === activeBeatId) || null;
-  const beatTakes = activeBeatId ? takesByBeat[activeBeatId] || [] : [];
-  const rInfo = activeBeatId ? renderInfo[activeBeatId] : undefined;
-  const previewPath =
-    beat && activeBeatId
-      ? (renderPreview[activeBeatId] ??
-        (beat.rendered ? `data/finalize/${beat.id}.mp4` : null))
-      : null;
-  const previewToken = activeBeatId ? renderToken[activeBeatId] : undefined;
-
-  const design = project?.design;
-  const designStr = design
-    ? `${design.resolution[0]}×${design.resolution[1]} @ ${design.fps}fps`
-    : "";
-
-  const TABS: Array<[Tab, string]> = [
-    ["autopilot", "Autopilot"],
-    ["script", "Script"],
-    ["record", "Record"],
-    ["feedback", "Feedback"],
-    ["ir", "IR Inspector"],
-  ];
+  const workflow = status?.workflow;
+  const stage = status?.current_stage;
+  const failed = workflow?.attempts.find((item) => item.state === "failed");
+  const reviewReady =
+    outcome !== "changes_requested" || finding.trim().length > 0;
 
   return (
-    <>
-      <header class="top">
-        <h1>
-          <span class="dot">●</span> Studio v2
-          {project ? ` · ${project.edit_name}` : ""}
-        </h1>
-        {project && (
-          <>
-            <span class="stat">
-              <b>{project.beats.length}</b> beats
-            </span>
-            <span class="stat">{designStr}</span>
-            <button
-              class={"btn sm " + (project.script_approved ? "secondary" : "")}
-              disabled={project.script_approved}
-              onClick={approveScript}
-              title={project.script_sha256}
-            >
-              {project.script_approved ? "Script approved" : "Approve script"}
-            </button>
-          </>
-        )}
-        <div class="tabs" style={{ marginLeft: "12px" }}>
-          {TABS.map(([id, label]) => (
-            <div
-              key={id}
-              class={"tab" + (tab === id ? " active" : "")}
-              onClick={() => setTab(id)}
-            >
-              {label}
-            </div>
-          ))}
-          <a class="tab tab-link" href="/research/">Research</a>
+    <div class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">DLSTUDIO / LOCAL PRODUCTION</p>
+          <h1>Studio v3</h1>
         </div>
-        <span class={"api " + (apiOk ? "ok" : "bad")}>
-          API: <b>{apiOk ? "ok" : "offline"}</b>
-        </span>
+        <button class="quiet" onClick={refresh} disabled={busy}>
+          Refresh
+        </button>
       </header>
 
-      {project?.product && <ProductOverview product={project.product} />}
-
-      <CheckBanner check={check} error={checkErr} />
-
-      <main>
-        {projectErr ? (
-          <div class="center-msg" style={{ gridColumn: "1 / -1" }}>
+      {error && <div class="alert" role="alert">{error}</div>}
+      {!status || !workflow ? (
+        <main class="loading" aria-busy={busy}>
+          <p>{busy ? "Loading canonical workflow…" : "No active workflow."}</p>
+          {!busy && <button class="primary" onClick={() => perform(async () => {
+            const result = await studioV3.POST("/api/v3/advance");
+            return readStatus(result.data, result.error);
+          })}>Start production</button>}
+        </main>
+      ) : (
+        <main>
+          <section class="summary" aria-labelledby="production-title">
             <div>
-              <p class="err-text">Could not reach the API: {projectErr}</p>
-              <p class="hint">
-                Start the backend (e.g. <code>dl2 studio</code> on{" "}
-                <code>127.0.0.1:8788</code>), then reload.
-              </p>
+              <p class="label">Production</p>
+              <h2 id="production-title">{workflow.production_id}</h2>
+              <p class="muted">{workflow.kind} · run {workflow.run_id} · revision {workflow.revision}</p>
             </div>
-          </div>
-        ) : !project ? (
-          <div class="center-msg" style={{ gridColumn: "1 / -1" }}>
-            Loading project…
-          </div>
-        ) : (
-          tab === "autopilot" ? (
-            <section class="autopilot-pane">
-              <AutopilotCheckpoint
-                checkpoint={checkpoint}
-                busy={checkpointBusy}
-                error={checkpointErr}
-                onApproveAll={approveCheckpoint}
-                onRequest={requestCheckpointChange}
-              />
-            </section>
-          ) : <>
-            <Sidebar
-              project={project}
-              activeBeatId={activeBeatId}
-              check={check}
-              onSelect={setActiveBeatId}
-            />
-            <section class="pane">
-              {beat ? (
-                <>
-                  <div class="panel-head">
-                    <span class="title">{beat.title || beat.id}</span>
-                    {beat.face && beat.face !== "none" && (
-                      <span class="face-badge">{beat.face}</span>
-                    )}
-                    <span class="workflow">
-                      <span
-                        class={"step" + (beatTakes.length ? " done" : "")}
-                      >
-                        take
-                      </span>
-                      <span class={"step" + (beat.audio ? " done" : "")}>
-                        audio
-                      </span>
-                      <span
-                        class={
-                          "step" +
-                          (beat.rendered || renderPreview[beat.id]
-                            ? " done"
-                            : "")
-                        }
-                      >
-                        render
-                      </span>
-                    </span>
-                    <span class="spacer" />
-                    <span class="action-status">{rInfo?.msg || ""}</span>
-                    <button
-                      class="btn"
-                      disabled={rInfo?.state === "running"}
-                      onClick={() => renderBeat(beat.id)}
-                    >
-                      {rInfo?.state === "running"
-                        ? "Rendering…"
-                        : "Render 540p draft"}
-                    </button>
-                  </div>
+            <div class="fact">
+              <span>Current stage</span>
+              <strong>{stage ?? "complete"}</strong>
+            </div>
+            <div class="fact">
+              <span>Eligible candidate</span>
+              <strong class="hash">{shortHash(workflow.eligible_candidate)}</strong>
+            </div>
+          </section>
 
-                  {tab === "script" && (
-                    <ScriptTab
-                      beat={beat}
-                      irBeat={irBeat}
-                      previewPath={previewPath}
-                      previewToken={previewToken}
-                    />
-                  )}
-                  {tab === "record" && (
-                    <RecordTab
-                      beat={beat}
-                      takes={beatTakes}
-                      addTake={addTake}
-                      updateTake={updateTake}
-                      onAfterProcess={afterProcess}
-                      scriptApproved={project.script_approved}
-                    />
-                  )}
-                  {tab === "feedback" && (
-                    <FeedbackPanel
-                      beatId={beat.id}
-                      feedback={feedback[beat.id]}
-                    />
-                  )}
-                  {tab === "ir" && (
-                    <IRInspector
-                      ir={ir}
-                      error={irErr}
-                      activeBeatId={activeBeatId}
-                    />
-                  )}
-                </>
-              ) : (
-                <div class="center-msg">Select a beat.</div>
-              )}
-            </section>
-          </>
-        )}
-      </main>
-    </>
+          <section class="workflow" aria-labelledby="workflow-title">
+            <div class="section-head">
+              <div>
+                <p class="label">Canonical progress</p>
+                <h2 id="workflow-title">Release workflow</h2>
+              </div>
+              {busy && <span class="working" role="status">Working…</span>}
+            </div>
+            <ol class="stages">
+              {status.stage_order.map((item, index) => {
+                const attempt = workflow.attempts.find((entry) => entry.stage === item);
+                const state = attempt?.state ?? (stage === item ? "current" : "pending");
+                return (
+                  <li key={item} class={`stage ${state}`} aria-current={stage === item ? "step" : undefined}>
+                    <span class="stage-index">{String(index + 1).padStart(2, "0")}</span>
+                    <span>{item}</span>
+                    <small>{state}</small>
+                  </li>
+                );
+              })}
+            </ol>
+            {failed?.error && <p class="failure">Last failure: {failed.error}</p>}
+          </section>
+
+          <section class="action" aria-labelledby="action-title">
+            <p class="label">Next action</p>
+            <h2 id="action-title">{stage ? `Continue ${stage}` : "Release complete"}</h2>
+
+            {status.action === "advance" && (
+              <button class="primary" disabled={busy} onClick={() => perform(async () => {
+                const result = await studioV3.POST("/api/v3/advance");
+                return readStatus(result.data, result.error);
+              })}>Advance workflow</button>
+            )}
+
+            {status.action === "review" && (
+              <form onSubmit={(event) => {
+                event.preventDefault();
+                void perform(async () => {
+                  const result = await studioV3.POST("/api/v3/review", { body: {
+                    outcome,
+                    scope: scope.split(",").map((item) => item.trim()).filter(Boolean),
+                    reviewer,
+                    reviewed_at: new Date().toISOString(),
+                    findings: finding.trim() ? [{
+                      finding_id: "studio.ui.review",
+                      text: finding.trim(),
+                      requires_change: outcome === "changes_requested",
+                    }] : [],
+                  } });
+                  return readStatus(result.data, result.error);
+                });
+              }}>
+                <label>Verdict<select value={outcome} onChange={(e) => setOutcome(e.currentTarget.value as Outcome)}>
+                  <option value="pass">Pass</option><option value="changes_requested">Changes requested</option><option value="block">Block</option>
+                </select></label>
+                <label>Reviewer<input value={reviewer} onInput={(e) => setReviewer(e.currentTarget.value)} required /></label>
+                <label>Scope<input value={scope} onInput={(e) => setScope(e.currentTarget.value)} required /></label>
+                <label class="wide">Finding<textarea value={finding} onInput={(e) => setFinding(e.currentTarget.value)} placeholder="Evidence-based note" /></label>
+                <button class="primary" disabled={busy || !reviewReady}>Submit exact review</button>
+              </form>
+            )}
+
+            {status.action === "deliver" && (
+              <form class="delivery" onSubmit={(event) => {
+                event.preventDefault();
+                void perform(async () => {
+                  const result = await studioV3.POST("/api/v3/deliver", { body: { destination_id: destination } });
+                  return readStatus(result.data?.status, result.error);
+                });
+              }}>
+                <label>Destination ID<input value={destination} onInput={(e) => setDestination(e.currentTarget.value)} required /></label>
+                <button class="primary" disabled={busy}>Deliver frozen candidate</button>
+              </form>
+            )}
+
+            {status.completed && <p class="complete">Receipt {shortHash(workflow.delivery_receipt)}</p>}
+          </section>
+        </main>
+      )}
+    </div>
   );
 }

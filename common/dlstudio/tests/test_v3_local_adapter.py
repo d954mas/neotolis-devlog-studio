@@ -15,7 +15,6 @@ def _write_manifest(
     schema: str = "dlstudio.production",
     version: str = "3",
     production_id: str = "fixture.reel",
-    workflow_kind: str = "reel",
     authoring: str = "edit.py",
     delivery_root: str = "delivery",
     extra: str = "",
@@ -29,7 +28,6 @@ def _write_manifest(
                 f'schema = "{schema}"',
                 f"version = {version}",
                 f'id = "{production_id}"',
-                f'workflow_kind = "{workflow_kind}"',
                 f'authoring = "{authoring}"',
                 f'delivery_root = "{delivery_root}"',
                 extra,
@@ -52,7 +50,6 @@ def test_load_local_production_exposes_explicit_paths_and_repositories(
 
     assert production.manifest_path == manifest.resolve()
     assert production.production_id == "fixture.reel"
-    assert production.workflow_kind == "reel"
     assert production.production_root == manifest.parent.resolve()
     assert production.authoring_path == (manifest.parent / "edit.py").resolve()
     assert production.delivery_root == (manifest.parent / "delivery").resolve()
@@ -70,7 +67,6 @@ def test_load_local_production_exposes_explicit_paths_and_repositories(
     [
         ({"schema": "dlstudio.other"}, "unsupported production schema"),
         ({"version": "2"}, "unsupported production version"),
-        ({"workflow_kind": "other"}, "unsupported workflow_kind"),
         ({"production_id": "../escape"}, "invalid domain id"),
         ({"extra": 'unexpected = "field"'}, "fields mismatch"),
     ],

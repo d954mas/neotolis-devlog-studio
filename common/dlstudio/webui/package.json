@@ -8,12 +8,17 @@
     "build": "tsc --noEmit && vite build",
     "test": "node --test \"test/*.test.mjs\"",
     "typecheck": "tsc --noEmit",
+    "openapi:schema": "python ../../../tools/studio_v3_openapi.py --output src/api/openapi.v3.json",
+    "openapi:types": "openapi-typescript src/api/openapi.v3.json -o src/api/v3.gen.ts",
+    "generate:client": "npm run openapi:schema && npm run openapi:types",
     "preview": "vite preview"
   },
   "dependencies": {
+    "openapi-fetch": "0.15.0",
     "preact": "^10.24.0"
   },
   "devDependencies": {
+    "openapi-typescript": "7.10.1",
     "typescript": "^5.6.0",
     "vite": "^6.0.0"
   }
