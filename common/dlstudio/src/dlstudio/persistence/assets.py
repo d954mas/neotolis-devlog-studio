@@ -53,6 +53,12 @@ class AssetRepository:
     def read_index(self) -> AssetIndexRevision:
         return self._read_index_from_root(self.repository.read_root())
 
+    def current(self, asset_id: str) -> AssetRevision:
+        ref = self.read_index().entries.get(asset_id)
+        if ref is None:
+            raise KeyError(f"unknown asset: {asset_id}")
+        return self.read_revision(ref)
+
     def _read_index_from_root(self, root: Any) -> AssetIndexRevision:
         ref = root.records.get(ASSET_INDEX_KEY)
         if ref is None:

@@ -9,7 +9,6 @@ from .api import (
     TextLayer,
     VideoFade,
 )
-from .compiler import compile_edit
 
 __all__ = [
     "Animation",
@@ -19,5 +18,4 @@ __all__ = [
     "SolidLayer",
     "TextLayer",
     "VideoFade",
-    "compile_edit",
 ]
