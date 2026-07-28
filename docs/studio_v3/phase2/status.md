@@ -1,32 +1,28 @@
-# Studio v3 Phase 2 status
+# Phase 2 — asset identity and migration status
 
-The v3 asset trust owner is `dlstudio.assets.AssetRevision`. It binds exact
-blob bytes, probed media facts, provenance, approval evidence, license data,
-and the previous logical revision into one canonical hash. Persistence writes
-immutable blob/revision/index objects before one CAS head transition.
+Status: **PASS**
 
-The clone rehearsal covers dry-run, apply, idempotent re-run, stale/interrupted
-apply, projection rebuild, explicit reachability GC, same-volume clone
-hardlink preflight, and cross-volume verified-copy policy. Mutable exports use
-an isolated verified copy and can never alias the immutable object store.
-Source fixtures remain byte- and mtime-identical.
+`dlstudio.assets.AssetRevision` is the only owner of asset bytes, probed media
+facts, provenance, approval and license. Revisions and indexes are immutable;
+one CAS head publishes a completed repository update.
 
-The offline translator inspected all currently selected representative
-productions:
+The one-shot migrator was exercised on a separate restored clone, applied to
+the workspace, rerun idempotently, then physically removed. Runtime code never
+imports migration tooling.
 
-- vertical: 18 legacy records, all explicitly blocked;
-- long-form/capture: 141 legacy records, all explicitly blocked;
-- legacy voice production: no legacy registry/catalog records.
+Three historical productions were ported without promoting trust:
 
-The records are blocked rather than upgraded because their v2 schemas do not
-carry a complete v3 license/provenance chain. In particular, historical
-frame-stepped capture is not reclassified as ordinary gameplay, and zero
-head/tail handles are not accepted. Exact per-record reasons and disk bytes are
-in the adjacent JSON reports.
+| Production | Assets | Approval facts preserved |
+|---|---:|---|
+| Vertical reel | 8 | 1 approved, 5 validated, 2 pending |
+| Long-form | 37 | 1 approved, 18 validated, 18 pending |
+| Capture/VO | 47 | 23 validated, 24 pending |
 
-No runtime compatibility reader exists. The translator is offline under
-`tools/studio_v3_migrate`; explicit v3 authoring ports must select trusted
-source revisions or retain these records read-only.
+All 92 exact sources and reachable evidence objects are present in immutable
+storage. The second apply ingested zero assets and kept the same repository
+heads and timeline hashes. Missing historical approvals and redistribution
+proof remain explicit release blockers; no legacy note was converted into
+proof.
 
-The real destructive migration remains gated by the Phase 0 full-manifest and
-verified-backup blocker. No user media was changed or deleted.
+Execution-bound evidence is
+`docs/studio_v3/phase6/active_ports_run.json`.

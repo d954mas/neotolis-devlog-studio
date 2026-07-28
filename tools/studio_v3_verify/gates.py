@@ -105,6 +105,7 @@ def check_architecture(source_root: Path, config: Mapping[str, object]) -> GateR
     public_module = str(config.get("public_module", "api"))
     graph: dict[str, set[str]] = {module: set() for module in modules}
     details: list[str] = []
+    quality_rules: set[str] = set()
     parsed_files = 0
 
     for path in _python_files(source_root):
@@ -118,6 +119,13 @@ def check_architecture(source_root: Path, config: Mapping[str, object]) -> GateR
             details.append(f"{relative.as_posix()}: cannot parse: {exc}")
             continue
         parsed_files += 1
+        quality_rules.update(
+            node.value
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and re.fullmatch(r"VQ-[A-Z0-9-]+", node.value)
+        )
         module_name = _module_name(source_root, path)
         imported: list[tuple[str, tuple[str, ...], int]] = []
         for node in ast.walk(tree):
@@ -152,7 +160,12 @@ def check_architecture(source_root: Path, config: Mapping[str, object]) -> GateR
         name="architecture/import-boundaries",
         status=GateStatus.FAIL if details else GateStatus.PASS,
         details=tuple(details),
-        metrics={"files": parsed_files, "edges": sum(map(len, graph.values()))},
+        metrics={
+            "files": parsed_files,
+            "edges": sum(map(len, graph.values())),
+            "rules": len(quality_rules),
+            "rule_index": ",".join(sorted(quality_rules)),
+        },
     )
 
 
@@ -252,6 +265,18 @@ def check_banned_surfaces(
                     details.append(
                         f"{relative}: cutover-banned surface matches /{pattern.pattern}/"
                     )
+        allowed_values = config.get("runtime_package_allowlist")
+        if allowed_values is not None:
+            allowed = set(str(value) for value in allowed_values)
+            unexpected = sorted(
+                path.name
+                for path in source_root.iterdir()
+                if path.name != "__pycache__" and path.name not in allowed
+            )
+            if unexpected:
+                details.append(
+                    "unexpected runtime package entries: " + ", ".join(unexpected)
+                )
 
     return GateResult(
         name="banned-runtime-surfaces",

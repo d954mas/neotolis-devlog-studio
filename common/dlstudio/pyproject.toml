@@ -4,39 +4,31 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dlstudio"
-version = "0.1.0"
-description = "Studio v2 - code-first video production engine for devlogs, reels, and trailers"
+version = "3.0.0"
+description = "Studio v3 modular video-production application"
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.7",
-    "pillow>=10",
-    "numpy>=1.26",
+    "fastapi>=0.111",
+    "uvicorn>=0.30",
 ]
 
 [project.optional-dependencies]
-studio = [
-    "fastapi>=0.111",
-    "uvicorn>=0.30",
-    "httpx>=0.27",            # ASGI client used by the API + starlette TestClient
-    "python-multipart>=0.0.9", # multipart form parsing for POST /api/takes uploads
-    "requests>=2.31",         # Pattern Lab collector + Reel media cache
-]
-stock = [
-    "requests>=2.31",         # services/stock.py: Pexels/Pixabay HTTP search + download
-]
-dev = ["pytest>=8"]
-# Heavy service deps (whisperx, deepfilternet, piper) are lazy-imported by
-# their service module and installed on demand — never listed here.
+dev = ["pytest>=8", "httpx>=0.27"]
 
 [project.scripts]
-dl2 = "dlstudio.cli:main"
+dl2 = "dlstudio.adapters.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"dlstudio.adapters" = ["static/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
     "canonical_vector: cross-platform canonical serialization vector",
     "performance_smoke: behavioral performance regression contract",
+    "reference_performance: frozen reference-machine measurement budget",
 ]

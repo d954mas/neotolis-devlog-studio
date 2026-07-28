@@ -4,24 +4,31 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
-from fastapi import FastAPI, Path as PathParam, Query, Response
+from fastapi import FastAPI, Path as PathParam, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel, ConfigDict
 
 from dlstudio.application.api import (
     advance_production,
+    CasConflict,
+    CorruptObject,
     DeliveryReceipt,
     deliver_local,
     project_status,
     query_status,
     resolve_blob,
     submit_review_payload,
+    StudioError,
     WorkflowStatus,
 )
 
 from .local import LocalProduction, load_local_production
+
+_LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "testserver"})
 
 
 class _Body(BaseModel):
@@ -67,10 +74,52 @@ def create_app(manifest_path: str | Path) -> FastAPI:
 
     production = load_local_production(manifest_path)
     app = FastAPI(title="DLStudio v3", version="3.0.0")
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=sorted(_LOCAL_HOSTS),
+    )
+
+    @app.middleware("http")
+    async def same_origin_control_plane(
+        request: Request, call_next
+    ) -> Response:
+        if request.method not in {"GET", "HEAD", "OPTIONS"}:
+            if request.headers.get("sec-fetch-site", "").lower() == "cross-site":
+                return JSONResponse(
+                    status_code=403, content={"detail": "cross-origin request blocked"}
+                )
+            origin = request.headers.get("origin")
+            if origin:
+                parsed = urlsplit(origin)
+                request_host = request.headers.get("host", "").lower()
+                if (
+                    parsed.scheme != "http"
+                    or parsed.hostname not in _LOCAL_HOSTS
+                    or parsed.netloc.lower() != request_host
+                ):
+                    return JSONResponse(
+                        status_code=403,
+                        content={"detail": "cross-origin request blocked"},
+                    )
+        return await call_next(request)
 
     @app.exception_handler(ValueError)
     async def value_error(_request: object, exc: ValueError) -> JSONResponse:
         return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+    @app.exception_handler(CasConflict)
+    async def cas_conflict(_request: object, exc: CasConflict) -> JSONResponse:
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+    @app.exception_handler(CorruptObject)
+    async def corrupt_object(
+        _request: object, exc: CorruptObject
+    ) -> JSONResponse:
+        return JSONResponse(status_code=500, content={"detail": str(exc)})
+
+    @app.exception_handler(StudioError)
+    async def studio_error(_request: object, exc: StudioError) -> JSONResponse:
+        return JSONResponse(status_code=422, content={"detail": str(exc)})
 
     @app.get("/api/v3/status", operation_id="getStatus")
     def status() -> WorkflowStatus:

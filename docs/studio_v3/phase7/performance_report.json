@@ -1,0 +1,40 @@
+{
+  "schema": "dlstudio.reference_performance",
+  "version": 1,
+  "reference_machine": {
+    "operating_system": "Windows",
+    "python": "3.12.4"
+  },
+  "measurements": {
+    "cli_help": {
+      "fixture": "dl2 --help",
+      "mode": "cold_process",
+      "runs": 15,
+      "unit": "milliseconds",
+      "cold": 332.1,
+      "p50": 318.41,
+      "p95": 415.037
+    },
+    "status_query": {
+      "fixture": "current WorkflowRun projection",
+      "mode": "warm_projection_read",
+      "runs": 2000,
+      "unit": "milliseconds",
+      "p50": 5.0108,
+      "p95": 9.0509
+    },
+    "compile_check": {
+      "fixture": "unchanged representative reel",
+      "mode": "unchanged_fixture",
+      "runs": 300,
+      "unit": "seconds",
+      "p50": 0.1682,
+      "p95": 0.2497
+    },
+    "orchestration_memory": {
+      "fixture": "unchanged representative reel",
+      "unit": "bytes",
+      "peak": 1129676
+    }
+  }
+}

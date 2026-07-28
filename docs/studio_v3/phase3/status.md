@@ -48,5 +48,5 @@ python -m pytest common/dlstudio/tests/test_v3_application_flow.py -q
 python -m tools.studio_v3_verify --profile phase0 --scope static --skip-toolchain
 ```
 
-The final cutover gate remains blocked until the real-workspace backup can read
-every in-scope source byte.
+The final cutover gate passed after the complete real-workspace manifest,
+verified backup and independent restore rehearsal were produced.

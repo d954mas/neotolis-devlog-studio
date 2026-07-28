@@ -7,7 +7,7 @@ __pycache__/
 .pytest_cache/
 .Python
 
-# ─── Render outputs (regenerable via `dl render`) ──────────
+# ─── Studio render outputs (regenerable from immutable inputs) ──────────
 **/data/finalize/.cache/
 **/data/finalize/.cache2/
 **/data/finalize/frames_iter*/

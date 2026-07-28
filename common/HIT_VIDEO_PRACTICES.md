@@ -20,7 +20,7 @@ iterations on top of a "needs polish" baseline).
 
 ## Validate after render
 
-- **DO `ffprobe duration video vs audio` after every `dl render` / `dl concat`.**
+- **DO compare video/audio duration with `ffprobe` after every final render.**
   When ffmpeg-engine has a bug or a source asset is shorter than expected,
   the video stream silently truncates. iter22→iter35 of trolley loop:
   half the content was invisible for 13 iterations because audio=363s
