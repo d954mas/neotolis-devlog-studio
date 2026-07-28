@@ -1,0 +1,37 @@
+{
+  "clone_copy_bytes": 33838978627,
+  "clone_policy": "verified_copy_then_migrate",
+  "hardlinks_are_backup": false,
+  "required_additional_peak_bytes": 100573793391,
+  "restore_rehearsal_copy_bytes": 33367407382,
+  "schema_version": 3,
+  "source_media_bytes": 4327327714,
+  "sufficient": true,
+  "verified_backup_copy_bytes": 33367407382,
+  "volumes": [
+    {
+      "destinations": [
+        {
+          "kind": "backup",
+          "path": "C:\\Users\\ROG\\.codex\\visualizations\\2026\\07\\26\\019f9e4a-ebec-7951-b9d9-0154ebf7b4ac\\studio-v3-cutover\\backup",
+          "required_bytes": 33367407382
+        },
+        {
+          "kind": "restore",
+          "path": "C:\\Users\\ROG\\.codex\\visualizations\\2026\\07\\26\\019f9e4a-ebec-7951-b9d9-0154ebf7b4ac\\studio-v3-cutover\\restore-rehearsal-final",
+          "required_bytes": 33367407382
+        },
+        {
+          "kind": "clone",
+          "path": "C:\\Users\\ROG\\.codex\\visualizations\\2026\\07\\26\\019f9e4a-ebec-7951-b9d9-0154ebf7b4ac\\studio-v3-cutover\\migration-clone-final",
+          "required_bytes": 33838978627
+        }
+      ],
+      "free_bytes": 133346467840,
+      "id": "c:",
+      "required_bytes": 100573793391,
+      "sufficient": true
+    }
+  ],
+  "workspace_bytes": 33367407382
+}

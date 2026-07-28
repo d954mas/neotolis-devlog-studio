@@ -1,0 +1,78 @@
+{
+  "schema": "studio_v3.active_port_run",
+  "version": 1,
+  "run_id": "studio-v3-cutover-2026-07-27",
+  "before_manifest_sha256": "ff92b7bde893945d769d717508e5ea44b16503dfcbcc90e876f3813fde34f44e",
+  "verified_at": "2026-07-27T18:45:00Z",
+  "targets": [
+    {
+      "role": "migration_clone",
+      "root": "C:\\Users\\ROG\\.codex\\visualizations\\2026\\07\\26\\019f9e4a-ebec-7951-b9d9-0154ebf7b4ac\\studio-v3-cutover\\migration-clone-final",
+      "apply_at": "2026-07-27T16:57:34.0857514Z",
+      "second_apply_at": "2026-07-27T16:57:42.2112982Z"
+    },
+    {
+      "role": "cutover",
+      "root": "C:\\projects\\devlogs",
+      "apply_at": "2026-07-27T16:57:57.0330565Z",
+      "second_apply_at": "2026-07-27T16:58:05.5766321Z"
+    }
+  ],
+  "productions": [
+    {
+      "id": "2026_07_18_reel_02",
+      "relative_root": "not_a_trolley_problem/reels/2026_07_18_reel_02",
+      "manifest_sha256": "c1c29c4aeab04d13f427135f8f98117227d5f071b3875a78063140777ef524ea",
+      "authoring_sha256": "aa56547fad2c60231c226cfab032d38a1cd6aebbdee40a88424a8e4efdf370a0",
+      "before_head": null,
+      "after_head": {
+        "revision": 8,
+        "root_hash": "d573a4ef4c46ef1ce27438a7aef63dff6d8df9a74aed329d474fd2d08eefde28"
+      },
+      "assets": 8,
+      "first_apply_ingested": 8,
+      "second_apply_ingested": 0,
+      "second_apply_reused": 8,
+      "timeline_sha256": "a4f0883e65fb829bbca2b0ca8aec177bc1e5e936889ca33af21de799a1860145"
+    },
+    {
+      "id": "2026_07_22_devlog_01",
+      "relative_root": "not_a_trolley_problem/devlogs/2026_07_22_devlog_01",
+      "manifest_sha256": "9d7b2ecf4bea0b86dca8638d6901e35ad994c4cd310113ad853b744dddb44fe6",
+      "authoring_sha256": "2d4010b5bb4e02676bf6ac43e1ae2548dee43c521cac1b2e5b0833e0d73e9d38",
+      "before_head": null,
+      "after_head": {
+        "revision": 37,
+        "root_hash": "8bd0741f0e77283ccd93dfec171dfa4e81abd98c3e266214536c3eeb467d79c6"
+      },
+      "assets": 37,
+      "first_apply_ingested": 37,
+      "second_apply_ingested": 0,
+      "second_apply_reused": 37,
+      "timeline_sha256": "a06b37cd3af5ae259b3433abdbbc894639257220be651d083bcd2fc84e1c7ae8"
+    },
+    {
+      "id": "2026_07_17_devlog_01",
+      "relative_root": "not_a_trolley_problem/devlogs/2026_07_17_devlog_01",
+      "manifest_sha256": "4912d6883d6a3b584820753664e719d7243689eb96600859b6f10a52be9c2b18",
+      "authoring_sha256": "238fb97d2c6616e91e7157f8ce26b1e0b3ffe7a11fa6af89919f129477ba4514",
+      "before_head": null,
+      "after_head": {
+        "revision": 47,
+        "root_hash": "676563f4b66be4580d870c61ea860bd835df2aa1d90f4035486c69c347059069"
+      },
+      "assets": 47,
+      "first_apply_ingested": 47,
+      "second_apply_ingested": 0,
+      "second_apply_reused": 47,
+      "timeline_sha256": "66356b40da51c3de7a45c3ea7ec49517720bb1f547b79d1d16a5ab8393b6eff1"
+    }
+  ],
+  "verification": {
+    "clone_and_cutover_heads_equal": true,
+    "clone_and_cutover_manifest_hashes_equal": true,
+    "clone_and_cutover_authoring_hashes_equal": true,
+    "second_apply_created_assets": 0,
+    "release_trust_was_not_promoted": true
+  }
+}

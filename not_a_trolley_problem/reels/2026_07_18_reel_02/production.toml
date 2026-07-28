@@ -1,0 +1,5 @@
+schema = "dlstudio.production"
+version = 3
+id = "2026_07_18_reel_02"
+authoring = "authoring.py"
+delivery_root = "delivery"

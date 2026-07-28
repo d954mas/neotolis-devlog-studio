@@ -1,0 +1,814 @@
+{
+  "excluded_roots": [
+    {
+      "name": ".agents",
+      "rule": "workspace_excludes",
+      "value": ".agents"
+    },
+    {
+      "name": ".claude",
+      "rule": "workspace_excludes",
+      "value": ".claude"
+    },
+    {
+      "name": ".codex",
+      "rule": "workspace_excludes",
+      "value": ".codex"
+    },
+    {
+      "name": ".codex-remote-attachments",
+      "rule": "workspace_excludes",
+      "value": ".codex-remote-attachments"
+    },
+    {
+      "name": ".git",
+      "rule": "workspace_excludes",
+      "value": ".git"
+    },
+    {
+      "name": ".github",
+      "rule": "workspace_excludes",
+      "value": ".github"
+    },
+    {
+      "name": ".npm-cache-devlogs",
+      "rule": "workspace_excludes",
+      "value": ".npm-cache-devlogs"
+    },
+    {
+      "name": ".phase4-review-repro-loader",
+      "rule": "workspace_exclude_prefixes",
+      "value": ".phase4-review-repro-"
+    },
+    {
+      "name": ".phase4-review-repro-package",
+      "rule": "workspace_exclude_prefixes",
+      "value": ".phase4-review-repro-"
+    },
+    {
+      "name": ".phase4-review-repro-prepare",
+      "rule": "workspace_exclude_prefixes",
+      "value": ".phase4-review-repro-"
+    },
+    {
+      "name": ".phase4-review-repro-review",
+      "rule": "workspace_exclude_prefixes",
+      "value": ".phase4-review-repro-"
+    },
+    {
+      "name": ".playwright-cli",
+      "rule": "workspace_excludes",
+      "value": ".playwright-cli"
+    },
+    {
+      "name": ".pytest_cache",
+      "rule": "workspace_excludes",
+      "value": ".pytest_cache"
+    },
+    {
+      "name": ".review-phase45-runtime",
+      "rule": "workspace_excludes",
+      "value": ".review-phase45-runtime"
+    },
+    {
+      "name": ".runtime",
+      "rule": "workspace_excludes",
+      "value": ".runtime"
+    },
+    {
+      "name": ".test-tmp",
+      "rule": "workspace_excludes",
+      "value": ".test-tmp"
+    },
+    {
+      "name": ".test-tmp-asset-translation-green",
+      "rule": "workspace_exclude_prefixes",
+      "value": ".test-tmp-"
+    },
+    {
+      "name": ".test-tmp-asset-translation-red",
+      "rule": "workspace_exclude_prefixes",
+      "value": ".test-tmp-"
+    },
+    {
+      "name": ".test-tmp-asset-translation-review",
+      "rule": "workspace_exclude_prefixes",
+      "value": ".test-tmp-"
+    },
+    {
+      "name": ".test-tmp-inventory-postcommit",
+      "rule": "workspace_exclude_prefixes",
+      "value": ".test-tmp-"
+    },
+    {
+      "name": ".test-tmp-inventory-prefix",
+      "rule": "workspace_exclude_prefixes",
+      "value": ".test-tmp-"
+    },
+    {
+      "name": ".test-tmp-local-adapter-final",
+      "rule": "workspace_exclude_prefixes",
+      "value": ".test-tmp-"
+    },
+    {
+      "name": ".test-tmp-local-adapter-final2",
+      "rule": "workspace_exclude_prefixes",
+      "value": ".test-tmp-"
+    },
+    {
+      "name": ".test-tmp-local-adapter-full",
+      "rule": "workspace_exclude_prefixes",
+      "value": ".test-tmp-"
+    },
+    {
+      "name": ".test-tmp-local-adapter-green",
+      "rule": "workspace_exclude_prefixes",
+      "value": ".test-tmp-"
+    },
+    {
+      "name": ".test-tmp-local-adapter-green2",
+      "rule": "workspace_exclude_prefixes",
+      "value": ".test-tmp-"
+    },
+    {
+      "name": ".test-tmp-local-adapter-red",
+      "rule": "workspace_exclude_prefixes",
+      "value": ".test-tmp-"
+    },
+    {
+      "name": ".test-tmp-phase4-review",
+      "rule": "workspace_exclude_prefixes",
+      "value": ".test-tmp-"
+    },
+    {
+      "name": ".test-tmp-phase5-adapters",
+      "rule": "workspace_exclude_prefixes",
+      "value": ".test-tmp-"
+    },
+    {
+      "name": ".test-tmp-renderer-green",
+      "rule": "workspace_exclude_prefixes",
+      "value": ".test-tmp-"
+    },
+    {
+      "name": ".test-tmp-renderer-red",
+      "rule": "workspace_exclude_prefixes",
+      "value": ".test-tmp-"
+    },
+    {
+      "name": ".test-tmp-renderer-rereview",
+      "rule": "workspace_exclude_prefixes",
+      "value": ".test-tmp-"
+    },
+    {
+      "name": ".test-tmp-root-fixes-review",
+      "rule": "workspace_exclude_prefixes",
+      "value": ".test-tmp-"
+    },
+    {
+      "name": ".test-tmp-runtime-arch-review",
+      "rule": "workspace_exclude_prefixes",
+      "value": ".test-tmp-"
+    },
+    {
+      "name": ".test-tmp-studio-v3-migrate",
+      "rule": "workspace_exclude_prefixes",
+      "value": ".test-tmp-"
+    },
+    {
+      "name": ".test-tmp-v3-integration",
+      "rule": "workspace_exclude_prefixes",
+      "value": ".test-tmp-"
+    },
+    {
+      "name": ".test-tmp-v3-timeline-rendering",
+      "rule": "workspace_exclude_prefixes",
+      "value": ".test-tmp-"
+    },
+    {
+      "name": ".test-tmp-workflow-fixes-complete",
+      "rule": "workspace_exclude_prefixes",
+      "value": ".test-tmp-"
+    },
+    {
+      "name": ".test-tmp-workflow-fixes-dependent",
+      "rule": "workspace_exclude_prefixes",
+      "value": ".test-tmp-"
+    },
+    {
+      "name": ".test-tmp-workflow-fixes-final",
+      "rule": "workspace_exclude_prefixes",
+      "value": ".test-tmp-"
+    },
+    {
+      "name": ".test-tmp-workflow-fixes-green",
+      "rule": "workspace_exclude_prefixes",
+      "value": ".test-tmp-"
+    },
+    {
+      "name": ".test-tmp-workflow-fixes-red",
+      "rule": "workspace_exclude_prefixes",
+      "value": ".test-tmp-"
+    },
+    {
+      "name": ".test-tmp-workflow-fixes-renamed",
+      "rule": "workspace_exclude_prefixes",
+      "value": ".test-tmp-"
+    },
+    {
+      "name": "__pycache__",
+      "rule": "workspace_excludes",
+      "value": "__pycache__"
+    },
+    {
+      "name": "_codex_tmp_adapter_full",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_adapters_handoff",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_adapters_types",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_app_helpers",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_app_split",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_app_workflow",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_app_workflow2",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_app_workflow_post",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_asset_current_only",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_asset_current_only2",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_asset_current_only3",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_asset_current_postcommit",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_asset_evidence_owner2",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_asset_migrate_handoff",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_asset_owner_final",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_authoring",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_authoring_dataclass",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_authoring_dataclass_post",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_authoring_postcommit",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_authoring_refs",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_authoring_refs2",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_authoring_single_path",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_authoring_single_path2",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_authoring_single_path3",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_authoring_stable_ids",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_auto_start",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_auto_start_local",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_auto_start_postcommit",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_blob_foundation",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_cache_review",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_delivery",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_delivery2",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_delivery3",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_delivery_final",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_delivery_live",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_delivery_postcommit",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_delivery_simple",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_delivery_simple2",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_eligibility_final",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_gates_postcommit",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_identity_owner",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_kind_owner",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_local_v3",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_local_v3_post",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_migration_handoff",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_migration_postcommit2",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_migration_postfix",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_migration_reverify",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_migration_safety",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_migration_safety2",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_no_ops",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_no_ops_postcommit",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_openapi_gen",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_package_app",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_package_app2",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_package_app3",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_package_final",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_package_owner",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_package_owner2",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_package_owner3",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_package_owner4",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_perf_all",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_perf_real",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_phase1_revert",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_phase3_status_app",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_phase3_status_timeline",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_phase5_postcommit",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_phase5_projection",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_post3548b",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_pre_render_gate",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_real_advance",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_real_app_flow",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_real_app_flow2",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_real_app_suite",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_release_chain",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_release_chain2",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_release_gate_owner",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_release_gate_owner2",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_release_gate_postcommit",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_release_postcommit",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_remove_operation",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_renderer_highs",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_renderer_postcommit",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_renderer_trust",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_simplicity_cleanup",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_simplify_final2",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_simplify_post",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_stage_order",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_status_projection2",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_three_e2e",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_three_e2e2",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_three_e2e_postcommit",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_trust_assets_timeline",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_trust_port_full",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_trust_port_smoke",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_trust_ports",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_trust_postcommit",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_v3_full2",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_verify_perf",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_workflow_blockers",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_workflow_postcommit",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_workflow_repo",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_workflow_repo2",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_workflow_reverify",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "_codex_tmp_workflow_single_delivery",
+      "rule": "workspace_exclude_prefixes",
+      "value": "_codex_tmp_"
+    },
+    {
+      "name": "common",
+      "rule": "workspace_excludes",
+      "value": "common"
+    },
+    {
+      "name": "data",
+      "rule": "workspace_excludes",
+      "value": "data"
+    },
+    {
+      "name": "docs",
+      "rule": "workspace_excludes",
+      "value": "docs"
+    },
+    {
+      "name": "tmp",
+      "rule": "workspace_excludes",
+      "value": "tmp"
+    },
+    {
+      "name": "tools",
+      "rule": "workspace_excludes",
+      "value": "tools"
+    }
+  ],
+  "roots": [
+    {
+      "disposition": "MIGRATE_ACTIVE",
+      "name": "neotolis_diary",
+      "rule_id": "known_active_override"
+    },
+    {
+      "disposition": "MIGRATE_ACTIVE",
+      "name": "not_a_trolley_problem",
+      "rule_id": "known_active_override"
+    },
+    {
+      "disposition": "ARCHIVE_READ_ONLY",
+      "name": "trolley",
+      "rule_id": "known_source_archive"
+    },
+    {
+      "disposition": "ARCHIVE_READ_ONLY",
+      "name": "trolley3d",
+      "rule_id": "known_source_archive"
+    },
+    {
+      "disposition": "MIGRATE_ACTIVE",
+      "name": "trolley_devlog",
+      "rule_id": "known_active_override"
+    }
+  ],
+  "rules_sha256": "0cfdffb7325e7b9609d6d211324e4a87e2a1fec94da0643b1c61b656cb87a737",
+  "schema_version": 1,
+  "summary": {
+    "ambiguous": 0,
+    "by_disposition": {
+      "ARCHIVE_READ_ONLY": 2,
+      "MIGRATE_ACTIVE": 3
+    },
+    "excluded": 154,
+    "roots": 5,
+    "unmatched": 0
+  },
+  "workspace": "C:\\projects\\devlogs"
+}
