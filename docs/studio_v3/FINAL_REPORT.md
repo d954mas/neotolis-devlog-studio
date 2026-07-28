@@ -2,6 +2,7 @@
 
 Дата: 2026-07-28
 Ветка: `codex/studio-v3-foundation`
+Статус: merged в `main` через PR #2 (`c5b3f9e`)
 
 ## Результат
 
@@ -156,9 +157,11 @@ GitHub Actions настроен выполнять тот же full cutover gate
 - Python 3.12.4;
 - Node 22.14.0.
 
-Hosted Ubuntu job для финального commit не запускался, но Linux full gate
-реально выполнен локальным Linux/amd64 container, а не выведен только из
-конфигурации matrix.
+Hosted Windows и Ubuntu gates прошли для feature commit, PR и merge commit в
+`main`. Финальный post-merge run:
+`https://github.com/d954mas/neotolis-devlog-studio/actions/runs/30354362561`.
+Локальный clean Linux/amd64 container остаётся независимым подтверждением того
+же blocking command.
 
 ## Performance
 
@@ -206,7 +209,8 @@ Cutover and final verification:
 - `d977305` — physical v3-only runtime cutover;
 - `31a5939` — installed-wheel and cross-platform CI gates;
 - `e2e37f5` — verified migration, restore, active ports and final reviews;
-- `a686953` — deterministic generated contracts across Windows and Linux.
+- `a686953` — deterministic generated contracts across Windows and Linux;
+- `33a0cc9` — hosted Windows/Linux FFmpeg provisioning.
 
 Manifest, restore, active-port and final-review evidence lives beside this
 report in its documentation commit.
@@ -216,11 +220,9 @@ report in its documentation commit.
 1. Historical production release остаётся intentionally blocked, пока владелец
    не добавит exact approval/license evidence. Это защита данных, а не runtime
    compatibility blocker.
-2. Hosted `ubuntu-24.04` job остаётся operational confirmation внешнего CI.
-   Тот же blocking command уже прошёл в clean Linux/amd64 container.
-3. Absolute latency report относится к одной Windows reference machine;
+2. Absolute latency report относится к одной Windows reference machine;
    behavioral performance gates остаются платформенно-независимыми.
-4. Research не входит в Studio core. Если он снова понадобится, его следует
+3. Research не входит в Studio core. Если он снова понадобится, его следует
    делать отдельным bounded package, не возвращать в runtime orchestration.
 
 ## Итог по поддерживаемости
