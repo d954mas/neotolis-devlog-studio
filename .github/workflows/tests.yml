@@ -69,6 +69,16 @@ jobs:
         working-directory: common/dlstudio/webui
         run: npm ci
 
+      - name: Install FFmpeg on Ubuntu
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
+
+      - name: Install FFmpeg on Windows
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg --yes --no-progress --limit-output
+
       - name: Verify FFmpeg is available
         run: ffmpeg -version
 
