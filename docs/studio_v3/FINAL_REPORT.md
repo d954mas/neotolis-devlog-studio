@@ -116,7 +116,7 @@ Historical port smoke отделён от synthetic trusted E2E: первый д
 
 ## Проверки
 
-Локально на Windows прошли:
+В exact frozen environment на Windows и в clean Linux container прошли:
 
 ```text
 147 v3 Python tests
@@ -142,7 +142,12 @@ sha256 ee8067f05a33ee7a2710f5cc3c6514f1fd1eafcc5c47a052cf72c06cfa4fd78d
 ```
 
 Full cutover gate запускался с зафиксированными Python 3.12.4 и Node 22.14.0,
-а не только с локально доступными версиями по умолчанию.
+а не только с локально доступными версиями по умолчанию. Windows использовал
+новый isolated venv из `python-ci.lock`. Linux/amd64 запускался из архива
+committed `HEAD` в `python:3.12.4-bookworm`, с exact Node 22.14.0 и FFmpeg
+5.1.9. Linux clean wheel smoke, 147 tests, npm audit, OpenAPI generation,
+4 UI tests и production build прошли.
+Machine-readable result: `docs/studio_v3/phase7/linux_gate_report.json`.
 
 GitHub Actions настроен выполнять тот же full cutover gate на:
 
@@ -151,9 +156,9 @@ GitHub Actions настроен выполнять тот же full cutover gate
 - Python 3.12.4;
 - Node 22.14.0.
 
-Этот отчёт не утверждает, что hosted Linux job уже был запущен для финального
-commit: в текущей локальной сессии подтверждён Windows gate и проверена
-конфигурация двухплатформенной matrix.
+Hosted Ubuntu job для финального commit не запускался, но Linux full gate
+реально выполнен локальным Linux/amd64 container, а не выведен только из
+конфигурации matrix.
 
 ## Performance
 
@@ -199,7 +204,9 @@ Migration safety:
 Cutover and final verification:
 
 - `d977305` — physical v3-only runtime cutover;
-- `31a5939` — installed-wheel and cross-platform CI gates.
+- `31a5939` — installed-wheel and cross-platform CI gates;
+- `e2e37f5` — verified migration, restore, active ports and final reviews;
+- `a686953` — deterministic generated contracts across Windows and Linux.
 
 Manifest, restore, active-port and final-review evidence lives beside this
 report in its documentation commit.
@@ -209,8 +216,8 @@ report in its documentation commit.
 1. Historical production release остаётся intentionally blocked, пока владелец
    не добавит exact approval/license evidence. Это защита данных, а не runtime
    compatibility blocker.
-2. Hosted Linux CI для финального commit должен быть подтверждён GitHub job;
-   matrix и blocking command уже зафиксированы.
+2. Hosted `ubuntu-24.04` job остаётся operational confirmation внешнего CI.
+   Тот же blocking command уже прошёл в clean Linux/amd64 container.
 3. Absolute latency report относится к одной Windows reference machine;
    behavioral performance gates остаются платформенно-независимыми.
 4. Research не входит в Studio core. Если он снова понадобится, его следует

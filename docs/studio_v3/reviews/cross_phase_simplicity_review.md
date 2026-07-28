@@ -54,6 +54,7 @@ contract or lifecycle.
 - strict architecture, banned-surface, canonical and performance gates;
 - generated OpenAPI TypeScript client, UI tests, typecheck and production build;
 - clean installed-wheel entrypoint/API/static smoke;
+- exact locked full gate on Windows and clean Linux/amd64;
 - full verified backup, independent restore copy and migration clone;
 - idempotent active ports with unchanged canonical heads on second apply;
 - final independent phase 0–3 and phase 4–5 reviews: no BLOCKER/HIGH/MEDIUM.
