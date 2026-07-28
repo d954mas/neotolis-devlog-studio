@@ -1,0 +1,31 @@
+{
+  "schema": "dlstudio.linux_gate",
+  "version": 1,
+  "verified_commit": "a686953",
+  "verified_on": "2026-07-28",
+  "source_archive_sha256": "388251f08a68080c2e897bf95b8f250b401dc87da8ddc3f058e276e3bc5ec5ca",
+  "environment": {
+    "architecture": "linux/amd64",
+    "image": "python:3.12.4-bookworm",
+    "image_digest": "sha256:40eb6aea06bc8f9f1bb1f8467dd1f06f57cb7eba38a70e65e2d26effeaf737e8",
+    "python": "3.12.4",
+    "node": "22.14.0",
+    "ffmpeg": "5.1.9-0+deb12u1"
+  },
+  "results": {
+    "installed_wheel_smoke": "PASS",
+    "npm_audit_vulnerabilities": 0,
+    "python_tests": {
+      "passed": 147,
+      "failed": 0
+    },
+    "locked_toolchain": "PASS",
+    "architecture_import_boundaries": "PASS",
+    "banned_runtime_surfaces": "PASS",
+    "canonical_vectors": "PASS",
+    "performance_contract": "PASS",
+    "generated_openapi_client": "PASS",
+    "webui_tests": "PASS",
+    "webui_build": "PASS"
+  }
+}

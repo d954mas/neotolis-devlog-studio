@@ -24,3 +24,7 @@ Confirmed:
 - 147 Python tests and `git diff --check` pass.
 
 No source changes were made by the reviewer.
+
+Final follow-up on `a686953` also returned READY with
+BLOCKER/HIGH/MEDIUM 0. The reviewer confirmed the LF policy is scoped only to
+the two generated contracts and that locked Windows and Linux full gates pass.
