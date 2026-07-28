@@ -48,12 +48,15 @@ jobs:
           python -m pip install
           --requirement tools/studio_v3_verify/python-ci.lock
 
-      - name: Install dlstudio without dependency resolution
+      - name: Build and install the dlstudio wheel
         run: >-
           python -m pip install
           --no-deps
           --no-build-isolation
-          --editable common/dlstudio
+          common/dlstudio
+
+      - name: Smoke-test the installed wheel
+        run: python tools/studio_v3_installed_smoke.py
 
       - name: Set up locked Node
         uses: actions/setup-node@v4
@@ -69,5 +72,5 @@ jobs:
       - name: Verify FFmpeg is available
         run: ffmpeg -version
 
-      - name: Run Studio v3 gates and full regression suite
-        run: python -m tools.studio_v3_verify --profile auto --scope full
+      - name: Run architecture, performance, generated-client, and full v3 gates
+        run: python -m tools.studio_v3_verify --profile cutover --scope full
