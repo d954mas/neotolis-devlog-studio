@@ -2,7 +2,6 @@
   "components": {
     "schemas": {
       "BlobRef": {
-        "description": "Exact identity of immutable bytes in an object store.",
         "properties": {
           "sha256": {
             "title": "Sha256",
@@ -263,13 +262,6 @@
       },
       "ValidationError": {
         "properties": {
-          "ctx": {
-            "title": "Context",
-            "type": "object"
-          },
-          "input": {
-            "title": "Input"
-          },
           "loc": {
             "items": {
               "anyOf": [
@@ -363,7 +355,6 @@
         "type": "object"
       },
       "WorkflowStatus": {
-        "description": "Read-only application projection shared by every adapter.",
         "properties": {
           "action": {
             "anyOf": [

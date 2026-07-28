@@ -93,10 +93,7 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /**
-         * BlobRef
-         * @description Exact identity of immutable bytes in an object store.
-         */
+        /** BlobRef */
         BlobRef: {
             /** Sha256 */
             sha256: string;
@@ -196,10 +193,6 @@ export interface components {
         };
         /** ValidationError */
         ValidationError: {
-            /** Context */
-            ctx?: Record<string, never>;
-            /** Input */
-            input?: unknown;
             /** Location */
             loc: (string | number)[];
             /** Message */
@@ -231,10 +224,7 @@ export interface components {
             /** Run Id */
             run_id: string;
         };
-        /**
-         * WorkflowStatus
-         * @description Read-only application projection shared by every adapter.
-         */
+        /** WorkflowStatus */
         WorkflowStatus: {
             /** Action */
             action: ("advance" | "review" | "deliver") | null;
