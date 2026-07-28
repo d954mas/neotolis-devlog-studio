@@ -4,15 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 import tempfile
 from pathlib import Path
 from typing import Any
-
-sys.path.insert(
-    0,
-    str(Path(__file__).resolve().parents[1] / "common" / "dlstudio" / "src"),
-)
 
 from dlstudio.adapters.http import create_app
 

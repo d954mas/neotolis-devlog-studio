@@ -57,11 +57,36 @@
   "cutover_absent_paths": [
     "common/devlog",
     "dl",
-    "common/dlstudio/src/dlstudio/cli/autopilot.py",
+    "dl.bat",
+    "common/dlstudio/src/dlstudio/api",
+    "common/dlstudio/src/dlstudio/cache",
+    "common/dlstudio/src/dlstudio/check",
+    "common/dlstudio/src/dlstudio/cli",
     "common/dlstudio/src/dlstudio/compile",
     "common/dlstudio/src/dlstudio/model",
     "common/dlstudio/src/dlstudio/render",
-    "common/dlstudio/src/dlstudio/services"
+    "common/dlstudio/src/dlstudio/services",
+    "common/dlstudio/src/dlstudio/template",
+    "common/dlstudio/src/dlstudio/ir.py",
+    "common/dlstudio/src/dlstudio/production.py"
+  ],
+  "runtime_package_allowlist": [
+    "__init__.py",
+    "__main__.py",
+    "adapters",
+    "application",
+    "assets",
+    "authoring",
+    "capture",
+    "constraints",
+    "foundation",
+    "persistence",
+    "release",
+    "rendering",
+    "review",
+    "speech",
+    "timeline",
+    "workflow"
   ],
   "cutover_forbidden_regex": [
     "asset_policy\\s*=\\s*[\"']compatibility[\"']",
@@ -91,5 +116,23 @@
       "owner": "review",
       "test_selector": "performance_smoke and review_pack_bounded"
     }
-  ]
+  ],
+  "reference_performance": {
+    "report_path": "docs/studio_v3/phase7/performance_report.json",
+    "budgets": {
+      "cli_help": {
+        "cold_ms_max": 800.0,
+        "p95_ms_max": 800.0
+      },
+      "status_query": {
+        "p95_ms_max": 100.0
+      },
+      "compile_check": {
+        "p95_seconds_max": 0.5
+      },
+      "orchestration_memory": {
+        "peak_bytes_max": 8388608
+      }
+    }
+  }
 }

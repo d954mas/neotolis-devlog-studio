@@ -38,9 +38,7 @@ Reports are in this directory:
 - `rehearsal_backup_report.json`
 - `rehearsal_restore_report.json`
 
-The real workspace dry-run remains fail-closed in the Codex sandbox because
-Python is denied read access to 14 current `trolley_devlog` WAV files. The
-root disposition report is complete, but no real-workspace before-manifest or
-budget is claimed until the same command runs under the owning user and all
-14 SHA-256 values are obtained.
-
+The real-workspace blocker was later resolved under the owning Windows user.
+The final manifest, disk budget, verified external backup and independent
+restore evidence are in `docs/studio_v3/phase6/`. The disposable migration
+clone is a different directory from both backup and restore rehearsal.

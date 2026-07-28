@@ -10,6 +10,7 @@ from typing import Any
 
 from dlstudio.application.api import (
     advance_production,
+    StudioError,
     deliver_local,
     project_status,
     query_status,
@@ -33,6 +34,8 @@ def _parser() -> argparse.ArgumentParser:
     blob = commands.add_parser("blob")
     blob.add_argument("sha256")
     blob.add_argument("size", type=int)
+    serve = commands.add_parser("serve")
+    serve.add_argument("--port", type=int, default=8788)
     return parser
 
 
@@ -80,11 +83,29 @@ def main(argv: list[str] | None = None) -> int:
                 while chunk := handle.read(1024 * 1024):
                     sys.stdout.buffer.write(chunk)
             return 0
+        elif args.command == "serve":
+            import uvicorn
+
+            from .http import create_app
+
+            uvicorn.run(
+                create_app(production.manifest_path),
+                host="127.0.0.1",
+                port=args.port,
+            )
+            return 0
         else:  # pragma: no cover - argparse owns command validation.
             raise AssertionError(args.command)
         print(json.dumps(result, sort_keys=True))
         return 0
-    except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+    except (
+        KeyError,
+        OSError,
+        StudioError,
+        TypeError,
+        ValueError,
+        json.JSONDecodeError,
+    ) as exc:
         print(f"BLOCKED: {exc}", file=sys.stderr)
         return 2
 

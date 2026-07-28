@@ -69,6 +69,20 @@ def test_architecture_accepts_public_api_import(tmp_path: Path) -> None:
     assert result.status is GateStatus.PASS
 
 
+def test_architecture_generates_quality_rule_index(tmp_path: Path) -> None:
+    source = tmp_path / "dlstudio"
+    _write(
+        source / "timeline" / "api.py",
+        'RULES = ("VQ-SYNC", "VQ-ASSET", "not-a-rule")\n',
+    )
+
+    result = check_architecture(source, _architecture_config())
+
+    assert result.status is GateStatus.PASS
+    assert result.metrics["rules"] == 2
+    assert result.metrics["rule_index"] == "VQ-ASSET,VQ-SYNC"
+
+
 def test_architecture_resolves_relative_cross_module_import_from_package_init(
     tmp_path: Path,
 ) -> None:

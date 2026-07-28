@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from dlstudio.application.api import start_workflow
+from dlstudio.foundation.api import CasConflict
 from dlstudio.persistence.api import open_local_repositories
 
 
@@ -130,3 +131,84 @@ def test_openapi_generation_is_deterministic(tmp_path: Path) -> None:
 
     assert openapi_bytes(manifest) == checked_in
     assert openapi_bytes(manifest) == openapi_bytes(manifest)
+
+
+def test_studio_server_is_loopback_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dlstudio.adapters.cli import main
+
+    manifest = _production(tmp_path / "production")
+    called: dict[str, object] = {}
+
+    def run(_app: object, **kwargs: object) -> None:
+        called.update(kwargs)
+
+    monkeypatch.setattr("uvicorn.run", run)
+    assert main(["--manifest", str(manifest), "serve", "--port", "8799"]) == 0
+    assert called == {"host": "127.0.0.1", "port": 8799}
+
+    with pytest.raises(SystemExit):
+        main(
+            [
+                "--manifest",
+                str(manifest),
+                "serve",
+                "--host",
+                "0.0.0.0",
+            ]
+        )
+
+
+def test_expected_studio_errors_are_structured(
+    tmp_path: Path,
+    capsys,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dlstudio.adapters import cli as cli_adapter
+    from dlstudio.adapters import http as http_adapter
+
+    manifest = _production(tmp_path / "production")
+
+    def conflict(_repository: object) -> object:
+        raise CasConflict("head changed")
+
+    monkeypatch.setattr(cli_adapter, "query_status", conflict)
+    assert cli_adapter.main(["--manifest", str(manifest), "status"]) == 2
+    assert capsys.readouterr().err == "BLOCKED: head changed\n"
+
+    monkeypatch.setattr(http_adapter, "query_status", conflict)
+    response = TestClient(http_adapter.create_app(manifest)).get("/api/v3/status")
+    assert response.status_code == 409
+    assert response.json() == {"detail": "head changed"}
+
+
+def test_http_control_plane_rejects_cross_origin_and_rebound_hosts(
+    tmp_path: Path,
+) -> None:
+    from dlstudio.adapters.http import create_app
+
+    manifest = _production(tmp_path / "production", prestart=False)
+    app = create_app(manifest)
+    client = TestClient(app, base_url="http://127.0.0.1")
+
+    cross_origin = client.post(
+        "/api/v3/advance",
+        headers={
+            "Origin": "https://attacker.example",
+            "Sec-Fetch-Site": "cross-site",
+        },
+    )
+    assert cross_origin.status_code == 403
+    assert cross_origin.json() == {"detail": "cross-origin request blocked"}
+
+    rebound = client.get(
+        "/api/v3/status",
+        headers={"Host": "attacker.example"},
+    )
+    assert rebound.status_code == 400
+
+    _, _, workflows = open_local_repositories(
+        manifest.parent, "fixture.reel"
+    )
+    assert workflows.read_current() is None

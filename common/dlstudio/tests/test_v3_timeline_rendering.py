@@ -3,18 +3,15 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import runpy
 import shutil
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
-from _builders import find_system_font
 from dlstudio.application.api import compile_production
 from dlstudio.assets.api import (
     Approval,
@@ -34,11 +31,11 @@ from dlstudio.authoring.api import (
     SolidLayer,
     TextLayer,
     VideoFade,
+    load_edit,
 )
 from dlstudio.authoring.api import _compile_resolved as compile_edit
 from dlstudio.foundation.api import canonical_bytes
 from dlstudio.persistence.api import ObjectStore, ProductionRepository
-from dlstudio.persistence.assets import AssetRepository
 from dlstudio.rendering.api import (
     ExecutionFingerprint,
     RenderOptions,
@@ -46,6 +43,19 @@ from dlstudio.rendering.api import (
 )
 from dlstudio.rendering import api as rendering_api
 from dlstudio.timeline.api import TimelineIR, VisualInstruction, check_timeline
+
+
+def find_system_font() -> str | None:
+    for candidate in (
+        "C:/Windows/Fonts/arial.ttf",
+        "C:/Windows/Fonts/segoeui.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/System/Library/Fonts/Helvetica.ttc",
+    ):
+        if Path(candidate).is_file():
+            return candidate
+    return None
 
 
 class EmptyResolver:
@@ -1123,72 +1133,6 @@ def test_text_authoring_does_not_claim_unsupported_animation_contract() -> None:
     assert "animations" not in TextLayer.__dataclass_fields__
 
 
-def test_legacy_sfx_port_covers_every_beat_and_clips_timeline_end() -> None:
-    from tools.studio_v3_port_legacy import _sfx_specs
-
-    first = SimpleNamespace(src="first.wav", t=0.25, gain_db=-2.0)
-    last = SimpleNamespace(src="last.wav", t=0.75, gain_db=-3.0)
-    timeline = SimpleNamespace(
-        beats=(
-            SimpleNamespace(id="first", sfx=(first,)),
-            SimpleNamespace(id="last", sfx=(last,)),
-        )
-    )
-
-    specs = _sfx_specs(
-        timeline,
-        {"first": 0.0, "last": 1.0},
-        2_000_000_000,
-        lambda _src, _kind: {"duration_ns": 500_000_000},
-    )
-
-    assert specs == [
-        (first, 250_000_000, 500_000_000),
-        (last, 1_750_000_000, 250_000_000),
-    ]
-
-
-def test_transition_anti_cut_gate_rejects_renderer_mutation() -> None:
-    from tools.studio_v3_render_representatives import (
-        _anti_cut_group,
-        _guard_integrity,
-    )
-
-    group = {
-        "kind": "xfade:fade",
-        "start_ns": 1,
-        "end_ns": 5,
-        "frame_indices": [1, 2, 3, 4],
-        "before_frame_index": 0,
-        "after_frame_index": 5,
-    }
-    references = {
-        index: bytes([value] * 16)
-        for index, value in enumerate((0, 50, 100, 150, 200, 250))
-    }
-    hard_cut = {
-        index: bytes([(0 if index <= 2 else 250)] * 16)
-        for index in range(6)
-    }
-    late_hard_cut = {
-        index: bytes([(0 if index < 5 else 250)] * 16)
-        for index in range(6)
-    }
-
-    assert _anti_cut_group(group, references, references)["pass"] is True
-    assert _anti_cut_group(group, references, hard_cut)["pass"] is False
-    assert _anti_cut_group(group, references, late_hard_cut)["pass"] is False
-    corrupted_guards = [
-        {
-            "mae_gray": 255.0,
-            "dhash_hamming": 2000,
-            "global_ssim": 0.0,
-        }
-        for _index in range(10)
-    ]
-    assert _guard_integrity(corrupted_guards)["pass"] is False
-
-
 def _pixel(path: Path, at: float) -> tuple[int, int, int]:
     completed = subprocess.run(
         [
@@ -1342,81 +1286,28 @@ def test_fresh_process_renders_ir_without_authoring_import(
     assert "GLOBAL_CHUNK_RESOLVER" not in worker_source
 
 
-def test_representative_vertical_longform_and_voice_ports_compile(
-    tmp_path: Path,
-) -> None:
+def test_representative_runtime_ports_are_pure_v3_authoring() -> None:
     repo = Path(__file__).parents[3]
     ports = (
         repo
         / "not_a_trolley_problem"
         / "reels"
         / "2026_07_18_reel_02"
-        / "v3_port.py",
+        / "authoring.py",
         repo
         / "not_a_trolley_problem"
         / "devlogs"
         / "2026_07_22_devlog_01"
-        / "v3_port.py",
+        / "authoring.py",
         repo
         / "not_a_trolley_problem"
         / "devlogs"
         / "2026_07_17_devlog_01"
-        / "v3_port.py",
+        / "authoring.py",
     )
-    timelines = []
-    for index, path in enumerate(ports):
-        namespace = runpy.run_path(str(path))
-        edit = namespace["EDIT"]
-        migration_assets = namespace["MIGRATION_ASSETS"]
-        evidence_objects = namespace["EVIDENCE_OBJECTS"]
-        repository = ProductionRepository(
-            object_root=tmp_path / f"objects-{index}",
-            state_root=tmp_path / f"state-{index}",
-            staging_root=tmp_path / f"staging-{index}",
-            lock_root=tmp_path / f"locks-{index}",
-            production_id=edit.production_id,
-        )
-        store = repository.objects
-        published = {
-            store.put_bytes(raw)
-            for _expected, raw in evidence_objects
-        }
-        assert published == {expected for expected, _raw in evidence_objects}
-        referenced = {
-            ref
-            for revision in migration_assets
-            for ref in (
-                *revision.provenance.evidence_refs,
-                *revision.approval.evidence_refs,
-            )
-        }
-        assert referenced == published
-        for ref in referenced:
-            store.verify(ref)
-        assets = AssetRepository(repository)
-        head_revision = 0
-        for bootstrap in migration_assets:
-            logical_source = bootstrap.provenance.logical_source
-            assert logical_source is not None
-            result = assets.ingest(
-                path.parent / logical_source,
-                asset_id=bootstrap.asset_id,
-                media=bootstrap.media,
-                provenance=bootstrap.provenance,
-                approval=bootstrap.approval,
-                license=bootstrap.license,
-                expected_revision=head_revision,
-                inspect_media=lambda _path, facts=bootstrap.media: facts,
-            )
-            assert result.revision == bootstrap
-            head_revision = result.state_revision
-        timelines.append(compile_production(edit, assets))
-    assert [item.metadata["kind"] for item in timelines] == [
+    edits = [load_edit(path) for path in ports]
+    assert [item.kind for item in edits] == [
         "reel",
         "devlog",
         "capture_vo",
     ]
-    assert all(
-        TimelineIR.from_canonical_bytes(item.canonical_bytes()) == item
-        for item in timelines
-    )

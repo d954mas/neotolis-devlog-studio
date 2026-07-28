@@ -18,6 +18,7 @@ from .workflow import (
 )
 from .production import advance_production
 from dlstudio.assets.api import MediaFacts
+from dlstudio.foundation.api import CasConflict, CorruptObject, StudioError
 from dlstudio.release.api import DeliveryReceipt
 from dlstudio.workflow.api import WorkflowRun
 
@@ -26,6 +27,9 @@ __all__ = [
     "MediaFacts",
     "LocalDeliveryState",
     "DeliveryReceipt",
+    "StudioError",
+    "CasConflict",
+    "CorruptObject",
     "WorkflowRun",
     "WorkflowStatus",
     "compile_production",
