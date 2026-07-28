@@ -1,0 +1,13 @@
+{
+  "schema": "dlstudio.restore_verification",
+  "version": 1,
+  "target_root": "C:\\Users\\ROG\\.codex\\visualizations\\2026\\07\\26\\019f9e4a-ebec-7951-b9d9-0154ebf7b4ac\\studio-v3-cutover\\restore-rehearsal-final",
+  "verified_at": "2026-07-28T05:08:45.4393351Z",
+  "manifest_sha256": "ff92b7bde893945d769d717508e5ea44b16503dfcbcc90e876f3813fde34f44e",
+  "entries": 11008,
+  "actual_entries": 11008,
+  "missing": [],
+  "extra": [],
+  "mismatched": [],
+  "verified": true
+}

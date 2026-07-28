@@ -1,0 +1,39 @@
+{
+  "mode": "dry-run",
+  "productions": [
+    {
+      "approval_statuses": {
+        "approved": 1,
+        "pending": 2,
+        "validated": 5
+      },
+      "assets": 8,
+      "evidence_objects": 9,
+      "mode": "dry-run",
+      "production_id": "2026_07_18_reel_02"
+    },
+    {
+      "approval_statuses": {
+        "approved": 1,
+        "pending": 18,
+        "validated": 18
+      },
+      "assets": 37,
+      "evidence_objects": 23,
+      "mode": "dry-run",
+      "production_id": "2026_07_22_devlog_01"
+    },
+    {
+      "approval_statuses": {
+        "pending": 24,
+        "validated": 23
+      },
+      "assets": 47,
+      "evidence_objects": 37,
+      "mode": "dry-run",
+      "production_id": "2026_07_17_devlog_01"
+    }
+  ],
+  "schema": "studio_v3.active_port_rehearsal",
+  "version": 1
+}

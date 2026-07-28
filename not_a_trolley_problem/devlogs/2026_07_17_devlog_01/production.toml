@@ -1,0 +1,5 @@
+schema = "dlstudio.production"
+version = 3
+id = "2026_07_17_devlog_01"
+authoring = "authoring.py"
+delivery_root = "delivery"
