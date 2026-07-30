@@ -89,6 +89,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v3/review/artifacts/{sha256}/evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Review Frame Evidence */
+        get: operations["getReviewFrameEvidence"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v3/review/artifacts/{sha256}/waveform": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Review Waveform */
+        get: operations["getReviewWaveform"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v3/review/context": {
         parameters: {
             query?: never;
@@ -451,6 +485,18 @@ export interface components {
             /** Scope */
             scope: string[];
         };
+        /** ReviewWaveform */
+        ReviewWaveform: {
+            artifact: components["schemas"]["BlobRef"];
+            /** Duration Ns */
+            duration_ns: number;
+            /** Has Audio */
+            has_audio: boolean;
+            /** Peaks Milli */
+            peaks_milli: number[];
+            /** Sample Count */
+            sample_count: number;
+        };
         /** StageAttempt */
         StageAttempt: {
             /** Error */
@@ -678,6 +724,79 @@ export interface operations {
                 };
                 content: {
                     "video/mp4": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getReviewFrameEvidence: {
+        parameters: {
+            query: {
+                size: number;
+                frame: number;
+                width: number;
+                x_milli?: number | null;
+                y_milli?: number | null;
+                width_milli?: number | null;
+                height_milli?: number | null;
+            };
+            header?: never;
+            path: {
+                sha256: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getReviewWaveform: {
+        parameters: {
+            query: {
+                size: number;
+                samples: number;
+            };
+            header?: never;
+            path: {
+                sha256: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewWaveform"];
                 };
             };
             /** @description Validation Error */

@@ -29,13 +29,17 @@ from dlstudio.application.api import (
     DeliveryReceipt,
     deliver_local,
     project_status,
-    query_authorized_review_artifacts,
+    query_authorized_review_artifact_contexts,
     query_current_review,
+    query_review_frame_evidence,
     query_review_context,
     query_review_task_pack,
+    query_review_waveform,
+    ReviewArtifactContext,
     query_status,
     ReviewContext,
     ReviewTaskPack,
+    ReviewWaveform,
     ReviewVerdict,
     resolve_blob,
     submit_review_payload,
@@ -120,13 +124,20 @@ def create_app(manifest_path: str | Path) -> FastAPI:
     app = FastAPI(title="DLStudio v3", version="3.0.0")
     authorized_review_artifacts: OrderedDict[
         tuple[int, BlobRef | None],
-        frozenset[BlobRef],
+        dict[BlobRef, ReviewArtifactContext],
     ] = OrderedDict()
     verified_review_artifacts: OrderedDict[
         tuple[str, int],
-        None,
+        Path,
     ] = OrderedDict()
     review_cache_lock = Lock()
+    presentation_cache_root = (
+        production.production_root
+        / "data"
+        / ".studio"
+        / "cache"
+        / "presentation"
+    )
     app.add_middleware(
         TrustedHostMiddleware,
         allowed_hosts=sorted(_LOCAL_HOSTS),
@@ -173,6 +184,63 @@ def create_app(manifest_path: str | Path) -> FastAPI:
     @app.exception_handler(StudioError)
     async def studio_error(_request: object, exc: StudioError) -> JSONResponse:
         return JSONResponse(status_code=422, content={"detail": str(exc)})
+
+    def authorize_review_artifact(
+        requested: BlobRef,
+    ) -> tuple[ReviewArtifactContext, Path]:
+        authorization_key = (
+            production.workflows.head_revision(),
+            production.workflows.read_latest_review_round_ref(),
+        )
+        with review_cache_lock:
+            authorized = authorized_review_artifacts.get(authorization_key)
+            if authorized is not None:
+                authorized_review_artifacts.move_to_end(authorization_key)
+        if authorized is None:
+            computed = {
+                context.artifact: context
+                for context in query_authorized_review_artifact_contexts(
+                    production.workflows,
+                    production.repository.objects,
+                )
+            }
+            with review_cache_lock:
+                authorized = authorized_review_artifacts.get(
+                    authorization_key
+                )
+                if authorized is None:
+                    authorized = computed
+                    authorized_review_artifacts[authorization_key] = authorized
+                    while len(authorized_review_artifacts) > 8:
+                        authorized_review_artifacts.popitem(last=False)
+                else:
+                    authorized_review_artifacts.move_to_end(authorization_key)
+        context = authorized.get(requested)
+        if context is None:
+            raise ValueError("review artifact is not authorized")
+
+        artifact_key = (requested.sha256, requested.size)
+        with review_cache_lock:
+            source = verified_review_artifacts.get(artifact_key)
+            if source is not None:
+                verified_review_artifacts.move_to_end(artifact_key)
+        if source is None:
+            resolved = resolve_blob(
+                production.repository.objects,
+                requested.sha256,
+                requested.size,
+            )
+            with review_cache_lock:
+                source = verified_review_artifacts.get(artifact_key)
+                if source is None:
+                    source = resolved
+                    verified_review_artifacts[artifact_key] = source
+                    verified_review_artifacts.move_to_end(artifact_key)
+                    while len(verified_review_artifacts) > 256:
+                        verified_review_artifacts.popitem(last=False)
+                else:
+                    verified_review_artifacts.move_to_end(artifact_key)
+        return context, source
 
     @app.get("/api/v3/status", operation_id="getStatus")
     def status() -> WorkflowStatus:
@@ -249,54 +317,71 @@ def create_app(manifest_path: str | Path) -> FastAPI:
         size: int = Query(gt=0),
     ) -> FileResponse:
         requested = BlobRef(sha256, size)
-        authorization_key = (
-            production.workflows.head_revision(),
-            production.workflows.read_latest_review_round_ref(),
-        )
-        with review_cache_lock:
-            authorized = authorized_review_artifacts.get(authorization_key)
-            if authorized is not None:
-                authorized_review_artifacts.move_to_end(authorization_key)
-        if authorized is None:
-            computed = frozenset(
-                query_authorized_review_artifacts(
-                    production.workflows,
-                    production.repository.objects,
-                )
-            )
-            with review_cache_lock:
-                authorized = authorized_review_artifacts.get(
-                    authorization_key
-                )
-                if authorized is None:
-                    authorized = computed
-                    authorized_review_artifacts[authorization_key] = authorized
-                    while len(authorized_review_artifacts) > 8:
-                        authorized_review_artifacts.popitem(last=False)
-                else:
-                    authorized_review_artifacts.move_to_end(authorization_key)
-        if requested not in authorized:
-            raise ValueError("review artifact is not authorized")
-
-        artifact_key = (sha256, size)
-        with review_cache_lock:
-            verified = artifact_key in verified_review_artifacts
-            if verified:
-                verified_review_artifacts.move_to_end(artifact_key)
-        if not verified:
-            source = resolve_blob(
-                production.repository.objects,
-                sha256,
-                size,
-            )
-            with review_cache_lock:
-                verified_review_artifacts[artifact_key] = None
-                verified_review_artifacts.move_to_end(artifact_key)
-                while len(verified_review_artifacts) > 256:
-                    verified_review_artifacts.popitem(last=False)
-        else:
-            source = production.repository.objects.path_for(requested)
+        _, source = authorize_review_artifact(requested)
         return FileResponse(source, media_type="video/mp4")
+
+    @app.get(
+        "/api/v3/review/artifacts/{sha256}/evidence",
+        operation_id="getReviewFrameEvidence",
+        response_class=Response,
+        responses={200: {"content": {"image/jpeg": {}}}},
+    )
+    def review_frame_evidence(
+        sha256: str = PathParam(pattern=r"^[0-9a-f]{64}$"),
+        size: int = Query(gt=0),
+        frame: int = Query(ge=0),
+        width: int = Query(ge=64, le=640),
+        x_milli: int | None = Query(default=None, ge=0, le=999),
+        y_milli: int | None = Query(default=None, ge=0, le=999),
+        width_milli: int | None = Query(default=None, ge=1, le=1000),
+        height_milli: int | None = Query(default=None, ge=1, le=1000),
+    ) -> Response:
+        requested = BlobRef(sha256, size)
+        context, source = authorize_review_artifact(requested)
+        coordinates = (x_milli, y_milli, width_milli, height_milli)
+        if any(value is not None for value in coordinates) and not all(
+            value is not None for value in coordinates
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="all review evidence region coordinates are required",
+            )
+        region = (
+            None
+            if all(value is None for value in coordinates)
+            else tuple(int(value) for value in coordinates if value is not None)
+        )
+        result = query_review_frame_evidence(
+            context,
+            source,
+            frame=frame,
+            width=width,
+            region_milli=region,
+            cache_root=presentation_cache_root,
+        )
+        return Response(
+            content=result.content,
+            media_type=result.media_type,
+            headers={"ETag": f'"{result.content_ref.sha256}"'},
+        )
+
+    @app.get(
+        "/api/v3/review/artifacts/{sha256}/waveform",
+        operation_id="getReviewWaveform",
+    )
+    def review_waveform(
+        sha256: str = PathParam(pattern=r"^[0-9a-f]{64}$"),
+        size: int = Query(gt=0),
+        samples: int = Query(ge=256, le=8192),
+    ) -> ReviewWaveform:
+        requested = BlobRef(sha256, size)
+        context, source = authorize_review_artifact(requested)
+        return query_review_waveform(
+            context,
+            source,
+            sample_count=samples,
+            cache_root=presentation_cache_root,
+        )
 
     @app.post("/api/v3/deliver", operation_id="deliverProduction")
     def deliver(body: DeliveryBody) -> DeliveryResponse:

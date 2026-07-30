@@ -802,6 +802,41 @@
         "title": "ReviewVerdictBody",
         "type": "object"
       },
+      "ReviewWaveform": {
+        "properties": {
+          "artifact": {
+            "$ref": "#/components/schemas/BlobRef"
+          },
+          "duration_ns": {
+            "title": "Duration Ns",
+            "type": "integer"
+          },
+          "has_audio": {
+            "title": "Has Audio",
+            "type": "boolean"
+          },
+          "peaks_milli": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Peaks Milli",
+            "type": "array"
+          },
+          "sample_count": {
+            "title": "Sample Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "artifact",
+          "duration_ns",
+          "sample_count",
+          "has_audio",
+          "peaks_milli"
+        ],
+        "title": "ReviewWaveform",
+        "type": "object"
+      },
       "StageAttempt": {
         "properties": {
           "error": {
@@ -1241,6 +1276,206 @@
           }
         },
         "summary": "Review Artifact"
+      }
+    },
+    "/api/v3/review/artifacts/{sha256}/evidence": {
+      "get": {
+        "operationId": "getReviewFrameEvidence",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sha256",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Sha256",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "frame",
+            "required": true,
+            "schema": {
+              "minimum": 0,
+              "title": "Frame",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "width",
+            "required": true,
+            "schema": {
+              "maximum": 640,
+              "minimum": 64,
+              "title": "Width",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "x_milli",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 999,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X Milli"
+            }
+          },
+          {
+            "in": "query",
+            "name": "y_milli",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 999,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Y Milli"
+            }
+          },
+          {
+            "in": "query",
+            "name": "width_milli",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 1000,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Width Milli"
+            }
+          },
+          {
+            "in": "query",
+            "name": "height_milli",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 1000,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Height Milli"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/jpeg": {}
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review Frame Evidence"
+      }
+    },
+    "/api/v3/review/artifacts/{sha256}/waveform": {
+      "get": {
+        "operationId": "getReviewWaveform",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sha256",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Sha256",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "samples",
+            "required": true,
+            "schema": {
+              "maximum": 8192,
+              "minimum": 256,
+              "title": "Samples",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewWaveform"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review Waveform"
       }
     },
     "/api/v3/review/context": {

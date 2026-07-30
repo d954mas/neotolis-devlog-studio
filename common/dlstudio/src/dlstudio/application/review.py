@@ -4,10 +4,18 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
+from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from dlstudio.foundation.api import BlobRef, CorruptObject
+from dlstudio.rendering.api import (
+    PresentationFingerprint,
+    extract_presentation_frame,
+    extract_presentation_waveform,
+)
 from dlstudio.review.api import (
+    ReviewRegion,
     ReviewRound,
     ReviewVerdict,
     validate_review_round_transition,
@@ -79,6 +87,53 @@ class ReviewTaskPack:
     duration_ns: int
     target_snapshots: tuple[ReviewTimelineItem, ...]
     source_mapping: ReviewSourceMapping
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewArtifactContext:
+    artifact: BlobRef
+    timeline: BlobRef
+    width: int
+    height: int
+    fps_num: int
+    fps_den: int
+    duration_ns: int
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewFrameEvidence:
+    content_ref: BlobRef
+    content: bytes
+    media_type: str
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewWaveform:
+    artifact: BlobRef
+    duration_ns: int
+    sample_count: int
+    has_audio: bool
+    peaks_milli: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _VerifiedPresentationSource:
+    artifact: BlobRef
+    path: Path
+
+    def path_for(self, ref: BlobRef) -> Path:
+        if ref != self.artifact:
+            raise ValueError("presentation source identity changed")
+        return self.path
+
+    def verify(self, ref: BlobRef) -> None:
+        self.verify_metadata(ref)
+
+    def verify_metadata(self, ref: BlobRef) -> None:
+        if ref != self.artifact:
+            raise ValueError("presentation source identity changed")
+        if not self.path.is_file() or self.path.stat().st_size != ref.size:
+            raise ValueError("verified presentation source changed")
 
 
 def _outputs(workflow: WorkflowRun, stage: str) -> dict[str, BlobRef]:
@@ -435,3 +490,168 @@ def query_authorized_review_artifacts(
         if current is not None:
             artifacts.add(current)
     return tuple(sorted(artifacts, key=lambda item: (item.sha256, item.size)))
+
+
+def query_authorized_review_artifact_contexts(
+    workflows: WorkflowStore,
+    store: BlobStore,
+) -> tuple[ReviewArtifactContext, ...]:
+    """Map every authorized artifact to its exact clock and geometry."""
+
+    timeline_cache: dict[BlobRef, TimelineIR] = {}
+    contexts: dict[BlobRef, ReviewArtifactContext] = {}
+
+    def add(artifact: BlobRef, timeline_ref: BlobRef) -> None:
+        timeline = timeline_cache.get(timeline_ref)
+        if timeline is None:
+            try:
+                timeline = TimelineIR.from_canonical_bytes(
+                    store.read(timeline_ref)
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                raise CorruptObject(
+                    "invalid authorized review timeline"
+                ) from exc
+            if timeline.ref != timeline_ref:
+                raise CorruptObject(
+                    "authorized review timeline identity changed"
+                )
+            timeline_cache[timeline_ref] = timeline
+        candidate = ReviewArtifactContext(
+            artifact=artifact,
+            timeline=timeline_ref,
+            width=timeline.width,
+            height=timeline.height,
+            fps_num=timeline.fps_num,
+            fps_den=timeline.fps_den,
+            duration_ns=timeline.duration_ns,
+        )
+        existing = contexts.get(artifact)
+        if existing is not None:
+            existing_clock = (
+                existing.width,
+                existing.height,
+                existing.fps_num,
+                existing.fps_den,
+                existing.duration_ns,
+            )
+            candidate_clock = (
+                candidate.width,
+                candidate.height,
+                candidate.fps_num,
+                candidate.fps_den,
+                candidate.duration_ns,
+            )
+            if existing_clock != candidate_clock:
+                raise ValueError(
+                    "review artifact has ambiguous timeline contexts"
+                )
+            return
+        contexts[artifact] = candidate
+
+    workflow = workflows.read_current()
+    if workflow is not None:
+        try:
+            prepared = _outputs(workflow, "prepare")
+            finalized = _outputs(workflow, "final")
+        except ValueError:
+            prepared = {}
+            finalized = {}
+        timeline_ref = prepared.get("timeline")
+        artifact = finalized.get("artifact")
+        if timeline_ref is not None and artifact is not None:
+            add(artifact, timeline_ref)
+
+    for entry in query_review_history(workflows, store):
+        add(entry.verdict.artifact, entry.timeline)
+
+    return tuple(
+        contexts[key]
+        for key in sorted(contexts, key=lambda ref: (ref.sha256, ref.size))
+    )
+
+
+@lru_cache(maxsize=1)
+def _presentation_fingerprint() -> PresentationFingerprint:
+    return PresentationFingerprint.detect()
+
+
+def query_review_frame_evidence(
+    context: ReviewArtifactContext,
+    verified_source: Path,
+    *,
+    frame: int,
+    width: int,
+    region_milli: tuple[int, int, int, int] | None,
+    cache_root: Path,
+    fingerprint: PresentationFingerprint | None = None,
+) -> ReviewFrameEvidence:
+    """Extract one bounded frame/crop from an already authorized source."""
+
+    region = (
+        None
+        if region_milli is None
+        else ReviewRegion(*region_milli)
+    )
+    crop = (
+        None
+        if region is None
+        else (
+            region.x_milli,
+            region.y_milli,
+            region.width_milli,
+            region.height_milli,
+        )
+    )
+    result = extract_presentation_frame(
+        context.artifact,
+        _VerifiedPresentationSource(
+            context.artifact,
+            verified_source.resolve(strict=True),
+        ),
+        frame=frame,
+        duration_ns=context.duration_ns,
+        fps_num=context.fps_num,
+        fps_den=context.fps_den,
+        source_width=context.width,
+        source_height=context.height,
+        width=width,
+        crop_milli=crop,
+        cache_root=cache_root,
+        fingerprint=fingerprint or _presentation_fingerprint(),
+    )
+    return ReviewFrameEvidence(
+        content_ref=result.blob,
+        content=result.content,
+        media_type=result.media_type,
+    )
+
+
+def query_review_waveform(
+    context: ReviewArtifactContext,
+    verified_source: Path,
+    *,
+    sample_count: int,
+    cache_root: Path,
+    fingerprint: PresentationFingerprint | None = None,
+) -> ReviewWaveform:
+    """Extract one bounded final-mix peak envelope for review navigation."""
+
+    result = extract_presentation_waveform(
+        context.artifact,
+        _VerifiedPresentationSource(
+            context.artifact,
+            verified_source.resolve(strict=True),
+        ),
+        duration_ns=context.duration_ns,
+        sample_count=sample_count,
+        cache_root=cache_root,
+        fingerprint=fingerprint or _presentation_fingerprint(),
+    )
+    return ReviewWaveform(
+        artifact=context.artifact,
+        duration_ns=context.duration_ns,
+        sample_count=sample_count,
+        has_audio=result.has_audio,
+        peaks_milli=result.samples,
+    )

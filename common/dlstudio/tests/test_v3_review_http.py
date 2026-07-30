@@ -4,6 +4,7 @@ from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from itertools import count
 from pathlib import Path
+import subprocess
 from threading import Barrier, Lock
 from time import sleep
 
@@ -11,7 +12,11 @@ import pytest
 from fastapi.encoders import jsonable_encoder
 from fastapi.testclient import TestClient
 
-from dlstudio.application.api import query_review_task_pack, start_workflow
+from dlstudio.application.api import (
+    query_authorized_review_artifact_contexts,
+    query_review_task_pack,
+    start_workflow,
+)
 from dlstudio.foundation.api import BlobRef, canonical_bytes
 from dlstudio.persistence.api import open_local_repositories
 from dlstudio.review.api import ReviewRound, ReviewVerdict
@@ -51,6 +56,7 @@ def _review_ready_production(
     root: Path,
     *,
     visual_start_ns: int = 0,
+    artifact_bytes: bytes | None = None,
 ) -> tuple[Path, BlobRef]:
     root.mkdir()
     (root / "edit.py").write_text("EDIT = None\n", encoding="utf-8")
@@ -100,7 +106,9 @@ def _review_ready_production(
     report = CheckReport(timeline_ref, policy_ref, ())
     report_ref = store.put_bytes(report.canonical_bytes())
     constraints_ref = store.put_bytes(b"constraints")
-    artifact_ref = store.put_bytes(bytes(range(128)))
+    artifact_ref = store.put_bytes(
+        bytes(range(128)) if artifact_bytes is None else artifact_bytes
+    )
 
     start_workflow(workflows, run_id="run.main", kind="reel")
     _save_stage(
@@ -128,6 +136,291 @@ def _review_ready_production(
         ),
     )
     return manifest, artifact_ref
+
+
+def _review_media_bytes(root: Path) -> bytes:
+    media = root / "review-media.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=0x263b1d:s=64x96:r=30:d=0.2",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=660:sample_rate=48000:duration=0.2",
+            "-shortest",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-movflags",
+            "+faststart",
+            str(media),
+        ],
+        check=True,
+        timeout=30,
+    )
+    return media.read_bytes()
+
+
+def test_review_presentation_endpoints_are_exact_bounded_and_noncanonical(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dlstudio.adapters.http import create_app
+    from dlstudio.persistence.api import ObjectStore
+
+    production_root = tmp_path / "presentation"
+    production_root.mkdir()
+    media_bytes = _review_media_bytes(production_root)
+    manifest, artifact = _review_ready_production(
+        production_root / "production",
+        artifact_bytes=media_bytes,
+    )
+    repository, _, workflows = open_local_repositories(
+        production_root / "production",
+        "fixture.reel",
+    )
+    initial_head = workflows.head_revision()
+    artifact_verifications = 0
+    original_verify = ObjectStore.verify
+
+    def counting_verify(self: ObjectStore, ref: BlobRef) -> None:
+        nonlocal artifact_verifications
+        if ref == artifact:
+            artifact_verifications += 1
+        original_verify(self, ref)
+
+    monkeypatch.setattr(ObjectStore, "verify", counting_verify)
+    client = TestClient(create_app(manifest))
+    base = f"/api/v3/review/artifacts/{artifact.sha256}"
+
+    evidence = client.get(
+        f"{base}/evidence",
+        params={"size": artifact.size, "frame": 3, "width": 160},
+    )
+    assert evidence.status_code == 200
+    assert evidence.headers["content-type"].startswith("image/jpeg")
+    assert evidence.content.startswith(b"\xff\xd8")
+
+    cropped = client.get(
+        f"{base}/evidence",
+        params={
+            "size": artifact.size,
+            "frame": 3,
+            "width": 160,
+            "x_milli": 100,
+            "y_milli": 200,
+            "width_milli": 300,
+            "height_milli": 150,
+        },
+    )
+    assert cropped.status_code == 200
+    assert cropped.content != evidence.content
+
+    waveform = client.get(
+        f"{base}/waveform",
+        params={"size": artifact.size, "samples": 256},
+    )
+    assert waveform.status_code == 200
+    payload = waveform.json()
+    assert payload["artifact"] == artifact.as_payload()
+    assert payload["duration_ns"] == 200_000_000
+    assert payload["sample_count"] == 256
+    assert payload["has_audio"] is True
+    assert len(payload["peaks_milli"]) == 256
+    assert all(0 <= value <= 1000 for value in payload["peaks_milli"])
+
+    assert client.get(
+        f"{base}/evidence",
+        params={"size": artifact.size, "frame": 6, "width": 160},
+    ).status_code == 409
+    assert client.get(
+        f"{base}/evidence",
+        params={
+            "size": artifact.size,
+            "frame": 0,
+            "width": 160,
+            "x_milli": 100,
+        },
+    ).status_code == 422
+    assert client.get(
+        f"{base}/evidence",
+        params={"size": artifact.size, "frame": 0, "width": 63},
+    ).status_code == 422
+    assert client.get(
+        f"{base}/waveform",
+        params={"size": artifact.size, "samples": 255},
+    ).status_code == 422
+
+    unrelated = repository.objects.put_bytes(b"not review media")
+    assert client.get(
+        f"/api/v3/review/artifacts/{unrelated.sha256}/evidence",
+        params={"size": unrelated.size, "frame": 0, "width": 160},
+    ).status_code == 409
+    assert client.get(
+        f"/api/v3/review/artifacts/{unrelated.sha256}/waveform",
+        params={"size": unrelated.size, "samples": 256},
+    ).status_code == 409
+
+    repeated = client.get(
+        f"{base}/evidence",
+        params={"size": artifact.size, "frame": 3, "width": 160},
+    )
+    assert repeated.status_code == 200
+    assert repeated.content == evidence.content
+    assert artifact_verifications == 1
+    assert workflows.head_revision() == initial_head
+    assert client.get("/api/v3/review/task-pack").status_code == 404
+
+    contexts = query_authorized_review_artifact_contexts(
+        workflows,
+        repository.objects,
+    )
+    assert len(contexts) == 1
+    assert contexts[0].artifact == artifact
+    assert contexts[0].timeline.as_payload() == client.get(
+        "/api/v3/review/context"
+    ).json()["timeline"]
+
+
+def test_historical_review_artifact_keeps_its_own_presentation_clock(
+    tmp_path: Path,
+) -> None:
+    from dlstudio.adapters.http import create_app
+
+    production_root = tmp_path / "historical-presentation"
+    production_root.mkdir()
+    manifest, artifact = _review_ready_production(
+        production_root / "production",
+        artifact_bytes=_review_media_bytes(production_root),
+    )
+    client = TestClient(create_app(manifest))
+    context = client.get("/api/v3/review/context").json()
+    payload = _changes_payload(
+        context=context,
+        end_frame_exclusive=6,
+        target_ids=["visual.000"],
+    )
+    payload["expected_latest_round"] = None
+    payload["resolutions"] = []
+    assert client.post("/api/v3/review", json=payload).status_code == 200
+
+    _invalidate_prepare(production_root / "production")
+    base = f"/api/v3/review/artifacts/{artifact.sha256}"
+    evidence = client.get(
+        f"{base}/evidence",
+        params={"size": artifact.size, "frame": 5, "width": 160},
+    )
+    waveform = client.get(
+        f"{base}/waveform",
+        params={"size": artifact.size, "samples": 256},
+    )
+
+    assert evidence.status_code == 200
+    assert evidence.content.startswith(b"\xff\xd8")
+    assert waveform.status_code == 200
+    assert waveform.json()["duration_ns"] == 200_000_000
+
+
+def test_review_artifact_rejects_ambiguous_historical_and_current_clocks(
+    tmp_path: Path,
+) -> None:
+    from dlstudio.adapters.http import create_app
+
+    production_root = tmp_path / "ambiguous-presentation"
+    manifest, artifact = _review_ready_production(production_root)
+    client = TestClient(create_app(manifest))
+    context = client.get("/api/v3/review/context").json()
+    payload = _changes_payload(
+        context=context,
+        end_frame_exclusive=6,
+        target_ids=["visual.000"],
+    )
+    payload["expected_latest_round"] = None
+    payload["resolutions"] = []
+    assert client.post("/api/v3/review", json=payload).status_code == 200
+
+    repository, _, workflows = open_local_repositories(
+        production_root,
+        "fixture.reel",
+    )
+    store = repository.objects
+    changed_timeline = TimelineIR(
+        production_id="fixture.reel",
+        width=64,
+        height=96,
+        fps_num=24,
+        fps_den=1,
+        duration_ns=250_000_000,
+        background="black",
+        visuals=(
+            VisualInstruction(
+                "solid",
+                0,
+                250_000_000,
+                0,
+                0,
+                0,
+                64,
+                96,
+                color="black",
+            ),
+        ),
+    )
+    changed_timeline_ref = store.put_bytes(changed_timeline.canonical_bytes())
+    policy_ref = store.put_bytes(b"changed policy")
+    report_ref = store.put_bytes(
+        CheckReport(
+            changed_timeline_ref,
+            policy_ref,
+            (),
+        ).canonical_bytes()
+    )
+    _save_stage(
+        workflows,
+        "prepare",
+        (
+            NamedRef("timeline", changed_timeline_ref),
+            NamedRef("check_policy", policy_ref),
+            NamedRef("check_report", report_ref),
+            NamedRef("constraints", store.put_bytes(b"changed constraints")),
+        ),
+        inputs=(NamedRef("authoring", store.put_bytes(b"changed authoring")),),
+        contract="fixture.prepare.v2",
+    )
+    _save_stage(
+        workflows,
+        "draft",
+        (NamedRef("artifact", store.put_bytes(b"changed draft")),),
+    )
+    _save_stage(
+        workflows,
+        "final",
+        (
+            NamedRef("artifact", artifact),
+            NamedRef("execution", store.put_bytes(b"changed execution")),
+            NamedRef("render_options", store.put_bytes(b"changed options")),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="ambiguous timeline contexts"):
+        query_authorized_review_artifact_contexts(workflows, store)
+    assert client.get(
+        f"/api/v3/review/artifacts/{artifact.sha256}",
+        params={"size": artifact.size},
+    ).status_code == 409
 
 
 def test_review_http_rejects_a_target_outside_the_selected_range(
