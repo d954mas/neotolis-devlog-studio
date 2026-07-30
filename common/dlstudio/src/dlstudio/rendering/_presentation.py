@@ -8,7 +8,6 @@ import math
 import os
 import struct
 import subprocess
-import sys
 import tempfile
 import time
 import uuid
@@ -17,6 +16,11 @@ from pathlib import Path
 from typing import BinaryIO, Mapping, Protocol
 
 from dlstudio.foundation.api import BlobRef, canonical_hash
+
+_MAX_PRESENTATION_OBJECT_BYTES = 16 * 1024 * 1024
+_MAX_FRAME_OUTPUT_HEIGHT = 1280
+_MAX_FRAME_OUTPUT_PIXELS = 640 * 1280
+_FFMPEG_TIMEOUT_SECONDS = 30.0
 
 
 class PresentationResolver(Protocol):
@@ -29,6 +33,69 @@ class PresentationToolFingerprint(Protocol):
     ffmpeg: str
 
     def as_payload(self) -> Mapping[str, object]: ...
+
+
+class ExecutionToolFingerprint(Protocol):
+    ffmpeg: str
+    ffmpeg_version: str
+    ffmpeg_build_sha256: str
+    ffmpeg_binary_sha256: str
+    runtime: str
+
+
+@dataclass(frozen=True, slots=True)
+class PresentationFingerprint:
+    """Tool identity isolated from the final-video render cache identity."""
+
+    ffmpeg: str
+    ffmpeg_version: str
+    ffmpeg_build_sha256: str
+    ffmpeg_binary_sha256: str
+    presentation_source_sha256: str
+    runtime: str
+    frame_contract: str = "ffmpeg-frame-jpeg-v1"
+    waveform_contract: str = "ffmpeg-final-mix-peak-v1"
+
+    def __post_init__(self) -> None:
+        BlobRef(self.ffmpeg_build_sha256, 0)
+        BlobRef(self.ffmpeg_binary_sha256, 0)
+        BlobRef(self.presentation_source_sha256, 0)
+
+    def as_payload(self) -> dict[str, str]:
+        return {
+            "ffmpeg_version": self.ffmpeg_version,
+            "ffmpeg_build_sha256": self.ffmpeg_build_sha256,
+            "ffmpeg_binary_sha256": self.ffmpeg_binary_sha256,
+            "presentation_source_sha256": self.presentation_source_sha256,
+            "runtime": self.runtime,
+            "frame_contract": self.frame_contract,
+            "waveform_contract": self.waveform_contract,
+        }
+
+    @classmethod
+    def from_execution(
+        cls,
+        execution: ExecutionToolFingerprint,
+        *,
+        presentation_source_sha256: str | None = None,
+    ) -> "PresentationFingerprint":
+        source_hash = presentation_source_sha256
+        if source_hash is None:
+            source_hash = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+        return cls(
+            ffmpeg=execution.ffmpeg,
+            ffmpeg_version=execution.ffmpeg_version,
+            ffmpeg_build_sha256=execution.ffmpeg_build_sha256,
+            ffmpeg_binary_sha256=execution.ffmpeg_binary_sha256,
+            presentation_source_sha256=source_hash,
+            runtime=execution.runtime,
+        )
+
+    @classmethod
+    def detect(cls, ffmpeg: str = "ffmpeg") -> "PresentationFingerprint":
+        from dlstudio.rendering.api import ExecutionFingerprint
+
+        return cls.from_execution(ExecutionFingerprint.detect(ffmpeg))
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,7 +116,7 @@ class PresentationCacheLimits:
 @dataclass(frozen=True, slots=True)
 class PresentationFileResult:
     blob: BlobRef
-    path: Path
+    content: bytes
     cache_key: str
     cache_hit: bool
     media_type: str
@@ -58,9 +125,9 @@ class PresentationFileResult:
 @dataclass(frozen=True, slots=True)
 class PresentationWaveformResult:
     blob: BlobRef
-    path: Path
     cache_key: str
     cache_hit: bool
+    has_audio: bool
     samples: tuple[int, ...]
 
 
@@ -72,6 +139,7 @@ class _CacheEntry:
     suffix: str
     media_type: str
     path: Path
+    content: bytes
 
 
 class _FileLease:
@@ -207,7 +275,18 @@ def _atomic_json(path: Path, payload: Mapping[str, object]) -> None:
 
 
 def _manifest_path(cache_root: Path, cache_key: str) -> Path:
+    BlobRef(cache_key, 0)
     return cache_root / "manifests" / f"{cache_key}.json"
+
+
+def _object_path(cache_root: Path, sha256: str, suffix: str) -> Path:
+    BlobRef(sha256, 0)
+    if suffix not in {"jpg", "json"}:
+        raise ValueError("invalid presentation cache suffix")
+    root = (cache_root / "objects").resolve()
+    candidate = (root / f"{sha256}.{suffix}").resolve()
+    candidate.relative_to(root)
+    return candidate
 
 
 def _read_manifest(
@@ -228,19 +307,33 @@ def _read_manifest(
         ):
             return None
         blob = BlobRef.from_payload(payload["blob"])
-        suffix = str(payload["suffix"])
-        if suffix not in {"jpg", "json"}:
+        if blob.size > _MAX_PRESENTATION_OBJECT_BYTES:
             return None
-        path = cache_root / "objects" / f"{blob.sha256}.{suffix}"
-        if not path.is_file() or _hash_file(path) != blob:
+        suffix = str(payload["suffix"])
+        media_type = str(payload["media_type"])
+        expected_format = {
+            "frame": ("jpg", "image/jpeg"),
+            "waveform": ("json", "application/json"),
+        }.get(kind)
+        if expected_format != (suffix, media_type):
+            return None
+        path = _object_path(cache_root, blob.sha256, suffix)
+        if not path.is_file() or path.stat().st_size != blob.size:
+            return None
+        content = path.read_bytes()
+        if (
+            BlobRef(hashlib.sha256(content).hexdigest(), len(content))
+            != blob
+        ):
             return None
         return _CacheEntry(
             cache_key=cache_key,
             kind=kind,
             blob=blob,
             suffix=suffix,
-            media_type=str(payload["media_type"]),
+            media_type=media_type,
             path=path,
+            content=content,
         )
     except (
         KeyError,
@@ -262,6 +355,7 @@ def _read_lru(cache_root: Path) -> dict[str, object]:
                 payload.get("schema") == "dlstudio.presentation_lru"
                 and payload.get("version") == 1
                 and type(payload.get("counter")) is int
+                and int(payload["counter"]) >= 0
                 and isinstance(entries, dict)
             ):
                 for key, value in entries.items():
@@ -269,11 +363,15 @@ def _read_lru(cache_root: Path) -> dict[str, object]:
                         not isinstance(key, str)
                         or not isinstance(value, dict)
                         or type(value.get("access")) is not int
+                        or int(value["access"]) < 0
                         or type(value.get("size")) is not int
+                        or int(value["size"]) < 0
                         or not isinstance(value.get("sha256"), str)
                         or value.get("suffix") not in {"jpg", "json"}
                     ):
                         raise ValueError("invalid presentation LRU entry")
+                    BlobRef(key, 0)
+                    BlobRef(str(value["sha256"]), int(value["size"]))
                 return payload
         except (
             KeyError,
@@ -323,16 +421,14 @@ def _delete_unreferenced_object(
         for value in entries.values()
     )
     if not referenced:
-        (cache_root / "objects" / f"{sha256}.{suffix}").unlink(
-            missing_ok=True
-        )
+        _object_path(cache_root, sha256, suffix).unlink(missing_ok=True)
 
 
 def _record_access(
     cache_root: Path,
     entry: _CacheEntry,
     limits: PresentationCacheLimits,
-) -> None:
+) -> bool:
     if entry.blob.size > limits.max_bytes:
         raise ValueError("presentation cache entry exceeds its byte limit")
     with _FileLease(cache_root / "locks" / "lru.lock"):
@@ -359,19 +455,59 @@ def _record_access(
             len(entries) > limits.max_entries
             or total_bytes() > limits.max_bytes
         ):
-            evicted_key, evicted = min(
-                entries.items(),
+            evicted_any = False
+            candidates = sorted(
+                (
+                    item
+                    for item in entries.items()
+                    if item[0] != entry.cache_key
+                ),
                 key=lambda item: (int(item[1]["access"]), item[0]),
             )
-            del entries[evicted_key]
-            _manifest_path(cache_root, evicted_key).unlink(missing_ok=True)
-            _delete_unreferenced_object(
-                cache_root,
-                str(evicted["sha256"]),
-                str(evicted["suffix"]),
-                entries,
+            for evicted_key, evicted in candidates:
+                victim_lock = _FileLease.open_lock(
+                    cache_root
+                    / "locks"
+                    / "keys"
+                    / f"{evicted_key}.lock"
+                )
+                if not _FileLease.try_lock(victim_lock):
+                    victim_lock.close()
+                    continue
+                try:
+                    del entries[evicted_key]
+                    _manifest_path(cache_root, evicted_key).unlink(
+                        missing_ok=True
+                    )
+                    _delete_unreferenced_object(
+                        cache_root,
+                        str(evicted["sha256"]),
+                        str(evicted["suffix"]),
+                        entries,
+                    )
+                finally:
+                    victim_lock.seek(0)
+                    _FileLease.unlock(victim_lock)
+                    victim_lock.close()
+                evicted_any = True
+                break
+            if evicted_any:
+                continue
+            current = entries.pop(entry.cache_key, None)
+            _manifest_path(cache_root, entry.cache_key).unlink(
+                missing_ok=True
             )
+            if isinstance(current, dict):
+                _delete_unreferenced_object(
+                    cache_root,
+                    str(current["sha256"]),
+                    str(current["suffix"]),
+                    entries,
+                )
+            _atomic_json(cache_root / "lru.json", payload)
+            return False
         _atomic_json(cache_root / "lru.json", payload)
+        return entry.cache_key in entries
 
 
 def _discard_entry(cache_root: Path, cache_key: str) -> None:
@@ -419,9 +555,13 @@ def _publish_entry(
     blob = _hash_file(stage)
     if blob.size == 0:
         raise RuntimeError("presentation extraction produced an empty result")
+    if blob.size > _MAX_PRESENTATION_OBJECT_BYTES:
+        raise RuntimeError("presentation extraction result is too large")
+    if blob.size > limits.max_bytes:
+        raise ValueError("presentation cache entry exceeds its byte limit")
     objects = cache_root / "objects"
     objects.mkdir(parents=True, exist_ok=True)
-    target = objects / f"{blob.sha256}.{suffix}"
+    target = _object_path(cache_root, blob.sha256, suffix)
     if target.is_file():
         if _hash_file(target) != blob:
             target.unlink()
@@ -437,6 +577,7 @@ def _publish_entry(
         suffix=suffix,
         media_type=media_type,
         path=target,
+        content=target.read_bytes(),
     )
     _atomic_json(
         _manifest_path(cache_root, cache_key),
@@ -458,7 +599,11 @@ def _verify_source(
     resolver: PresentationResolver,
     artifact: BlobRef,
 ) -> Path:
-    resolver.verify(artifact)
+    metadata_verifier = getattr(resolver, "verify_metadata", None)
+    if metadata_verifier is None:
+        resolver.verify(artifact)
+    else:
+        metadata_verifier(artifact)
     source = resolver.path_for(artifact)
     if not source.is_file() or source.stat().st_size != artifact.size:
         raise ValueError("presentation source is missing or changed")
@@ -501,10 +646,85 @@ def _validate_crop(
     return left, top, max(1, right - left), max(1, bottom - top)
 
 
+def _validate_output_shape(
+    width: int,
+    input_width: int,
+    input_height: int,
+) -> None:
+    output_height = math.ceil(width * input_height / input_width)
+    if output_height % 2:
+        output_height += 1
+    if (
+        output_height > _MAX_FRAME_OUTPUT_HEIGHT
+        or width * output_height > _MAX_FRAME_OUTPUT_PIXELS
+    ):
+        raise ValueError("presentation output dimensions exceed their limit")
+
+
+def _frame_timestamp(frame: int, fps_num: int, fps_den: int) -> str:
+    nanoseconds = frame * fps_den * 1_000_000_000 // fps_num
+    seconds, remainder = divmod(nanoseconds, 1_000_000_000)
+    return f"{seconds}.{remainder:09d}"
+
+
+def _jpeg_dimensions(raw: bytes) -> tuple[int, int] | None:
+    if len(raw) < 4 or not raw.startswith(b"\xff\xd8"):
+        return None
+    position = 2
+    while position + 1 < len(raw):
+        if raw[position] != 0xFF:
+            position += 1
+            continue
+        while position < len(raw) and raw[position] == 0xFF:
+            position += 1
+        if position >= len(raw):
+            return None
+        marker = raw[position]
+        position += 1
+        if marker == 0xD9:
+            break
+        if marker in {0x01, *range(0xD0, 0xD8)}:
+            continue
+        if position + 2 > len(raw):
+            return None
+        segment_length = int.from_bytes(raw[position : position + 2], "big")
+        if segment_length < 2 or position + segment_length > len(raw):
+            return None
+        if marker in {
+            0xC0,
+            0xC1,
+            0xC2,
+            0xC3,
+            0xC5,
+            0xC6,
+            0xC7,
+            0xC9,
+            0xCA,
+            0xCB,
+            0xCD,
+            0xCE,
+            0xCF,
+        }:
+            if segment_length < 7:
+                return None
+            height = int.from_bytes(
+                raw[position + 3 : position + 5], "big"
+            )
+            width = int.from_bytes(
+                raw[position + 5 : position + 7], "big"
+            )
+            return None if width <= 0 or height <= 0 else (width, height)
+        if marker == 0xDA:
+            break
+        position += segment_length
+    return None
+
+
 def _frame_cache_key(
     artifact: BlobRef,
     *,
     frame: int,
+    duration_ns: int,
     fps_num: int,
     fps_den: int,
     source_width: int,
@@ -518,6 +738,7 @@ def _frame_cache_key(
             "kind": "frame",
             "artifact": artifact.as_payload(),
             "frame": frame,
+            "duration_ns": duration_ns,
             "fps_num": fps_num,
             "fps_den": fps_den,
             "source_width": source_width,
@@ -537,6 +758,7 @@ def extract_presentation_frame(
     resolver: PresentationResolver,
     *,
     frame: int,
+    duration_ns: int,
     fps_num: int,
     fps_den: int,
     source_width: int,
@@ -551,12 +773,21 @@ def extract_presentation_frame(
         raise ValueError("presentation frame width must be 64..640")
     if frame < 0 or fps_num <= 0 or fps_den <= 0:
         raise ValueError("presentation frame is invalid")
+    if frame >= _frame_count(duration_ns, fps_num, fps_den):
+        raise ValueError("presentation frame is outside the artifact context")
     crop_pixels = _validate_crop(crop_milli, source_width, source_height)
+    shape = (
+        (source_width, source_height)
+        if crop_pixels is None
+        else (crop_pixels[2], crop_pixels[3])
+    )
+    _validate_output_shape(width, shape[0], shape[1])
     source = _verify_source(resolver, artifact)
     cache_root = cache_root.resolve()
     cache_key = _frame_cache_key(
         artifact,
         frame=frame,
+        duration_ns=duration_ns,
         fps_num=fps_num,
         fps_den=fps_den,
         source_width=source_width,
@@ -570,7 +801,7 @@ def extract_presentation_frame(
         if cached is not None:
             return PresentationFileResult(
                 cached.blob,
-                cached.path,
+                cached.content,
                 cache_key,
                 True,
                 cached.media_type,
@@ -589,20 +820,21 @@ def extract_presentation_frame(
             if crop_pixels is not None:
                 left, top, crop_width, crop_height = crop_pixels
                 filters.append(
-                    f"crop={crop_width}:{crop_height}:{left}:{top}"
+                    f"crop={crop_width}:{crop_height}:{left}:{top}:exact=1"
                 )
             filters.append(f"scale={width}:-2:flags=lanczos")
-            seconds = frame * fps_den / fps_num
             command = [
                 fingerprint.ffmpeg,
                 "-hide_banner",
                 "-loglevel",
                 "error",
                 "-y",
+                "-ss",
+                _frame_timestamp(frame, fps_num, fps_den),
                 "-i",
                 str(source),
-                "-ss",
-                f"{seconds:.9f}",
+                "-map",
+                "0:v:0",
                 "-frames:v",
                 "1",
                 "-vf",
@@ -615,13 +847,13 @@ def extract_presentation_frame(
                 cache_root,
                 limits.max_concurrency,
             ):
-                subprocess.run(command, check=True)
+                subprocess.run(
+                    command,
+                    check=True,
+                    timeout=_FFMPEG_TIMEOUT_SECONDS,
+                )
             raw = stage.read_bytes()
-            if (
-                len(raw) < 4
-                or not raw.startswith(b"\xff\xd8")
-                or not raw.endswith(b"\xff\xd9")
-            ):
+            if not raw.endswith(b"\xff\xd9") or _jpeg_dimensions(raw) is None:
                 raise RuntimeError("FFmpeg produced invalid JPEG evidence")
             entry = _publish_entry(
                 cache_root,
@@ -634,7 +866,7 @@ def extract_presentation_frame(
             )
             return PresentationFileResult(
                 entry.blob,
-                entry.path,
+                entry.content,
                 cache_key,
                 False,
                 entry.media_type,
@@ -664,11 +896,15 @@ def _waveform_cache_key(
     )
 
 
-def _waveform_payload(samples: tuple[int, ...]) -> bytes:
+def _waveform_payload(
+    samples: tuple[int, ...],
+    has_audio: bool,
+) -> bytes:
     return json.dumps(
         {
             "schema": "dlstudio.presentation_waveform",
             "version": 1,
+            "has_audio": has_audio,
             "samples": list(samples),
         },
         sort_keys=True,
@@ -679,14 +915,16 @@ def _waveform_payload(samples: tuple[int, ...]) -> bytes:
 def _read_waveform(
     entry: _CacheEntry,
     sample_count: int,
-) -> tuple[int, ...] | None:
+) -> tuple[bool, tuple[int, ...]] | None:
     try:
-        payload = json.loads(entry.path.read_text(encoding="utf-8"))
+        payload = json.loads(entry.content)
         values = payload["samples"]
+        has_audio = payload["has_audio"]
         if (
             payload.get("schema") != "dlstudio.presentation_waveform"
             or payload.get("version") != 1
             or not isinstance(values, list)
+            or type(has_audio) is not bool
             or len(values) != sample_count
             or any(
                 type(value) is not int or not 0 <= value <= 1000
@@ -694,7 +932,10 @@ def _read_waveform(
             )
         ):
             return None
-        return tuple(values)
+        samples = tuple(values)
+        if has_audio != any(samples):
+            return None
+        return has_audio, samples
     except (
         KeyError,
         OSError,
@@ -748,13 +989,14 @@ def extract_presentation_waveform(
     with _FileLease(cache_root / "locks" / "keys" / f"{cache_key}.lock"):
         cached = _load_entry(cache_root, cache_key, "waveform", limits)
         if cached is not None:
-            samples = _read_waveform(cached, sample_count)
-            if samples is not None:
+            cached_waveform = _read_waveform(cached, sample_count)
+            if cached_waveform is not None:
+                has_audio, samples = cached_waveform
                 return PresentationWaveformResult(
                     cached.blob,
-                    cached.path,
                     cache_key,
                     True,
+                    has_audio,
                     samples,
                 )
             _discard_entry(cache_root, cache_key)
@@ -787,7 +1029,7 @@ def extract_presentation_waveform(
                 "-i",
                 str(source),
                 "-map",
-                "0:a:0?",
+                "0:a:0",
                 "-vn",
                 "-ac",
                 "1",
@@ -803,9 +1045,14 @@ def extract_presentation_waveform(
                 cache_root,
                 limits.max_concurrency,
             ):
-                subprocess.run(command, check=True)
+                subprocess.run(
+                    command,
+                    check=True,
+                    timeout=_FFMPEG_TIMEOUT_SECONDS,
+                )
             samples = _envelope(pcm.read_bytes(), sample_count)
-            json_stage.write_bytes(_waveform_payload(samples))
+            has_audio = any(samples)
+            json_stage.write_bytes(_waveform_payload(samples, has_audio))
             entry = _publish_entry(
                 cache_root,
                 cache_key,
@@ -817,9 +1064,9 @@ def extract_presentation_waveform(
             )
             return PresentationWaveformResult(
                 entry.blob,
-                entry.path,
                 cache_key,
                 False,
+                has_audio,
                 samples,
             )
         finally:

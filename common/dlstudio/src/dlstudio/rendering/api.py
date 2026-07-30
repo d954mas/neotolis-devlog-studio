@@ -981,6 +981,7 @@ def render(
 from dlstudio.rendering._presentation import (  # noqa: E402
     PresentationCacheLimits,
     PresentationFileResult,
+    PresentationFingerprint,
     PresentationWaveformResult,
     extract_presentation_frame,
     extract_presentation_waveform,
