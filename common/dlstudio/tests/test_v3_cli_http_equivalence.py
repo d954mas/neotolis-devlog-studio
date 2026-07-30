@@ -111,6 +111,9 @@ def test_openapi_has_no_path_file_or_job_queue_surface(tmp_path: Path) -> None:
         "/api/v3/status",
         "/api/v3/advance",
         "/api/v3/review",
+        "/api/v3/review/context",
+        "/api/v3/review/current",
+        "/api/v3/review/artifacts/{sha256}",
         "/api/v3/deliver",
         "/api/v3/blobs/{sha256}",
     }

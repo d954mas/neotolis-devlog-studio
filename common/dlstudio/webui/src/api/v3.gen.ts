@@ -72,6 +72,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v3/review/artifacts/{sha256}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Review Artifact */
+        get: operations["getReviewArtifact"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v3/review/context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Review Context */
+        get: operations["getReviewContext"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v3/review/current": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Current Review */
+        get: operations["getCurrentReview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v3/status": {
         parameters: {
             query?: never;
@@ -93,7 +144,10 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** BlobRef */
+        /**
+         * BlobRef
+         * @description Exact identity of immutable bytes in an object store.
+         */
         BlobRef: {
             /** Sha256 */
             sha256: string;
@@ -138,10 +192,30 @@ export interface components {
             /** Path */
             path: string;
         };
-        /** ReviewFindingBody */
-        ReviewFindingBody: {
+        /** ReviewContext */
+        ReviewContext: {
+            artifact: components["schemas"]["BlobRef"];
+            check_report: components["schemas"]["BlobRef"];
+            constraints: components["schemas"]["BlobRef"];
+            /** Duration Ns */
+            duration_ns: number;
+            /** Fps Den */
+            fps_den: number;
+            /** Fps Num */
+            fps_num: number;
+            /** Height */
+            height: number;
+            /** Items */
+            items: components["schemas"]["ReviewTimelineItem"][];
+            timeline: components["schemas"]["BlobRef"];
+            /** Width */
+            width: number;
+        };
+        /** ReviewFinding */
+        ReviewFinding: {
             /** Finding Id */
             finding_id: string;
+            locator?: components["schemas"]["ReviewLocator"] | null;
             /**
              * Requires Change
              * @default false
@@ -150,8 +224,124 @@ export interface components {
             /** Text */
             text: string;
         };
+        /** ReviewFindingBody */
+        ReviewFindingBody: {
+            /** Finding Id */
+            finding_id: string;
+            locator?: components["schemas"]["ReviewLocatorBody"] | null;
+            /**
+             * Requires Change
+             * @default false
+             */
+            requires_change: boolean;
+            /** Text */
+            text: string;
+        };
+        /**
+         * ReviewLocator
+         * @description Frame-accurate location plus optional spatial and timeline targets.
+         */
+        ReviewLocator: {
+            /** End Frame Exclusive */
+            end_frame_exclusive: number;
+            region?: components["schemas"]["ReviewRegion"] | null;
+            /** Start Frame */
+            start_frame: number;
+            /**
+             * Target Ids
+             * @default []
+             */
+            target_ids: string[];
+        };
+        /** ReviewLocatorBody */
+        ReviewLocatorBody: {
+            /** End Frame Exclusive */
+            end_frame_exclusive: number;
+            region?: components["schemas"]["ReviewRegionBody"] | null;
+            /** Start Frame */
+            start_frame: number;
+            /** Target Ids */
+            target_ids?: string[];
+        };
+        /**
+         * ReviewRegion
+         * @description Normalized 0..1000 rectangle inside the reviewed frame.
+         */
+        ReviewRegion: {
+            /** Height Milli */
+            height_milli: number;
+            /** Width Milli */
+            width_milli: number;
+            /** X Milli */
+            x_milli: number;
+            /** Y Milli */
+            y_milli: number;
+        };
+        /** ReviewRegionBody */
+        ReviewRegionBody: {
+            /** Height Milli */
+            height_milli: number;
+            /** Width Milli */
+            width_milli: number;
+            /** X Milli */
+            x_milli: number;
+            /** Y Milli */
+            y_milli: number;
+        };
+        /** ReviewTimelineItem */
+        ReviewTimelineItem: {
+            /** Duration Ns */
+            duration_ns: number;
+            /** Item Id */
+            item_id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "visual" | "audio" | "transition";
+            /** Label */
+            label: string;
+            /** Lane */
+            lane: string;
+            /** Start Ns */
+            start_ns: number;
+            /** Z */
+            z?: number | null;
+        };
+        /** ReviewVerdict */
+        ReviewVerdict: {
+            artifact: components["schemas"]["BlobRef"];
+            check_report: components["schemas"]["BlobRef"];
+            constraints: components["schemas"]["BlobRef"];
+            /**
+             * Evidence
+             * @default []
+             */
+            evidence: components["schemas"]["BlobRef"][];
+            /**
+             * Findings
+             * @default []
+             */
+            findings: components["schemas"]["ReviewFinding"][];
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "pass" | "changes_requested" | "block";
+            review_pack?: components["schemas"]["BlobRef"] | null;
+            /** Reviewed At */
+            reviewed_at: string;
+            /** Reviewer */
+            reviewer: string;
+            /** Scope */
+            scope: string[];
+        };
         /** ReviewVerdictBody */
         ReviewVerdictBody: {
+            expected_artifact: components["schemas"]["BlobRef"];
+            expected_check_report: components["schemas"]["BlobRef"];
+            expected_constraints: components["schemas"]["BlobRef"];
+            expected_timeline: components["schemas"]["BlobRef"];
             /** Findings */
             findings: components["schemas"]["ReviewFindingBody"][];
             /**
@@ -193,6 +383,10 @@ export interface components {
         };
         /** ValidationError */
         ValidationError: {
+            /** Context */
+            ctx?: Record<string, never>;
+            /** Input */
+            input?: unknown;
             /** Location */
             loc: (string | number)[];
             /** Message */
@@ -224,7 +418,10 @@ export interface components {
             /** Run Id */
             run_id: string;
         };
-        /** WorkflowStatus */
+        /**
+         * WorkflowStatus
+         * @description Read-only application projection shared by every adapter.
+         */
         WorkflowStatus: {
             /** Action */
             action: ("advance" | "review" | "deliver") | null;
@@ -362,6 +559,79 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getReviewArtifact: {
+        parameters: {
+            query: {
+                size: number;
+            };
+            header?: never;
+            path: {
+                sha256: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "video/mp4": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getReviewContext: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewContext"];
+                };
+            };
+        };
+    };
+    getCurrentReview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewVerdict"];
                 };
             };
         };

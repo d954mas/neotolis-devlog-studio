@@ -166,7 +166,18 @@ media и не запускает subprocess.
 - final artifact;
 - check report;
 - constraints;
-- review scope и findings.
+- review scope и findings;
+- для локализованного finding — полуоткрытый диапазон кадров
+  `[start_frame, end_frame_exclusive)`, optional region `0..1000` и IDs
+  элементов exact `TimelineIR`.
+
+Review UI — read-only проекция, а не второй монтажный runtime. Он показывает
+exact final video, filmstrip, визуальные слои, переходы и audio roles из
+`TimelineIR`, но не меняет authoring или timeline. Черновики до submit могут
+жить локально в браузере; canonical фактом они становятся только внутри
+`ReviewVerdict`. Поэтому review не входит в render cache key и не инвалидирует
+рендер. После изменения authoring создаются новый TimelineIR и новый artifact,
+а старые координаты не перепривязываются к ним молча.
 
 `package` повторно загружает canonical records из object store и создаёт
 `ReleaseCandidate` только после проверки полной closure. Candidate включает

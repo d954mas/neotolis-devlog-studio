@@ -85,7 +85,9 @@ store. Authoring не содержит approval, license или migration eviden
 - текущий stage;
 - последний failure, если он есть;
 - одно следующее действие;
-- exact review form только на review;
+- exact review workspace только на review: video/filmstrip, покадровый шаг,
+  read-only слои/переходы/звук, комментарий к кадру или диапазону и optional
+  область в кадре;
 - destination form только на delivery.
 
 `Advance workflow` выполняет один автоматический этап. После ошибки исправьте
@@ -181,12 +183,19 @@ authoring, asset revision/evidence, verdict или destination condition, зат
 GET  /api/v3/status
 POST /api/v3/advance
 POST /api/v3/review
+GET  /api/v3/review/context
+GET  /api/v3/review/current
+GET  /api/v3/review/artifacts/{sha256}?size=<bytes>
 POST /api/v3/deliver
 GET  /api/v3/blobs/{sha256}?size=<bytes>
 ```
 
 UI использует generated client из `common/dlstudio/webui/src/api/v3.gen.ts`.
 CLI и HTTP возвращают одну `WorkflowStatus` projection.
+
+`review/context` — read-only проекция exact final artifact и `TimelineIR`;
+artifact endpoint допускает HTTP Range для seek. `review/current` возвращает
+exact submitted verdict, чтобы агент мог забрать структурированный feedback.
 
 ## 8. Проверка разработки
 

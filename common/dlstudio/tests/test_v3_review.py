@@ -9,6 +9,8 @@ from dlstudio.review.api import (
     REVIEW_PACK_MAX_BYTES,
     REVIEW_PACK_MAX_ITEMS,
     ReviewFinding,
+    ReviewLocator,
+    ReviewRegion,
     ReviewVerdict,
     build_review_pack,
 )
@@ -46,7 +48,17 @@ def test_verdict_round_trip_binds_policy_snapshot_and_exact_artifact() -> None:
 
 
 def test_required_findings_are_the_change_requests() -> None:
-    finding = ReviewFinding("safe.zone", "Move the title down.", True)
+    finding = ReviewFinding(
+        "safe.zone",
+        "Move the title down.",
+        True,
+        ReviewLocator(
+            120,
+            121,
+            ReviewRegion(100, 200, 400, 180),
+            ("visual.002",),
+        ),
+    )
     verdict = _verdict(
         outcome="changes_requested",
         findings=(finding,),
@@ -54,6 +66,23 @@ def test_required_findings_are_the_change_requests() -> None:
     assert verdict.findings == (finding,)
     with pytest.raises(ValueError, match="cannot require"):
         _verdict(findings=(finding,))
+
+
+def test_review_locator_supports_exact_frames_ranges_and_regions() -> None:
+    frame = ReviewLocator(42, 43)
+    time_range = ReviewLocator(
+        42,
+        75,
+        ReviewRegion(10, 20, 300, 400),
+        ("visual.003", "audio.001", "visual.003"),
+    )
+    assert frame.is_frame
+    assert not time_range.is_frame
+    assert time_range.target_ids == ("audio.001", "visual.003")
+    with pytest.raises(ValueError, match="frame range"):
+        ReviewLocator(12, 12)
+    with pytest.raises(ValueError, match="exceeds"):
+        ReviewRegion(900, 0, 101, 100)
 
 
 def test_simple_review_does_not_require_pack_or_roles() -> None:

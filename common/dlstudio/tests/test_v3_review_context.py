@@ -1,0 +1,118 @@
+from __future__ import annotations
+
+from dlstudio.application.review import query_review_context
+from dlstudio.foundation.api import BlobRef
+from dlstudio.timeline.api import (
+    CheckReport,
+    TimelineIR,
+    VideoFadeInstruction,
+    VisualInstruction,
+)
+from dlstudio.workflow.api import NamedRef, WorkflowRun
+
+
+class _Workflows:
+    def __init__(self, workflow: WorkflowRun) -> None:
+        self.workflow = workflow
+
+    def read_current(self) -> WorkflowRun:
+        return self.workflow
+
+
+class _Store:
+    def __init__(self, timeline: TimelineIR, report: CheckReport) -> None:
+        self.timeline = timeline
+        self.report = report
+
+    def read(self, ref: BlobRef) -> bytes:
+        if ref == self.timeline.ref:
+            return self.timeline.canonical_bytes()
+        assert ref == self.report.ref
+        return self.report.canonical_bytes()
+
+
+def _succeed(
+    workflow: WorkflowRun,
+    stage: str,
+    inputs: tuple[NamedRef, ...],
+    outputs: tuple[NamedRef, ...],
+) -> WorkflowRun:
+    running = workflow.start(stage, inputs, contract=f"fixture.{stage}.v1")
+    return running.succeed(running.attempts[-1].operation_id, outputs)
+
+
+def test_review_context_projects_exact_artifact_and_timeline_lanes() -> None:
+    timeline = TimelineIR(
+        production_id="fixture.reel",
+        width=1080,
+        height=1920,
+        fps_num=30,
+        fps_den=1,
+        duration_ns=2_000_000_000,
+        background="black",
+        visuals=(
+            VisualInstruction(
+                "solid",
+                0,
+                2_000_000_000,
+                0,
+                0,
+                0,
+                1080,
+                1920,
+                color="black",
+                fade_out_ns=100_000_000,
+            ),
+        ),
+        video_fades=(VideoFadeInstruction("out", 1_800_000_000, 200_000_000),),
+    )
+    artifact = BlobRef("a" * 64, 123)
+    execution = BlobRef("b" * 64, 10)
+    options = BlobRef("c" * 64, 11)
+    policy = BlobRef("d" * 64, 12)
+    report = CheckReport(timeline.ref, policy, ())
+    constraints = BlobRef("f" * 64, 14)
+    workflow = WorkflowRun("run.main", "fixture.reel", "reel")
+    workflow = _succeed(
+        workflow,
+        "prepare",
+        (NamedRef("timeline", timeline.ref),),
+        (
+            NamedRef("timeline", timeline.ref),
+            NamedRef("check_policy", policy),
+            NamedRef("check_report", report.ref),
+            NamedRef("constraints", constraints),
+        ),
+    )
+    workflow = _succeed(
+        workflow,
+        "draft",
+        (NamedRef("timeline", timeline.ref),),
+        (NamedRef("artifact", BlobRef("1" * 64, 100)),),
+    )
+    workflow = _succeed(
+        workflow,
+        "final",
+        (NamedRef("timeline", timeline.ref),),
+        (
+            NamedRef("artifact", artifact),
+            NamedRef("execution", execution),
+            NamedRef("render_options", options),
+        ),
+    )
+
+    context = query_review_context(  # type: ignore[arg-type]
+        _Workflows(workflow),
+        _Store(timeline, report),
+    )
+
+    assert context.artifact == artifact
+    assert context.timeline == timeline.ref
+    assert context.check_report == report.ref
+    assert context.constraints == constraints
+    assert context.fps_num == 30
+    assert [(item.item_id, item.lane) for item in context.items] == [
+        ("visual.000", "layer.0"),
+        ("transition.fade.000", "transitions"),
+        ("transition.fadeout.000", "transitions"),
+    ]

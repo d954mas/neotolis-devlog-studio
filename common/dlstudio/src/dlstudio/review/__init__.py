@@ -1,5 +1,15 @@
 """Exact-artifact review records."""
 
-from .api import ReviewFinding, ReviewVerdict
+from .api import (
+    ReviewFinding,
+    ReviewLocator,
+    ReviewRegion,
+    ReviewVerdict,
+)
 
-__all__ = ["ReviewFinding", "ReviewVerdict"]
+__all__ = [
+    "ReviewFinding",
+    "ReviewLocator",
+    "ReviewRegion",
+    "ReviewVerdict",
+]

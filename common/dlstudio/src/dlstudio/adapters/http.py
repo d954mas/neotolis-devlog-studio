@@ -10,16 +10,21 @@ from fastapi import FastAPI, Path as PathParam, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from dlstudio.application.api import (
     advance_production,
+    BlobRef,
     CasConflict,
     CorruptObject,
     DeliveryReceipt,
     deliver_local,
     project_status,
+    query_current_review,
+    query_review_context,
     query_status,
+    ReviewContext,
+    ReviewVerdict,
     resolve_blob,
     submit_review_payload,
     StudioError,
@@ -35,13 +40,32 @@ class _Body(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ReviewRegionBody(_Body):
+    x_milli: int
+    y_milli: int
+    width_milli: int
+    height_milli: int
+
+
+class ReviewLocatorBody(_Body):
+    start_frame: int
+    end_frame_exclusive: int
+    region: ReviewRegionBody | None = None
+    target_ids: list[str] = Field(default_factory=list)
+
+
 class ReviewFindingBody(_Body):
     finding_id: str
     text: str
     requires_change: bool = False
+    locator: ReviewLocatorBody | None = None
 
 
 class ReviewVerdictBody(_Body):
+    expected_artifact: BlobRef
+    expected_timeline: BlobRef
+    expected_check_report: BlobRef
+    expected_constraints: BlobRef
     outcome: Literal["pass", "changes_requested", "block"]
     scope: list[str]
     reviewer: str
@@ -74,6 +98,7 @@ def create_app(manifest_path: str | Path) -> FastAPI:
 
     production = load_local_production(manifest_path)
     app = FastAPI(title="DLStudio v3", version="3.0.0")
+    verified_review_artifacts: set[tuple[str, int]] = set()
     app.add_middleware(
         TrustedHostMiddleware,
         allowed_hosts=sorted(_LOCAL_HOSTS),
@@ -131,9 +156,70 @@ def create_app(manifest_path: str | Path) -> FastAPI:
 
     @app.post("/api/v3/review", operation_id="submitReview")
     def review(body: ReviewVerdictBody) -> WorkflowStatus:
-        return project_status(
-            submit_review_payload(production.workflows, body.model_dump())
+        payload = body.model_dump(
+            exclude={
+                "expected_artifact",
+                "expected_timeline",
+                "expected_check_report",
+                "expected_constraints",
+            }
         )
+        return project_status(
+            submit_review_payload(
+                production.workflows,
+                payload,
+                production.repository.objects,
+                expected_artifact=body.expected_artifact,
+                expected_timeline=body.expected_timeline,
+                expected_check_report=body.expected_check_report,
+                expected_constraints=body.expected_constraints,
+            )
+        )
+
+    @app.get("/api/v3/review/context", operation_id="getReviewContext")
+    def review_context() -> ReviewContext:
+        return query_review_context(
+            production.workflows,
+            production.repository.objects,
+        )
+
+    @app.get("/api/v3/review/current", operation_id="getCurrentReview")
+    def current_review() -> ReviewVerdict:
+        return query_current_review(
+            production.workflows,
+            production.repository.objects,
+        )
+
+    @app.get(
+        "/api/v3/review/artifacts/{sha256}",
+        operation_id="getReviewArtifact",
+        response_class=Response,
+        responses={200: {"content": {"video/mp4": {}}}},
+    )
+    def review_artifact(
+        sha256: str = PathParam(pattern=r"^[0-9a-f]{64}$"),
+        size: int = Query(gt=0),
+    ) -> FileResponse:
+        context = query_review_context(
+            production.workflows,
+            production.repository.objects,
+        )
+        if (
+            context.artifact.sha256 != sha256
+            or context.artifact.size != size
+        ):
+            raise ValueError("review artifact is stale")
+        artifact_key = (sha256, size)
+        if artifact_key not in verified_review_artifacts:
+            source = resolve_blob(
+                production.repository.objects,
+                sha256,
+                size,
+            )
+            verified_review_artifacts.add(artifact_key)
+        else:
+            source = production.repository.objects.path_for(context.artifact)
+        return FileResponse(source, media_type="video/mp4")
 
     @app.post("/api/v3/deliver", operation_id="deliverProduction")
     def deliver(body: DeliveryBody) -> DeliveryResponse:

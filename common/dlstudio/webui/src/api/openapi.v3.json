@@ -2,6 +2,7 @@
   "components": {
     "schemas": {
       "BlobRef": {
+        "description": "Exact identity of immutable bytes in an object store.",
         "properties": {
           "sha256": {
             "title": "Sha256",
@@ -128,12 +129,112 @@
         "title": "PackageFile",
         "type": "object"
       },
+      "ReviewContext": {
+        "properties": {
+          "artifact": {
+            "$ref": "#/components/schemas/BlobRef"
+          },
+          "check_report": {
+            "$ref": "#/components/schemas/BlobRef"
+          },
+          "constraints": {
+            "$ref": "#/components/schemas/BlobRef"
+          },
+          "duration_ns": {
+            "title": "Duration Ns",
+            "type": "integer"
+          },
+          "fps_den": {
+            "title": "Fps Den",
+            "type": "integer"
+          },
+          "fps_num": {
+            "title": "Fps Num",
+            "type": "integer"
+          },
+          "height": {
+            "title": "Height",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewTimelineItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "timeline": {
+            "$ref": "#/components/schemas/BlobRef"
+          },
+          "width": {
+            "title": "Width",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "artifact",
+          "timeline",
+          "check_report",
+          "constraints",
+          "width",
+          "height",
+          "fps_num",
+          "fps_den",
+          "duration_ns",
+          "items"
+        ],
+        "title": "ReviewContext",
+        "type": "object"
+      },
+      "ReviewFinding": {
+        "properties": {
+          "finding_id": {
+            "title": "Finding Id",
+            "type": "string"
+          },
+          "locator": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewLocator"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requires_change": {
+            "default": false,
+            "title": "Requires Change",
+            "type": "boolean"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "finding_id",
+          "text"
+        ],
+        "title": "ReviewFinding",
+        "type": "object"
+      },
       "ReviewFindingBody": {
         "additionalProperties": false,
         "properties": {
           "finding_id": {
             "title": "Finding Id",
             "type": "string"
+          },
+          "locator": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewLocatorBody"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "requires_change": {
             "default": false,
@@ -152,9 +253,280 @@
         "title": "ReviewFindingBody",
         "type": "object"
       },
+      "ReviewLocator": {
+        "description": "Frame-accurate location plus optional spatial and timeline targets.",
+        "properties": {
+          "end_frame_exclusive": {
+            "title": "End Frame Exclusive",
+            "type": "integer"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewRegion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "start_frame": {
+            "title": "Start Frame",
+            "type": "integer"
+          },
+          "target_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Target Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "start_frame",
+          "end_frame_exclusive"
+        ],
+        "title": "ReviewLocator",
+        "type": "object"
+      },
+      "ReviewLocatorBody": {
+        "additionalProperties": false,
+        "properties": {
+          "end_frame_exclusive": {
+            "title": "End Frame Exclusive",
+            "type": "integer"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewRegionBody"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "start_frame": {
+            "title": "Start Frame",
+            "type": "integer"
+          },
+          "target_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Target Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "start_frame",
+          "end_frame_exclusive"
+        ],
+        "title": "ReviewLocatorBody",
+        "type": "object"
+      },
+      "ReviewRegion": {
+        "description": "Normalized 0..1000 rectangle inside the reviewed frame.",
+        "properties": {
+          "height_milli": {
+            "title": "Height Milli",
+            "type": "integer"
+          },
+          "width_milli": {
+            "title": "Width Milli",
+            "type": "integer"
+          },
+          "x_milli": {
+            "title": "X Milli",
+            "type": "integer"
+          },
+          "y_milli": {
+            "title": "Y Milli",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "x_milli",
+          "y_milli",
+          "width_milli",
+          "height_milli"
+        ],
+        "title": "ReviewRegion",
+        "type": "object"
+      },
+      "ReviewRegionBody": {
+        "additionalProperties": false,
+        "properties": {
+          "height_milli": {
+            "title": "Height Milli",
+            "type": "integer"
+          },
+          "width_milli": {
+            "title": "Width Milli",
+            "type": "integer"
+          },
+          "x_milli": {
+            "title": "X Milli",
+            "type": "integer"
+          },
+          "y_milli": {
+            "title": "Y Milli",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "x_milli",
+          "y_milli",
+          "width_milli",
+          "height_milli"
+        ],
+        "title": "ReviewRegionBody",
+        "type": "object"
+      },
+      "ReviewTimelineItem": {
+        "properties": {
+          "duration_ns": {
+            "title": "Duration Ns",
+            "type": "integer"
+          },
+          "item_id": {
+            "title": "Item Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "visual",
+              "audio",
+              "transition"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "lane": {
+            "title": "Lane",
+            "type": "string"
+          },
+          "start_ns": {
+            "title": "Start Ns",
+            "type": "integer"
+          },
+          "z": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Z"
+          }
+        },
+        "required": [
+          "item_id",
+          "kind",
+          "lane",
+          "label",
+          "start_ns",
+          "duration_ns"
+        ],
+        "title": "ReviewTimelineItem",
+        "type": "object"
+      },
+      "ReviewVerdict": {
+        "properties": {
+          "artifact": {
+            "$ref": "#/components/schemas/BlobRef"
+          },
+          "check_report": {
+            "$ref": "#/components/schemas/BlobRef"
+          },
+          "constraints": {
+            "$ref": "#/components/schemas/BlobRef"
+          },
+          "evidence": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/BlobRef"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "findings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ReviewFinding"
+            },
+            "title": "Findings",
+            "type": "array"
+          },
+          "outcome": {
+            "enum": [
+              "pass",
+              "changes_requested",
+              "block"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "review_pack": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BlobRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reviewed_at": {
+            "title": "Reviewed At",
+            "type": "string"
+          },
+          "reviewer": {
+            "title": "Reviewer",
+            "type": "string"
+          },
+          "scope": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Scope",
+            "type": "array"
+          }
+        },
+        "required": [
+          "artifact",
+          "outcome",
+          "check_report",
+          "constraints",
+          "scope",
+          "reviewer",
+          "reviewed_at"
+        ],
+        "title": "ReviewVerdict",
+        "type": "object"
+      },
       "ReviewVerdictBody": {
         "additionalProperties": false,
         "properties": {
+          "expected_artifact": {
+            "$ref": "#/components/schemas/BlobRef"
+          },
+          "expected_check_report": {
+            "$ref": "#/components/schemas/BlobRef"
+          },
+          "expected_constraints": {
+            "$ref": "#/components/schemas/BlobRef"
+          },
+          "expected_timeline": {
+            "$ref": "#/components/schemas/BlobRef"
+          },
           "findings": {
             "items": {
               "$ref": "#/components/schemas/ReviewFindingBody"
@@ -188,6 +560,10 @@
           }
         },
         "required": [
+          "expected_artifact",
+          "expected_timeline",
+          "expected_check_report",
+          "expected_constraints",
           "outcome",
           "scope",
           "reviewer",
@@ -262,6 +638,13 @@
       },
       "ValidationError": {
         "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
           "loc": {
             "items": {
               "anyOf": [
@@ -355,6 +738,7 @@
         "type": "object"
       },
       "WorkflowStatus": {
+        "description": "Read-only application projection shared by every adapter.",
         "properties": {
           "action": {
             "anyOf": [
@@ -582,6 +966,88 @@
           }
         },
         "summary": "Review"
+      }
+    },
+    "/api/v3/review/artifacts/{sha256}": {
+      "get": {
+        "operationId": "getReviewArtifact",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sha256",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Sha256",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "video/mp4": {}
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review Artifact"
+      }
+    },
+    "/api/v3/review/context": {
+      "get": {
+        "operationId": "getReviewContext",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewContext"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Review Context"
+      }
+    },
+    "/api/v3/review/current": {
+      "get": {
+        "operationId": "getCurrentReview",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewVerdict"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Current Review"
       }
     },
     "/api/v3/status": {

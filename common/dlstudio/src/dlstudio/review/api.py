@@ -17,6 +17,98 @@ REVIEW_PACK_MAX_ITEMS = 12
 REVIEW_PACK_MAX_BYTES = 2 * 1024 * 1024
 
 
+@dataclass(frozen=True, slots=True)
+class ReviewRegion:
+    """Normalized 0..1000 rectangle inside the reviewed frame."""
+
+    x_milli: int
+    y_milli: int
+    width_milli: int
+    height_milli: int
+
+    def __post_init__(self) -> None:
+        if min(
+            self.x_milli,
+            self.y_milli,
+            self.width_milli,
+            self.height_milli,
+        ) < 0:
+            raise ValueError("review region cannot be negative")
+        if self.width_milli == 0 or self.height_milli == 0:
+            raise ValueError("review region must have positive area")
+        if (
+            self.x_milli + self.width_milli > 1000
+            or self.y_milli + self.height_milli > 1000
+        ):
+            raise ValueError("review region exceeds the frame")
+
+    def as_payload(self) -> dict[str, int]:
+        return {
+            "x_milli": self.x_milli,
+            "y_milli": self.y_milli,
+            "width_milli": self.width_milli,
+            "height_milli": self.height_milli,
+        }
+
+    @classmethod
+    def from_payload(cls, value: dict[str, Any]) -> "ReviewRegion":
+        return cls(
+            x_milli=int(value["x_milli"]),
+            y_milli=int(value["y_milli"]),
+            width_milli=int(value["width_milli"]),
+            height_milli=int(value["height_milli"]),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewLocator:
+    """Frame-accurate location plus optional spatial and timeline targets."""
+
+    start_frame: int
+    end_frame_exclusive: int
+    region: ReviewRegion | None = None
+    target_ids: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if (
+            self.start_frame < 0
+            or self.end_frame_exclusive <= self.start_frame
+        ):
+            raise ValueError("review frame range is invalid")
+        targets = tuple(sorted(set(self.target_ids)))
+        for target_id in targets:
+            DomainId(target_id)
+        object.__setattr__(self, "target_ids", targets)
+
+    @property
+    def is_frame(self) -> bool:
+        return self.end_frame_exclusive == self.start_frame + 1
+
+    def as_payload(self) -> dict[str, Any]:
+        return {
+            "start_frame": self.start_frame,
+            "end_frame_exclusive": self.end_frame_exclusive,
+            "region": (
+                None if self.region is None else self.region.as_payload()
+            ),
+            "target_ids": list(self.target_ids),
+        }
+
+    @classmethod
+    def from_payload(cls, value: dict[str, Any]) -> "ReviewLocator":
+        region = value.get("region")
+        return cls(
+            start_frame=int(value["start_frame"]),
+            end_frame_exclusive=int(value["end_frame_exclusive"]),
+            region=(
+                None
+                if region is None
+                else ReviewRegion.from_payload(region)
+            ),
+            target_ids=tuple(str(item) for item in value.get("target_ids", ())),
+        )
+
+
 def build_review_pack(
     artifact: BlobRef,
     evidence: tuple[BlobRef, ...],
@@ -48,6 +140,7 @@ class ReviewFinding:
     finding_id: str
     text: str
     requires_change: bool = False
+    locator: ReviewLocator | None = None
 
     def __post_init__(self) -> None:
         DomainId(self.finding_id)
@@ -59,6 +152,9 @@ class ReviewFinding:
             "finding_id": self.finding_id,
             "text": self.text,
             "requires_change": self.requires_change,
+            "locator": (
+                None if self.locator is None else self.locator.as_payload()
+            ),
         }
 
 
@@ -76,7 +172,7 @@ class ReviewVerdict:
     evidence: tuple[BlobRef, ...] = ()
 
     DOMAIN = "dlstudio.review_verdict"
-    VERSION = 2
+    VERSION = 3
 
     def __post_init__(self) -> None:
         DomainId(self.reviewer)
@@ -174,6 +270,11 @@ class ReviewVerdict:
                     str(item["finding_id"]),
                     str(item["text"]),
                     bool(item["requires_change"]),
+                    (
+                        None
+                        if item["locator"] is None
+                        else ReviewLocator.from_payload(item["locator"])
+                    ),
                 )
                 for item in payload["findings"]
             ),

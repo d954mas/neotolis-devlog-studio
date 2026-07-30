@@ -63,7 +63,11 @@ def main(argv: list[str] | None = None) -> int:
             if not isinstance(payload, dict):
                 raise ValueError("review verdict must be a JSON object")
             result = project_status(
-                submit_review_payload(production.workflows, payload)
+                submit_review_payload(
+                    production.workflows,
+                    payload,
+                    production.repository.objects,
+                )
             ).as_payload()
         elif args.command == "deliver":
             workflow, receipt = deliver_local(

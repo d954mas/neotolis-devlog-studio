@@ -6,14 +6,19 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 from dlstudio.constraints.api import ConstraintSet
-from dlstudio.foundation.api import BlobRef, canonical_bytes
+from dlstudio.foundation.api import BlobRef, CasConflict, canonical_bytes
 from dlstudio.release.api import PackageFile, ReleaseCandidate
 from dlstudio.rendering.api import (
     ExecutionFingerprint,
     RenderOptions,
     RenderResult,
 )
-from dlstudio.review.api import ReviewFinding, ReviewVerdict
+from dlstudio.review.api import (
+    ReviewFinding,
+    ReviewLocator,
+    ReviewRegion,
+    ReviewVerdict,
+)
 from dlstudio.timeline.api import (
     CheckPolicy,
     CheckReport,
@@ -29,6 +34,7 @@ from dlstudio.workflow.api import (
 )
 
 from .release import BlobStore, freeze_release
+from .review import query_review_context
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,28 +237,96 @@ def submit_review(
 def submit_review_payload(
     workflows: WorkflowStore,
     payload: Mapping[str, Any],
+    store: BlobStore,
+    *,
+    expected_artifact: BlobRef | None = None,
+    expected_timeline: BlobRef | None = None,
+    expected_check_report: BlobRef | None = None,
+    expected_constraints: BlobRef | None = None,
 ) -> WorkflowRun:
     """Create the exact verdict from a small transport-neutral review payload."""
 
     required = {"outcome", "scope", "reviewer", "reviewed_at", "findings"}
     if set(payload) != required:
         raise ValueError("review payload fields mismatch")
-    current = get_status(workflows)
-    prepared = _stage_outputs(current, "prepare")
-    finalized = _stage_outputs(current, "final")
+    expected = (
+        expected_artifact,
+        expected_timeline,
+        expected_check_report,
+        expected_constraints,
+    )
+    if any(item is not None for item in expected) and any(
+        item is None for item in expected
+    ):
+        raise ValueError("expected review context must be complete")
     findings = tuple(
         ReviewFinding(
             finding_id=str(item["finding_id"]),
             text=str(item["text"]),
             requires_change=bool(item.get("requires_change", False)),
+            locator=(
+                None
+                if item.get("locator") is None
+                else ReviewLocator(
+                    start_frame=int(item["locator"]["start_frame"]),
+                    end_frame_exclusive=int(
+                        item["locator"]["end_frame_exclusive"]
+                    ),
+                    region=(
+                        None
+                        if item["locator"].get("region") is None
+                        else ReviewRegion(
+                            x_milli=int(
+                                item["locator"]["region"]["x_milli"]
+                            ),
+                            y_milli=int(
+                                item["locator"]["region"]["y_milli"]
+                            ),
+                            width_milli=int(
+                                item["locator"]["region"]["width_milli"]
+                            ),
+                            height_milli=int(
+                                item["locator"]["region"]["height_milli"]
+                            ),
+                        )
+                    ),
+                    target_ids=tuple(
+                        str(target)
+                        for target in item["locator"].get("target_ids", ())
+                    ),
+                )
+            ),
         )
         for item in payload["findings"]
     )
+    context = query_review_context(workflows, store)
+    if expected_artifact is not None and expected != (
+        context.artifact,
+        context.timeline,
+        context.check_report,
+        context.constraints,
+    ):
+        raise CasConflict("review context changed; reload the exact artifact")
+    frame_count = (
+        context.duration_ns * context.fps_num
+        + 1_000_000_000 * context.fps_den
+        - 1
+    ) // (1_000_000_000 * context.fps_den)
+    target_ids = {item.item_id for item in context.items}
+    for finding in findings:
+        locator = finding.locator
+        if locator is None:
+            continue
+        if locator.end_frame_exclusive > frame_count:
+            raise ValueError("review locator exceeds the final artifact")
+        unknown = set(locator.target_ids) - target_ids
+        if unknown:
+            raise ValueError(f"review locator has unknown targets: {sorted(unknown)}")
     verdict = ReviewVerdict(
-        artifact=finalized["artifact"],
+        artifact=context.artifact,
         outcome=payload["outcome"],
-        check_report=prepared["check_report"],
-        constraints=prepared["constraints"],
+        check_report=context.check_report,
+        constraints=context.constraints,
         scope=tuple(str(item) for item in payload["scope"]),
         reviewer=str(payload["reviewer"]),
         reviewed_at=str(payload["reviewed_at"]),
