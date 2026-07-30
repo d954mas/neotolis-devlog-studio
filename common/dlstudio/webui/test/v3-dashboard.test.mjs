@@ -34,6 +34,22 @@ const frameStrip = await readFile(
   new URL("../src/review/FrameStrip.tsx", import.meta.url),
   "utf8",
 );
+const reviewTimeTrack = await readFile(
+  new URL("../src/review/ReviewTimeTrack.tsx", import.meta.url),
+  "utf8",
+);
+const useReviewWaveform = await readFile(
+  new URL("../src/review/useReviewWaveform.ts", import.meta.url),
+  "utf8",
+);
+const waveformShape = await readFile(
+  new URL("../src/review/WaveformShape.tsx", import.meta.url),
+  "utf8",
+);
+const findingRegionEvidence = await readFile(
+  new URL("../src/review/FindingRegionEvidence.tsx", import.meta.url),
+  "utf8",
+);
 const ui = [
   app,
   workflowDashboard,
@@ -43,6 +59,10 @@ const ui = [
   reviewNotes,
   previousFindingsReview,
   frameStrip,
+  reviewTimeTrack,
+  useReviewWaveform,
+  waveformShape,
+  findingRegionEvidence,
 ].join("\n");
 const http = await readFile(
   new URL("../../src/dlstudio/adapters/http.py", import.meta.url),
@@ -99,11 +119,13 @@ test("review surface captures exact frame, range, region and TimelineIR targets"
   assert.doesNotMatch(reviewWorkspace, /\bnsToFrame\(/);
   assert.match(reviewWorkspace, /studioV3\.GET\("\/api\/v3\/review\/context"\)/);
   assert.doesNotMatch(reviewWorkspace, /selectionMode|rangeAnchor|rangeEdge/);
-  assert.match(frameStrip, /onPointerDown={handlePointerDown}/);
-  assert.match(frameStrip, /onPointerMove={handlePointerMove}/);
-  assert.match(frameStrip, /setDragSelection/);
+  assert.match(reviewTimeTrack, /onPointerDown={handlePointerDown}/);
+  assert.match(reviewTimeTrack, /onPointerMove={handlePointerMove}/);
+  assert.match(reviewTimeTrack, /event\.button !== 0 \|\| !event\.isPrimary/);
+  assert.match(reviewTimeTrack, /onLostPointerCapture=/);
+  assert.match(reviewTimeTrack, /setDragSelection/);
   assert.match(frameStrip, /captureRequest/);
-  assert.match(frameStrip, /role="slider"/);
+  assert.match(reviewTimeTrack, /role="slider"/);
   assert.match(frameStrip, /aria-pressed={selected}/);
   assert.match(reviewPlayer, /onPointerDown={startRegion}/);
   assert.doesNotMatch(reviewPlayer, /setDrawing|selectionMode/);
@@ -117,6 +139,48 @@ test("review surface captures exact frame, range, region and TimelineIR targets"
   assert.doesNotMatch(reviewTimeline, /onToggleTarget/);
   assert.match(reviewNotes, /hasUnsavedNote/);
   assert.match(reviewNotes, /role="status"/);
+});
+
+test("presentation aids are exact, bounded, cached, and never become review facts", () => {
+  assert.match(
+    useReviewWaveform,
+    /studioV3\s*\.GET\("\/api\/v3\/review\/artifacts\/\{sha256\}\/waveform"/,
+  );
+  assert.match(useReviewWaveform, /sha256.*size.*sampleCount/s);
+  assert.match(useReviewWaveform, /waveformCache/);
+  assert.match(useReviewWaveform, /inFlight/);
+  assert.match(useReviewWaveform, /retry/);
+  assert.match(useReviewWaveform, /expectedDurationNs/);
+  assert.match(useReviewWaveform, /state\.key !== key/);
+  assert.match(waveformShape, /<path/);
+  assert.doesNotMatch(waveformShape, /\.map\([^)]*=>\s*<rect/);
+  assert.match(waveformShape, /aria-hidden="true"/);
+  assert.match(frameStrip, /reviewFrameEvidenceUrl/);
+  assert.doesNotMatch(frameStrip, /document\.createElement\("video"\)/);
+  assert.doesNotMatch(frameStrip, /canvas|toDataURL|drawImage/);
+  assert.match(reviewTimeTrack, /mode === "select"/);
+  assert.match(reviewTimeTrack, /mode === "seek"/);
+  assert.match(reviewTimeTrack, /version === "previous"/);
+  assert.match(reviewTimeTrack, /aria-describedby=/);
+  assert.match(reviewTimeTrack, /time-range-marker/);
+  assert.match(frameStrip, /failedFrames\.size > 0/);
+  assert.match(frameStrip, /frameRequestKey/);
+  assert.match(frameStrip, /currentRequestKey/);
+  assert.match(reviewPlayer, /<ReviewTimeTrack/);
+  assert.match(reviewPlayer, /mode="seek"/);
+  assert.match(findingRegionEvidence, /reviewFrameEvidenceUrl/);
+  assert.match(findingRegionEvidence, /loading="lazy"/);
+  assert.match(previousFindingsReview, /<FindingRegionEvidence/);
+  assert.match(previousFindingsReview, /key={finding\.finding_id}/);
+  assert.doesNotMatch(
+    [
+      reviewTimeTrack,
+      useReviewWaveform,
+      waveformShape,
+      findingRegionEvidence,
+    ].join("\n"),
+    /localStorage|ReviewVerdict|expected_artifact/,
+  );
 });
 
 test("repeat review compares the exact old artifact and marks only exceptions", () => {
@@ -143,6 +207,14 @@ test("repeat review compares the exact old artifact and marks only exceptions", 
   assert.match(reviewPlayer, /wasPlayingBeforeComparison/);
   assert.match(reviewPlayer, /activeVideo\.volume = currentVideo\.volume/);
   assert.match(reviewWorkspace, /focusPreviousOnCurrent/);
+  assert.match(
+    reviewWorkspace,
+    /comparison === null\s*\|\|\s*comparison\.sameMedia/,
+  );
+  assert.match(
+    reviewWorkspace,
+    /linkedPreviousIndex = previousFindings\.findIndex/,
+  );
   assert.match(reviewWorkspace, /legacyDraftStorageKey/);
   assert.match(reviewWorkspace, /activePreviousIndex,\s+note,\s+selection,\s+region/);
   assert.match(reviewWorkspace, /canRestorePending/);

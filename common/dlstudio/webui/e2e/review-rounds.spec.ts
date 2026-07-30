@@ -43,6 +43,25 @@ test("submits exact refs and explicit links to previous findings", async ({
       name: /Новый комментарий: Move it farther/,
     }),
   ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Предыдущее замечание" })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Замечание 1 из 2" }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Удалить замечание 1" })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Замечание 2 из 2" }),
+  ).toBeVisible();
+  await expect(note).toHaveValue(
+    "Move the highlighted element away from the title.",
+  );
+  await note.fill("Move it farther from the title in the current version.");
+  await page
+    .getByRole("button", { name: "Сохранить комментарий" })
+    .click();
 
   const outgoing = page.waitForRequest(isReviewPost);
   const incoming = page.waitForResponse(

@@ -1,6 +1,8 @@
 import type { JSX, RefObject } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
+import { ReviewTimeTrack } from "./ReviewTimeTrack";
 import type {
+  FrameSelection,
   ReviewContext,
   ReviewRegion,
   ReviewTaskPack,
@@ -21,6 +23,7 @@ type ReviewPlayerProps = {
   comparison: {
     context: ReviewTaskPack;
     frame: number;
+    selection: FrameSelection;
     region: ReviewRegion | null;
     sameMedia: boolean;
   } | null;
@@ -284,16 +287,21 @@ export function ReviewPlayer({
     return videoRef.current;
   }
 
+  function seekComparisonFrame(frame: number) {
+    if (!comparison) return;
+    const next = clampFrame(frame, comparison.context);
+    const video = activeVideo();
+    video?.pause();
+    if (video) {
+      video.currentTime = frameToSeconds(next, comparison.context);
+    }
+    setComparisonFrame(next);
+    setPlaying(false);
+  }
+
   function step(delta: number) {
     if (comparison) {
-      const next = clampFrame(displayFrame + delta, displayContext);
-      const video = activeVideo();
-      video?.pause();
-      if (video) {
-        video.currentTime = frameToSeconds(next, displayContext);
-      }
-      setComparisonFrame(next);
-      setPlaying(false);
+      seekComparisonFrame(displayFrame + delta);
       return;
     }
     onSeek(clampFrame(currentFrame + delta, context));
@@ -596,6 +604,18 @@ export function ReviewPlayer({
           </button>
         )}
       </div>
+      {comparison && (
+        <div class="comparison-time-track">
+          <ReviewTimeTrack
+            context={comparison.context}
+            frame={displayFrame}
+            selection={comparison.selection}
+            mode="seek"
+            version="previous"
+            onSeek={seekComparisonFrame}
+          />
+        </div>
+      )}
       <p class="keyboard-hint">
         В фокусе плеера: ←/→ — по кадру · пробел — пауза
       </p>

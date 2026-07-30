@@ -5,6 +5,7 @@ import type {
   ReviewFindingBody,
   ReviewTaskPack,
 } from "./types";
+import { FindingRegionEvidence } from "./FindingRegionEvidence";
 import { formatSelection, targetLabel } from "./types";
 
 export type PreviousPackState =
@@ -252,6 +253,14 @@ export function PreviousFindingsReview({
           <span key={target.id}>{target.label}</span>
         ))}
       </div>
+
+      {ready && locator?.region && (
+        <FindingRegionEvidence
+          key={finding.finding_id}
+          pack={pack}
+          finding={finding}
+        />
+      )}
 
       {packState === "mismatch" || packState === "unavailable" ? (
         <div class="previous-pack-error" role="alert">

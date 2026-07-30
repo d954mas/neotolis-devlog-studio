@@ -507,9 +507,12 @@ Presentation-time sync помогает навигации, но не стано
 восстановление незавершённого `still_wrong` draft, media load/decode failure,
 legacy local draft migration и запрет same-context `pass` после non-pass
 round. Built FastAPI/UI gate использует временные production с валидными
-H.264/AAC и проходит 8 Playwright scenarios на Windows.
+H.264/AAC; после Phase 5 общий browser gate проходит 13 Playwright scenarios
+на Windows.
 
 ### Phase 5 — presentation evidence и final-mix waveform
+
+Status: completed on 2026-07-30.
 
 Цель: добавить доказательства и звуковую навигацию, не смешивая их lifecycle с
 immutable verdict.
@@ -551,6 +554,42 @@ Lazy frame/crop evidence остаётся derived task-pack projection и не �
 
 После substrate — один final-mix waveform experiment. Role-specific waveform,
 transition density и multi-lane view требуют evidence реальной пользы.
+
+Реализованный owner flow использует одну существующую time surface, а не
+вторую монтажную timeline:
+
+- filmstrip читает bounded JPEG evidence и больше не создаёт скрытый второй
+  browser video decoder;
+- final-mix waveform является фоном той же 44 px шкалы, поверх которой остаются
+  selection, playhead и маркеры комментариев;
+- old waveform создаётся lazy только после открытия `До` и адресует exact old
+  artifact/clock; old track работает только как seek и не меняет current draft;
+- активное прошлое замечание с region показывает один lazy exact crop;
+- waveform/crop failure и silent-audio state не блокируют навигацию, findings
+  или verdict;
+- presentation data не записывается в localStorage, `ReviewVerdict`,
+  `ReviewRound` или release trust closure.
+
+Presentation cache физически отделён от final render cache под
+`data/.studio/cache/presentation`. Его fingerprint не входит в execution
+fingerprint renderer, поэтому изменение UI extraction contract не
+инвалидирует финальный render. Cold authorization/full-SHA misses
+single-flight, а cache entry публикуется только для стабильной пары
+`(head revision, latest round)`. Параллельные запросы разделяют как успешный
+результат, так и стабильную ошибку одного flight; новый независимый запрос
+после завершения группы может повторить операцию.
+
+Проверка включает real H.264/AAC, exact historical clocks, same-media dedupe,
+silent/error/retry, normalized crop, large integer frame boundary, cache
+corruption/LRU/concurrency и browser matrix 320/390/1024/1440. Тринадцать
+Playwright scenarios дополнительно проверяют duration mismatch, быстрый выход
+из незагруженного `До`, partial filmstrip failure/retry, primary-pointer
+semantics и восстановление linked finding. Они проходят без horizontal
+overflow; waveform/evidence никогда не появляются в outgoing verdict.
+
+Финальный `cutover --scope full --skip-toolchain` gate: 234 Python tests,
+7 fast UI contract tests, generated OpenAPI client, production build и 13/13
+Chromium E2E.
 
 Критерии приёмки:
 

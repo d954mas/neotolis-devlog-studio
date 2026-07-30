@@ -6,6 +6,7 @@ export type ReviewVerdict = components["schemas"]["ReviewVerdict"];
 export type ReviewRegion = components["schemas"]["ReviewRegionBody"];
 export type ReviewTimelineItem = components["schemas"]["ReviewTimelineItem"];
 export type ReviewTaskPack = components["schemas"]["ReviewTaskPack"];
+export type ReviewWaveform = components["schemas"]["ReviewWaveform"];
 export type WorkflowStatus = components["schemas"]["WorkflowStatus"];
 export type BlobRef = components["schemas"]["BlobRef"];
 
@@ -159,6 +160,28 @@ export function sameBlobRef(
 
 export function artifactVideoUrl(artifact: BlobRef): string {
   return `/api/v3/review/artifacts/${artifact.sha256}?size=${artifact.size}`;
+}
+
+export function reviewFrameEvidenceUrl(
+  artifact: BlobRef,
+  frame: number,
+  width: number,
+  region: ReviewRegion | null = null,
+): string {
+  const parameters = new URLSearchParams({
+    size: String(artifact.size),
+    frame: String(frame),
+    width: String(width),
+  });
+  if (region !== null) {
+    parameters.set("x_milli", String(region.x_milli));
+    parameters.set("y_milli", String(region.y_milli));
+    parameters.set("width_milli", String(region.width_milli));
+    parameters.set("height_milli", String(region.height_milli));
+  }
+  return `/api/v3/review/artifacts/${
+    artifact.sha256
+  }/evidence?${parameters.toString()}`;
 }
 
 export function targetLabel(

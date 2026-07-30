@@ -471,6 +471,12 @@ export function ReviewWorkspace({
   ]);
 
   useEffect(() => {
+    if (!showingOld) {
+      setComparisonMediaState("ready");
+    }
+  }, [showingOld]);
+
+  useEffect(() => {
     if (
       !context ||
       !previousPack ||
@@ -598,19 +604,38 @@ export function ReviewWorkspace({
             activePreviousFinding.locator.start_frame,
             previousPack,
           ),
+          selection: {
+            startFrame: activePreviousFinding.locator.start_frame,
+            endFrameExclusive:
+              activePreviousFinding.locator.end_frame_exclusive,
+          },
           region: activePreviousFinding.locator.region ?? null,
           sameMedia,
         }
       : null;
+  const findingMarkers = findings.flatMap((finding) =>
+    finding.locator
+      ? [
+          {
+            id: finding.finding_id,
+            frame: finding.locator.start_frame,
+          },
+        ]
+      : [],
+  );
   const reviewReady =
     (previousFindings.length === 0 ||
       (previousPackState === "ready" && previousPack !== null)) &&
     currentMediaState === "ready" &&
-    comparisonMediaState === "ready";
+    (comparison === null ||
+      comparison.sameMedia ||
+      comparisonMediaState === "ready");
   const mediaError =
     currentMediaState === "error"
       ? "Не удалось открыть текущую точную версию."
-      : comparisonMediaState === "error"
+      : comparison !== null &&
+          !comparison.sameMedia &&
+          comparisonMediaState === "error"
         ? "Не удалось открыть точную версию «До»."
         : null;
   const resolutionSummary = previousFindings.reduce<ResolutionSummary>(
@@ -871,6 +896,12 @@ export function ReviewWorkspace({
       current.filter((finding) => finding.finding_id !== findingId),
     );
     if (linkedPrevious) {
+      const linkedPreviousIndex = previousFindings.findIndex(
+        (finding) => finding.finding_id === linkedPrevious,
+      );
+      if (linkedPreviousIndex >= 0) {
+        setActivePreviousIndex(linkedPreviousIndex);
+      }
       setPendingPreviousFindingId(linkedPrevious);
       resolvePrevious(linkedPrevious, "still_wrong", null);
       const previous = previousFindings.find(
@@ -1128,6 +1159,7 @@ export function ReviewWorkspace({
               context={context}
               currentFrame={currentFrame}
               selection={selection}
+              markers={findingMarkers}
               onSelect={selectTime}
             />
           </div>

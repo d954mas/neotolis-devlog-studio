@@ -41,12 +41,36 @@ The repeat-review follow-up adds the deliberately small A/B layer:
 - visible media failure/retry states and full stale-round refresh after a
   two-tab CAS conflict.
 
+The Phase 5 follow-up closes the remaining presentation gap without adding an
+editing timeline:
+
+- exact server-side frame thumbnails replace the hidden second browser video
+  used by the filmstrip;
+- one final-mix waveform sits inside the existing 44 px selection track with
+  the same playhead and range geometry;
+- saved findings appear as small markers on that track;
+- the old waveform loads only in `До`, uses the old artifact clock and remains
+  seek-only;
+- one lazy crop shows the exact old region for the active previous finding;
+- waveform/crop loading, silence and retry are non-blocking presentation
+  states and never enter the local draft or canonical verdict;
+- partial filmstrip failure preserves successful previews and exposes a
+  44 px retry target; exact duration/key guards prevent stale waveform or crop
+  evidence from flashing after an artifact/finding change.
+
 Independent subagent reviews found and drove fixes for current/old frame
 desynchronization, lost legacy drafts, orphaned continuation findings,
 stuck hold-preview state, mobile overflow, volume jumps, failed thumbnail
 retry, incorrect pending-draft restoration and cached-media readiness races.
-The final full gate passes 212 Python tests, 6 fast UI tests and 8 real-browser
-Playwright scenarios.
+The Phase 5 audit additionally covered cache single-flight, stable review
+snapshots, integer frame boundaries, exact binary OpenAPI and same-media
+waveform reuse. A final interaction pass also fixed secondary-pointer range
+changes, lost pointer-capture cleanup, quick exit from a loading old artifact
+and linked-finding deletion while another previous card is open.
+
+Final verification: the Studio v3 cutover gate passes 234 Python tests,
+7 fast UI contract tests, generated-client/build checks and 13/13 Chromium
+E2E scenarios.
 
 Post-redesign evidence:
 
@@ -58,12 +82,12 @@ Post-redesign evidence:
 
 ## Post-redesign audit
 
-Overall score: **21/24**
+Overall score: **22/24**
 
 | Pillar | Score | Assessment |
 |---|---:|---|
 | Copywriting | 4/4 | The default surface speaks in tasks and outcomes; implementation terms stay in the collapsed inspector. |
-| Visuals | 3/4 | The player, frame strip and composer form one clear workspace; a waveform remains the main missing visual aid. |
+| Visuals | 4/4 | The player, server-backed frame strip, shared waveform/selection surface and composer form one coherent review workspace without exposing edit controls. |
 | Color | 4/4 | Accent, selection, warning and focus states are consistent, and functional microcopy now meets AA contrast. |
 | Typography | 3/4 | Primary controls and guidance are readable; dense clip labels remain intentionally compact inside technical details. |
 | Spacing | 3/4 | The desktop sidecar and mobile stack remove the former page travel; a true mobile composer sheet could reduce travel further. |
@@ -83,7 +107,6 @@ The follow-up interaction and accessibility review also added:
 
 Residual opportunities, not blockers for the owner-review workflow:
 
-- add an audio waveform when audio-heavy productions make visual timing useful;
 - consider a mobile bottom-sheet composer if real projects show excessive
   travel between the portrait player and the note field;
 - add keyboard controls for precise spatial-region resizing if the central
