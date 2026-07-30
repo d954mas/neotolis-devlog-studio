@@ -290,3 +290,214 @@ class ReviewVerdict:
         if result.canonical_bytes() != raw:
             raise ValueError("review verdict is not canonical")
         return result
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewResolution:
+    """Typed resolution of one required finding from the previous round."""
+
+    previous_finding_id: str
+    status: Literal["fixed", "obsolete", "still_wrong"]
+    current_finding_id: str | None = None
+
+    def __post_init__(self) -> None:
+        DomainId(self.previous_finding_id)
+        if self.status not in {"fixed", "obsolete", "still_wrong"}:
+            raise ValueError("unsupported resolution status")
+        if self.status == "still_wrong":
+            if self.current_finding_id is None:
+                raise ValueError(
+                    "still_wrong resolution requires a current finding"
+                )
+            DomainId(self.current_finding_id)
+        elif self.current_finding_id is not None:
+            raise ValueError(
+                "current finding is allowed only for still_wrong"
+            )
+
+    def as_payload(self) -> dict[str, object]:
+        return {
+            "previous_finding_id": self.previous_finding_id,
+            "status": self.status,
+            "current_finding_id": self.current_finding_id,
+        }
+
+    @classmethod
+    def from_payload(cls, value: dict[str, Any]) -> "ReviewResolution":
+        if set(value) != {
+            "previous_finding_id",
+            "status",
+            "current_finding_id",
+        }:
+            raise ValueError("review resolution fields mismatch")
+        return cls(
+            previous_finding_id=str(value["previous_finding_id"]),
+            status=value["status"],
+            current_finding_id=(
+                None
+                if value["current_finding_id"] is None
+                else str(value["current_finding_id"])
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewRound:
+    """Immutable link between an exact verdict and its previous review."""
+
+    verdict: BlobRef
+    previous_round: BlobRef | None = None
+    resolutions: tuple[ReviewResolution, ...] = ()
+
+    DOMAIN = "dlstudio.review_round"
+    VERSION = 1
+
+    def __post_init__(self) -> None:
+        if self.verdict.size <= 0:
+            raise ValueError("review round verdict must be non-empty")
+        if self.previous_round is not None and self.previous_round.size <= 0:
+            raise ValueError("previous review round must be non-empty")
+        resolutions = tuple(
+            sorted(
+                self.resolutions,
+                key=lambda item: item.previous_finding_id,
+            )
+        )
+        previous_ids = [
+            item.previous_finding_id for item in resolutions
+        ]
+        if len(previous_ids) != len(set(previous_ids)):
+            raise ValueError("duplicate previous finding resolution")
+        current_ids = [
+            item.current_finding_id
+            for item in resolutions
+            if item.current_finding_id is not None
+        ]
+        if len(current_ids) != len(set(current_ids)):
+            raise ValueError("duplicate current finding resolution")
+        if self.previous_round is None and resolutions:
+            raise ValueError("first review round cannot have resolutions")
+        object.__setattr__(self, "resolutions", resolutions)
+
+    def as_payload(self) -> dict[str, Any]:
+        return {
+            "verdict": self.verdict.as_payload(),
+            "previous_round": (
+                None
+                if self.previous_round is None
+                else self.previous_round.as_payload()
+            ),
+            "resolutions": [
+                resolution.as_payload() for resolution in self.resolutions
+            ],
+        }
+
+    @property
+    def ref(self) -> BlobRef:
+        raw = self.canonical_bytes()
+        return BlobRef(
+            canonical_hash(
+                self.as_payload(),
+                domain=self.DOMAIN,
+                version=self.VERSION,
+            ),
+            len(raw),
+        )
+
+    @property
+    def reachable_blobs(self) -> tuple[BlobRef, ...]:
+        if self.previous_round is None:
+            return (self.verdict,)
+        return (self.verdict, self.previous_round)
+
+    def canonical_bytes(self) -> bytes:
+        return canonical_bytes(
+            self.as_payload(),
+            domain=self.DOMAIN,
+            version=self.VERSION,
+        )
+
+    @classmethod
+    def from_canonical_bytes(cls, raw: bytes) -> "ReviewRound":
+        wrapped = json.loads(raw)
+        if (
+            wrapped.get("$domain") != cls.DOMAIN
+            or wrapped.get("$version") != cls.VERSION
+        ):
+            raise ValueError("invalid review round schema")
+        payload = wrapped["payload"]
+        result = cls(
+            verdict=BlobRef.from_payload(payload["verdict"]),
+            previous_round=(
+                None
+                if payload["previous_round"] is None
+                else BlobRef.from_payload(payload["previous_round"])
+            ),
+            resolutions=tuple(
+                ReviewResolution.from_payload(item)
+                for item in payload["resolutions"]
+            ),
+        )
+        if result.canonical_bytes() != raw:
+            raise ValueError("review round is not canonical")
+        return result
+
+
+def validate_review_round_transition(
+    review_round: ReviewRound,
+    current_verdict: ReviewVerdict,
+    *,
+    previous_round: ReviewRound | None,
+    previous_verdict: ReviewVerdict | None,
+) -> None:
+    """Validate a loaded round transition without reading persistence."""
+
+    if review_round.verdict != current_verdict.ref:
+        raise ValueError("review round does not name the current verdict")
+    if (previous_round is None) != (previous_verdict is None):
+        raise ValueError("previous review round and verdict must be loaded together")
+    if previous_round is None:
+        if review_round.previous_round is not None:
+            raise ValueError("first review round names an unavailable previous round")
+        if review_round.resolutions:
+            raise ValueError("first review round cannot resolve earlier findings")
+        return
+
+    assert previous_verdict is not None
+    if review_round.previous_round != previous_round.ref:
+        raise ValueError("review round does not name the exact previous round")
+    if previous_round.verdict != previous_verdict.ref:
+        raise ValueError("previous review round does not name its exact verdict")
+    if previous_verdict.outcome == "pass":
+        raise ValueError("passing review cannot have a successor round")
+
+    required_previous = {
+        finding.finding_id
+        for finding in previous_verdict.findings
+        if finding.requires_change
+    }
+    resolved_previous = {
+        resolution.previous_finding_id
+        for resolution in review_round.resolutions
+    }
+    if resolved_previous != required_previous:
+        missing = sorted(required_previous - resolved_previous)
+        unknown = sorted(resolved_previous - required_previous)
+        raise ValueError(
+            "review resolution coverage mismatch; "
+            f"missing={missing}, unknown={unknown}"
+        )
+
+    required_current = {
+        finding.finding_id
+        for finding in current_verdict.findings
+        if finding.requires_change
+    }
+    for resolution in review_round.resolutions:
+        if (
+            resolution.status == "still_wrong"
+            and resolution.current_finding_id not in required_current
+        ):
+            raise ValueError(
+                "still_wrong resolution must name a required current finding"
+            )

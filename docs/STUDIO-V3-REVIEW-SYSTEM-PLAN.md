@@ -259,6 +259,8 @@ advance/render → новый review
 
 ### Phase 1 — contracts: exact verdict и cross-version round
 
+Status: completed on 2026-07-30.
+
 Цель: определить canonical модель без compatibility reader.
 
 Dependency: Phase 0. Это contract-only phase; runtime transition и persistence
