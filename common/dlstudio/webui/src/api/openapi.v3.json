@@ -1399,9 +1399,22 @@
         "responses": {
           "200": {
             "content": {
-              "image/jpeg": {}
+              "image/jpeg": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
             },
-            "description": "Successful Response"
+            "description": "Exact bounded JPEG review evidence",
+            "headers": {
+              "ETag": {
+                "description": "SHA-256 identity of the JPEG bytes",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "422": {
             "content": {

@@ -475,21 +475,15 @@ def query_authorized_review_artifacts(
     workflows: WorkflowStore,
     store: BlobStore,
 ) -> tuple[BlobRef, ...]:
-    """Return exact current and historical artifacts authorized for review."""
+    """Return refs using the same fail-closed policy as presentation access."""
 
-    artifacts = {
-        entry.verdict.artifact
-        for entry in query_review_history(workflows, store)
-    }
-    workflow = workflows.read_current()
-    if workflow is not None:
-        try:
-            current = _outputs(workflow, "final").get("artifact")
-        except ValueError:
-            current = None
-        if current is not None:
-            artifacts.add(current)
-    return tuple(sorted(artifacts, key=lambda item: (item.sha256, item.size)))
+    return tuple(
+        context.artifact
+        for context in query_authorized_review_artifact_contexts(
+            workflows,
+            store,
+        )
+    )
 
 
 def query_authorized_review_artifact_contexts(

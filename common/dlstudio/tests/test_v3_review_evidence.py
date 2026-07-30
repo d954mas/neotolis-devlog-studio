@@ -200,6 +200,59 @@ def test_frame_evidence_uses_exact_normalized_crop_pixels(
     assert "scale=128:-2" in filter_graph
 
 
+def test_frame_evidence_uses_integer_ceil_for_large_exact_clock(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact, resolver = _fixture(tmp_path)
+    launches = 0
+
+    def fake_run(
+        command: list[str],
+        *,
+        check: bool,
+        capture_output: bool = False,
+        timeout: float,
+    ) -> subprocess.CompletedProcess[bytes]:
+        nonlocal launches
+        assert check
+        assert not capture_output
+        assert timeout == 30
+        launches += 1
+        Path(command[-1]).write_bytes(_jpeg(134_217_728))
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    request = {
+        "duration_ns": 4_473_924_266_666_667,
+        "fps_num": 30,
+        "fps_den": 1,
+        "source_width": 1920,
+        "source_height": 1080,
+        "width": 160,
+        "crop_milli": None,
+        "cache_root": tmp_path / "presentation",
+        "fingerprint": _fingerprint(),
+    }
+
+    result = extract_presentation_frame(
+        artifact,
+        resolver,
+        frame=134_217_728,
+        **request,
+    )
+
+    assert result.content == _jpeg(134_217_728)
+    assert launches == 1
+    with pytest.raises(ValueError, match="outside the artifact"):
+        extract_presentation_frame(
+            artifact,
+            resolver,
+            frame=134_217_729,
+            **request,
+        )
+
+
 def test_waveform_is_bounded_cached_and_recovers_corrupt_entry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

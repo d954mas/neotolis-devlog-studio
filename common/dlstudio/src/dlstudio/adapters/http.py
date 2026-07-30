@@ -52,6 +52,50 @@ from .local import LocalProduction, load_local_production
 _LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "testserver"})
 
 
+class _FlightLock:
+    def __init__(self) -> None:
+        self.lock = Lock()
+        self.users = 0
+        self.failure: tuple[type[Exception], tuple[object, ...]] | None = None
+
+
+def _join_flight(
+    pool: dict[object, _FlightLock],
+    key: object,
+    guard: Lock,
+) -> _FlightLock:
+    with guard:
+        flight = pool.get(key)
+        if flight is None:
+            flight = _FlightLock()
+            pool[key] = flight
+        flight.users += 1
+        return flight
+
+
+def _acquire_flight(
+    pool: dict[object, _FlightLock],
+    key: object,
+    guard: Lock,
+) -> _FlightLock:
+    flight = _join_flight(pool, key, guard)
+    flight.lock.acquire()
+    return flight
+
+
+def _release_flight(
+    pool: dict[object, _FlightLock],
+    key: object,
+    flight: _FlightLock,
+    guard: Lock,
+) -> None:
+    flight.lock.release()
+    with guard:
+        flight.users -= 1
+        if flight.users == 0 and pool.get(key) is flight:
+            del pool[key]
+
+
 class _Body(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -130,6 +174,8 @@ def create_app(manifest_path: str | Path) -> FastAPI:
         tuple[str, int],
         Path,
     ] = OrderedDict()
+    authorization_flights: dict[object, _FlightLock] = {}
+    verification_flights: dict[object, _FlightLock] = {}
     review_cache_lock = Lock()
     presentation_cache_root = (
         production.production_root
@@ -185,62 +231,159 @@ def create_app(manifest_path: str | Path) -> FastAPI:
     async def studio_error(_request: object, exc: StudioError) -> JSONResponse:
         return JSONResponse(status_code=422, content={"detail": str(exc)})
 
-    def authorize_review_artifact(
-        requested: BlobRef,
-    ) -> tuple[ReviewArtifactContext, Path]:
-        authorization_key = (
-            production.workflows.head_revision(),
-            production.workflows.read_latest_review_round_ref(),
-        )
-        with review_cache_lock:
-            authorized = authorized_review_artifacts.get(authorization_key)
-            if authorized is not None:
-                authorized_review_artifacts.move_to_end(authorization_key)
-        if authorized is None:
-            computed = {
-                context.artifact: context
-                for context in query_authorized_review_artifact_contexts(
-                    production.workflows,
-                    production.repository.objects,
-                )
-            }
+    def raise_flight_failure(flight: _FlightLock) -> None:
+        if flight.failure is None:
+            return
+        exception_type, args = flight.failure
+        raise exception_type(*args)
+
+    def stable_authorization_key() -> tuple[int, BlobRef | None]:
+        for _attempt in range(4):
+            before = production.workflows.head_revision()
+            latest = production.workflows.read_latest_review_round_ref()
+            after = production.workflows.head_revision()
+            if before == after:
+                return after, latest
+        raise ValueError("review state changed while authorizing artifact")
+
+    def load_authorized_contexts() -> dict[BlobRef, ReviewArtifactContext]:
+        for _attempt in range(4):
+            authorization_key = stable_authorization_key()
             with review_cache_lock:
                 authorized = authorized_review_artifacts.get(
                     authorization_key
                 )
-                if authorized is None:
-                    authorized = computed
-                    authorized_review_artifacts[authorization_key] = authorized
-                    while len(authorized_review_artifacts) > 8:
-                        authorized_review_artifacts.popitem(last=False)
-                else:
+                if authorized is not None:
                     authorized_review_artifacts.move_to_end(authorization_key)
-        context = authorized.get(requested)
-        if context is None:
-            raise ValueError("review artifact is not authorized")
+            if authorized is not None:
+                if stable_authorization_key() == authorization_key:
+                    return authorized
+                continue
 
+            flight = _acquire_flight(
+                authorization_flights,
+                authorization_key,
+                review_cache_lock,
+            )
+            try:
+                if stable_authorization_key() != authorization_key:
+                    continue
+                with review_cache_lock:
+                    authorized = authorized_review_artifacts.get(
+                        authorization_key
+                    )
+                    if authorized is not None:
+                        authorized_review_artifacts.move_to_end(
+                            authorization_key
+                        )
+                if authorized is None:
+                    if flight.failure is not None:
+                        if stable_authorization_key() != authorization_key:
+                            continue
+                        raise_flight_failure(flight)
+                    try:
+                        computed = {
+                            context.artifact: context
+                            for context in (
+                                query_authorized_review_artifact_contexts(
+                                    production.workflows,
+                                    production.repository.objects,
+                                )
+                            )
+                        }
+                    except Exception as exc:
+                        if stable_authorization_key() != authorization_key:
+                            continue
+                        flight.failure = (type(exc), exc.args)
+                        raise
+                    if stable_authorization_key() != authorization_key:
+                        continue
+                    with review_cache_lock:
+                        authorized = authorized_review_artifacts.get(
+                            authorization_key
+                        )
+                        if authorized is None:
+                            authorized = computed
+                            authorized_review_artifacts[
+                                authorization_key
+                            ] = authorized
+                            while len(authorized_review_artifacts) > 8:
+                                authorized_review_artifacts.popitem(
+                                    last=False
+                                )
+                        else:
+                            authorized_review_artifacts.move_to_end(
+                                authorization_key
+                            )
+                elif stable_authorization_key() != authorization_key:
+                    continue
+                return authorized
+            finally:
+                _release_flight(
+                    authorization_flights,
+                    authorization_key,
+                    flight,
+                    review_cache_lock,
+                )
+        raise ValueError("review state changed while authorizing artifact")
+
+    def verified_artifact_path(requested: BlobRef) -> Path:
         artifact_key = (requested.sha256, requested.size)
         with review_cache_lock:
             source = verified_review_artifacts.get(artifact_key)
             if source is not None:
                 verified_review_artifacts.move_to_end(artifact_key)
-        if source is None:
-            resolved = resolve_blob(
-                production.repository.objects,
-                requested.sha256,
-                requested.size,
-            )
+        if source is not None:
+            return source
+
+        flight = _acquire_flight(
+            verification_flights,
+            artifact_key,
+            review_cache_lock,
+        )
+        try:
             with review_cache_lock:
                 source = verified_review_artifacts.get(artifact_key)
-                if source is None:
-                    source = resolved
-                    verified_review_artifacts[artifact_key] = source
+                if source is not None:
                     verified_review_artifacts.move_to_end(artifact_key)
-                    while len(verified_review_artifacts) > 256:
-                        verified_review_artifacts.popitem(last=False)
-                else:
-                    verified_review_artifacts.move_to_end(artifact_key)
-        return context, source
+            if source is None:
+                raise_flight_failure(flight)
+                try:
+                    source = resolve_blob(
+                        production.repository.objects,
+                        requested.sha256,
+                        requested.size,
+                    )
+                except Exception as exc:
+                    flight.failure = (type(exc), exc.args)
+                    raise
+                with review_cache_lock:
+                    cached = verified_review_artifacts.get(artifact_key)
+                    if cached is None:
+                        verified_review_artifacts[artifact_key] = source
+                        verified_review_artifacts.move_to_end(artifact_key)
+                        while len(verified_review_artifacts) > 256:
+                            verified_review_artifacts.popitem(last=False)
+                    else:
+                        source = cached
+                        verified_review_artifacts.move_to_end(artifact_key)
+            return source
+        finally:
+            _release_flight(
+                verification_flights,
+                artifact_key,
+                flight,
+                review_cache_lock,
+            )
+
+    def authorize_review_artifact(
+        requested: BlobRef,
+    ) -> tuple[ReviewArtifactContext, Path]:
+        authorized = load_authorized_contexts()
+        context = authorized.get(requested)
+        if context is None:
+            raise ValueError("review artifact is not authorized")
+        return context, verified_artifact_path(requested)
 
     @app.get("/api/v3/status", operation_id="getStatus")
     def status() -> WorkflowStatus:
@@ -324,7 +467,25 @@ def create_app(manifest_path: str | Path) -> FastAPI:
         "/api/v3/review/artifacts/{sha256}/evidence",
         operation_id="getReviewFrameEvidence",
         response_class=Response,
-        responses={200: {"content": {"image/jpeg": {}}}},
+        responses={
+            200: {
+                "description": "Exact bounded JPEG review evidence",
+                "headers": {
+                    "ETag": {
+                        "description": "SHA-256 identity of the JPEG bytes",
+                        "schema": {"type": "string"},
+                    }
+                },
+                "content": {
+                    "image/jpeg": {
+                        "schema": {
+                            "type": "string",
+                            "format": "binary",
+                        }
+                    }
+                },
+            }
+        },
     )
     def review_frame_evidence(
         sha256: str = PathParam(pattern=r"^[0-9a-f]{64}$"),

@@ -756,13 +756,15 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description Exact bounded JPEG review evidence */
             200: {
                 headers: {
+                    /** @description SHA-256 identity of the JPEG bytes */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "image/jpeg": unknown;
+                    "image/jpeg": string;
                 };
             };
             /** @description Validation Error */

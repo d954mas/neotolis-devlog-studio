@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
-from itertools import count
 from pathlib import Path
 import subprocess
-from threading import Barrier, Lock
+from threading import Barrier, Event, Lock
 from time import sleep
 
 import pytest
@@ -14,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from dlstudio.application.api import (
     query_authorized_review_artifact_contexts,
+    query_authorized_review_artifacts,
     query_review_task_pack,
     start_workflow,
 )
@@ -295,6 +295,24 @@ def test_review_presentation_endpoints_are_exact_bounded_and_noncanonical(
     ).json()["timeline"]
 
 
+def test_review_evidence_openapi_declares_binary_jpeg_and_etag(
+    tmp_path: Path,
+) -> None:
+    from dlstudio.adapters.http import create_app
+
+    manifest, _ = _review_ready_production(tmp_path / "production")
+    operation = create_app(manifest).openapi()["paths"][
+        "/api/v3/review/artifacts/{sha256}/evidence"
+    ]["get"]
+    response = operation["responses"]["200"]
+
+    assert response["content"]["image/jpeg"]["schema"] == {
+        "type": "string",
+        "format": "binary",
+    }
+    assert response["headers"]["ETag"]["schema"] == {"type": "string"}
+
+
 def test_historical_review_artifact_keeps_its_own_presentation_clock(
     tmp_path: Path,
 ) -> None:
@@ -417,6 +435,8 @@ def test_review_artifact_rejects_ambiguous_historical_and_current_clocks(
 
     with pytest.raises(ValueError, match="ambiguous timeline contexts"):
         query_authorized_review_artifact_contexts(workflows, store)
+    with pytest.raises(ValueError, match="ambiguous timeline contexts"):
+        query_authorized_review_artifacts(workflows, store)
     assert client.get(
         f"/api/v3/review/artifacts/{artifact.sha256}",
         params={"size": artifact.size},
@@ -709,8 +729,6 @@ def test_concurrent_artifact_requests_serialize_cache_mutation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from dlstudio.adapters import http as http_adapter
-    from dlstudio.persistence.workflow import WorkflowRepository
-
     class MutationDetectingOrderedDict(OrderedDict):
         instances: list["MutationDetectingOrderedDict"] = []
 
@@ -762,12 +780,6 @@ def test_concurrent_artifact_requests_serialize_cache_mutation(
     payload["resolutions"] = []
     assert client.post("/api/v3/review", json=payload).status_code == 200
 
-    cache_identity = count(10_000)
-    monkeypatch.setattr(
-        WorkflowRepository,
-        "head_revision",
-        lambda _self: next(cache_identity),
-    )
     workers = 12
     start = Barrier(workers)
     url = (
@@ -787,6 +799,343 @@ def test_concurrent_artifact_requests_serialize_cache_mutation(
         cache.concurrent_mutation
         for cache in MutationDetectingOrderedDict.instances
     )
+
+
+def _install_flight_join_barriers(
+    monkeypatch: pytest.MonkeyPatch,
+    http_adapter,
+    *,
+    workers: int,
+) -> tuple[Event, Event]:
+    original_join = http_adapter._join_flight
+    counters_lock = Lock()
+    authorization_joined = Event()
+    verification_joined = Event()
+    first_authorization_key: object | None = None
+    first_verification_key: object | None = None
+    authorization_joins = 0
+    verification_joins = 0
+
+    def tracked_join(pool, key, guard):
+        nonlocal first_authorization_key
+        nonlocal first_verification_key
+        nonlocal authorization_joins
+        nonlocal verification_joins
+        flight = original_join(pool, key, guard)
+        is_verification = (
+            isinstance(key, tuple)
+            and len(key) == 2
+            and isinstance(key[0], str)
+            and isinstance(key[1], int)
+        )
+        with counters_lock:
+            if is_verification:
+                if first_verification_key is None:
+                    first_verification_key = key
+                if key == first_verification_key:
+                    verification_joins += 1
+                    if verification_joins == workers:
+                        verification_joined.set()
+            else:
+                if first_authorization_key is None:
+                    first_authorization_key = key
+                if key == first_authorization_key:
+                    authorization_joins += 1
+                    if authorization_joins == workers:
+                        authorization_joined.set()
+        return flight
+
+    monkeypatch.setattr(http_adapter, "_join_flight", tracked_join)
+    return authorization_joined, verification_joined
+
+
+def test_concurrent_artifact_requests_coalesce_projection_and_verification(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dlstudio.adapters import http as http_adapter
+    from dlstudio.persistence.api import ObjectStore
+
+    manifest, artifact = _review_ready_production(tmp_path / "production")
+    projection_calls = 0
+    verification_calls = 0
+    counters_lock = Lock()
+    original_projection = (
+        http_adapter.query_authorized_review_artifact_contexts
+    )
+    original_verify = ObjectStore.verify
+    authorization_joined, verification_joined = (
+        _install_flight_join_barriers(
+            monkeypatch,
+            http_adapter,
+            workers=12,
+        )
+    )
+
+    def counted_projection(*args, **kwargs):
+        nonlocal projection_calls
+        with counters_lock:
+            projection_calls += 1
+        assert authorization_joined.wait(timeout=5)
+        return original_projection(*args, **kwargs)
+
+    def counted_verify(self: ObjectStore, ref: BlobRef) -> None:
+        nonlocal verification_calls
+        if ref == artifact:
+            with counters_lock:
+                verification_calls += 1
+            assert verification_joined.wait(timeout=5)
+        original_verify(self, ref)
+
+    monkeypatch.setattr(
+        http_adapter,
+        "query_authorized_review_artifact_contexts",
+        counted_projection,
+    )
+    monkeypatch.setattr(ObjectStore, "verify", counted_verify)
+    client = TestClient(http_adapter.create_app(manifest))
+    workers = 12
+    start = Barrier(workers)
+    url = (
+        f"/api/v3/review/artifacts/{artifact.sha256}"
+        f"?size={artifact.size}"
+    )
+
+    def request_artifact(_position: int) -> int:
+        start.wait()
+        return client.get(url).status_code
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        statuses = tuple(pool.map(request_artifact, range(workers)))
+
+    assert statuses == (200,) * workers
+    assert projection_calls == 1
+    assert verification_calls == 1
+
+
+def test_concurrent_authorization_failure_is_shared_per_flight(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dlstudio.adapters import http as http_adapter
+
+    manifest, artifact = _review_ready_production(tmp_path / "production")
+    projection_calls = 0
+    counter_lock = Lock()
+    authorization_joined, _verification_joined = (
+        _install_flight_join_barriers(
+            monkeypatch,
+            http_adapter,
+            workers=8,
+        )
+    )
+
+    def failing_projection(*_args, **_kwargs):
+        nonlocal projection_calls
+        with counter_lock:
+            projection_calls += 1
+        assert authorization_joined.wait(timeout=5)
+        raise ValueError("stable projection failure")
+
+    monkeypatch.setattr(
+        http_adapter,
+        "query_authorized_review_artifact_contexts",
+        failing_projection,
+    )
+    client = TestClient(http_adapter.create_app(manifest))
+    workers = 8
+    start = Barrier(workers)
+    url = (
+        f"/api/v3/review/artifacts/{artifact.sha256}"
+        f"?size={artifact.size}"
+    )
+
+    def request_artifact(_position: int) -> int:
+        start.wait()
+        return client.get(url).status_code
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        statuses = tuple(pool.map(request_artifact, range(workers)))
+
+    assert statuses == (409,) * workers
+    assert projection_calls == 1
+
+
+def test_concurrent_verification_failure_is_shared_per_flight(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dlstudio.adapters import http as http_adapter
+    from dlstudio.persistence.api import ObjectStore
+
+    manifest, artifact = _review_ready_production(tmp_path / "production")
+    verification_calls = 0
+    counter_lock = Lock()
+    original_verify = ObjectStore.verify
+    _authorization_joined, verification_joined = (
+        _install_flight_join_barriers(
+            monkeypatch,
+            http_adapter,
+            workers=8,
+        )
+    )
+
+    def failing_verify(self: ObjectStore, ref: BlobRef) -> None:
+        nonlocal verification_calls
+        if ref == artifact:
+            with counter_lock:
+                verification_calls += 1
+            assert verification_joined.wait(timeout=5)
+            raise ValueError("stable verification failure")
+        original_verify(self, ref)
+
+    monkeypatch.setattr(ObjectStore, "verify", failing_verify)
+    client = TestClient(http_adapter.create_app(manifest))
+    workers = 8
+    start = Barrier(workers)
+    url = (
+        f"/api/v3/review/artifacts/{artifact.sha256}"
+        f"?size={artifact.size}"
+    )
+
+    def request_artifact(_position: int) -> int:
+        start.wait()
+        return client.get(url).status_code
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        statuses = tuple(pool.map(request_artifact, range(workers)))
+
+    assert statuses == (409,) * workers
+    assert verification_calls == 1
+
+
+def test_waiters_skip_obsolete_projection_after_revision_churn(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dlstudio.adapters import http as http_adapter
+    from dlstudio.persistence.workflow import WorkflowRepository
+
+    manifest, artifact = _review_ready_production(tmp_path / "production")
+    repository, _, workflows = open_local_repositories(
+        tmp_path / "production",
+        "fixture.reel",
+    )
+    del repository
+    base_revision = workflows.head_revision()
+    reported_revision = base_revision
+    projection_calls = 0
+    state_lock = Lock()
+    workers = 8
+    authorization_joined, _verification_joined = (
+        _install_flight_join_barriers(
+            monkeypatch,
+            http_adapter,
+            workers=workers,
+        )
+    )
+    original_projection = (
+        http_adapter.query_authorized_review_artifact_contexts
+    )
+
+    def reported_head(_self: WorkflowRepository) -> int:
+        with state_lock:
+            return reported_revision
+
+    def counted_projection(*args, **kwargs):
+        nonlocal projection_calls
+        nonlocal reported_revision
+        with state_lock:
+            projection_calls += 1
+            call_number = projection_calls
+        if call_number == 1:
+            assert authorization_joined.wait(timeout=5)
+        projected = original_projection(*args, **kwargs)
+        if call_number == 1:
+            with state_lock:
+                reported_revision = base_revision + 1
+        return projected
+
+    monkeypatch.setattr(
+        WorkflowRepository,
+        "head_revision",
+        reported_head,
+    )
+    monkeypatch.setattr(
+        http_adapter,
+        "query_authorized_review_artifact_contexts",
+        counted_projection,
+    )
+    client = TestClient(http_adapter.create_app(manifest))
+    start = Barrier(workers)
+    url = (
+        f"/api/v3/review/artifacts/{artifact.sha256}"
+        f"?size={artifact.size}"
+    )
+
+    def request_artifact(_position: int) -> int:
+        start.wait()
+        return client.get(url).status_code
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        statuses = tuple(pool.map(request_artifact, range(workers)))
+
+    assert statuses == (200,) * workers
+    assert projection_calls == 2
+    assert client.get(url).status_code == 200
+    assert projection_calls == 2
+
+
+def test_authorization_skips_obsolete_key_before_projection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dlstudio.adapters import http as http_adapter
+    from dlstudio.persistence.workflow import WorkflowRepository
+
+    manifest, artifact = _review_ready_production(tmp_path / "production")
+    repository, _, workflows = open_local_repositories(
+        tmp_path / "production",
+        "fixture.reel",
+    )
+    del repository
+    base_revision = workflows.head_revision()
+    head_reads = 0
+    projection_calls = 0
+    original_projection = (
+        http_adapter.query_authorized_review_artifact_contexts
+    )
+
+    def changing_head(_self: WorkflowRepository) -> int:
+        nonlocal head_reads
+        head_reads += 1
+        return base_revision if head_reads <= 2 else base_revision + 1
+
+    def counted_projection(*args, **kwargs):
+        nonlocal projection_calls
+        projection_calls += 1
+        return original_projection(*args, **kwargs)
+
+    monkeypatch.setattr(
+        WorkflowRepository,
+        "head_revision",
+        changing_head,
+    )
+    monkeypatch.setattr(
+        http_adapter,
+        "query_authorized_review_artifact_contexts",
+        counted_projection,
+    )
+    client = TestClient(http_adapter.create_app(manifest))
+    url = (
+        f"/api/v3/review/artifacts/{artifact.sha256}"
+        f"?size={artifact.size}"
+    )
+
+    assert client.get(url).status_code == 200
+    assert projection_calls == 1
+    assert client.get(url).status_code == 200
+    assert projection_calls == 1
 
 
 def test_review_round_fields_survive_invalidation_and_authorize_lineage_media(

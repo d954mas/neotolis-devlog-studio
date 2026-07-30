@@ -194,12 +194,14 @@ def test_openapi_has_no_path_file_or_job_queue_surface(tmp_path: Path) -> None:
         "/api/v3/advance",
         "/api/v3/review",
         "/api/v3/review/context",
-        "/api/v3/review/current",
-        "/api/v3/review/task-pack",
-        "/api/v3/review/artifacts/{sha256}",
-        "/api/v3/deliver",
-        "/api/v3/blobs/{sha256}",
-    }
+            "/api/v3/review/current",
+            "/api/v3/review/task-pack",
+            "/api/v3/review/artifacts/{sha256}",
+            "/api/v3/review/artifacts/{sha256}/evidence",
+            "/api/v3/review/artifacts/{sha256}/waveform",
+            "/api/v3/deliver",
+            "/api/v3/blobs/{sha256}",
+        }
     assert all("job" not in path and "file" not in path for path in paths)
 
 

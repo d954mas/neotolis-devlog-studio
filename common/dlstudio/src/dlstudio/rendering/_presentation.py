@@ -613,10 +613,8 @@ def _verify_source(
 def _frame_count(duration_ns: int, fps_num: int, fps_den: int) -> int:
     if duration_ns <= 0 or fps_num <= 0 or fps_den <= 0:
         raise ValueError("presentation frame clock is invalid")
-    return max(
-        1,
-        math.ceil(duration_ns * fps_num / (1_000_000_000 * fps_den)),
-    )
+    denominator = 1_000_000_000 * fps_den
+    return max(1, (duration_ns * fps_num + denominator - 1) // denominator)
 
 
 def _validate_crop(
@@ -641,8 +639,8 @@ def _validate_crop(
         raise ValueError("presentation crop exceeds the normalized frame")
     left = source_width * x // 1000
     top = source_height * y // 1000
-    right = math.ceil(source_width * (x + width) / 1000)
-    bottom = math.ceil(source_height * (y + height) / 1000)
+    right = (source_width * (x + width) + 999) // 1000
+    bottom = (source_height * (y + height) + 999) // 1000
     return left, top, max(1, right - left), max(1, bottom - top)
 
 
@@ -651,7 +649,9 @@ def _validate_output_shape(
     input_width: int,
     input_height: int,
 ) -> None:
-    output_height = math.ceil(width * input_height / input_width)
+    output_height = (
+        width * input_height + input_width - 1
+    ) // input_width
     if output_height % 2:
         output_height += 1
     if (
