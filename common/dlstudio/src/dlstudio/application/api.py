@@ -20,11 +20,14 @@ from .production import advance_production
 from .review import (
     ReviewContext,
     ReviewHistoryEntry,
+    ReviewSourceMapping,
+    ReviewTaskPack,
     ReviewTimelineItem,
     query_authorized_review_artifacts,
     query_current_review,
     query_review_context,
     query_review_history,
+    query_review_task_pack,
 )
 from dlstudio.assets.api import MediaFacts
 from dlstudio.foundation.api import BlobRef, CasConflict, CorruptObject, StudioError
@@ -45,6 +48,8 @@ __all__ = [
     "WorkflowStatus",
     "ReviewContext",
     "ReviewHistoryEntry",
+    "ReviewSourceMapping",
+    "ReviewTaskPack",
     "ReviewTimelineItem",
     "ReviewVerdict",
     "compile_production",
@@ -57,6 +62,7 @@ __all__ = [
     "query_authorized_review_artifacts",
     "query_review_context",
     "query_review_history",
+    "query_review_task_pack",
     "ingest_asset",
     "recover_local_delivery",
     "resolve_blob",

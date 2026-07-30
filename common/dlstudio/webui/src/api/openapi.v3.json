@@ -406,6 +406,41 @@
         "title": "ReviewRegionBody",
         "type": "object"
       },
+      "ReviewResolution": {
+        "description": "Typed resolution of one required finding from the previous round.",
+        "properties": {
+          "current_finding_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Finding Id"
+          },
+          "previous_finding_id": {
+            "title": "Previous Finding Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "fixed",
+              "obsolete",
+              "still_wrong"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "previous_finding_id",
+          "status"
+        ],
+        "title": "ReviewResolution",
+        "type": "object"
+      },
       "ReviewResolutionBody": {
         "additionalProperties": false,
         "properties": {
@@ -439,6 +474,126 @@
           "status"
         ],
         "title": "ReviewResolutionBody",
+        "type": "object"
+      },
+      "ReviewRound": {
+        "description": "Immutable link between an exact verdict and its previous review.",
+        "properties": {
+          "previous_round": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BlobRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resolutions": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ReviewResolution"
+            },
+            "title": "Resolutions",
+            "type": "array"
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/BlobRef"
+          }
+        },
+        "required": [
+          "verdict"
+        ],
+        "title": "ReviewRound",
+        "type": "object"
+      },
+      "ReviewSourceMapping": {
+        "properties": {
+          "status": {
+            "const": "unavailable",
+            "default": "unavailable",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "title": "ReviewSourceMapping",
+        "type": "object"
+      },
+      "ReviewTaskPack": {
+        "properties": {
+          "artifact": {
+            "$ref": "#/components/schemas/BlobRef"
+          },
+          "check_report": {
+            "$ref": "#/components/schemas/BlobRef"
+          },
+          "constraints": {
+            "$ref": "#/components/schemas/BlobRef"
+          },
+          "duration_ns": {
+            "title": "Duration Ns",
+            "type": "integer"
+          },
+          "fps_den": {
+            "title": "Fps Den",
+            "type": "integer"
+          },
+          "fps_num": {
+            "title": "Fps Num",
+            "type": "integer"
+          },
+          "height": {
+            "title": "Height",
+            "type": "integer"
+          },
+          "latest_round": {
+            "$ref": "#/components/schemas/BlobRef"
+          },
+          "review_round": {
+            "$ref": "#/components/schemas/ReviewRound"
+          },
+          "source_mapping": {
+            "$ref": "#/components/schemas/ReviewSourceMapping"
+          },
+          "target_snapshots": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewTimelineItem"
+            },
+            "title": "Target Snapshots",
+            "type": "array"
+          },
+          "timeline": {
+            "$ref": "#/components/schemas/BlobRef"
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/ReviewVerdict"
+          },
+          "verdict_ref": {
+            "$ref": "#/components/schemas/BlobRef"
+          },
+          "width": {
+            "title": "Width",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "latest_round",
+          "review_round",
+          "verdict_ref",
+          "verdict",
+          "artifact",
+          "timeline",
+          "check_report",
+          "constraints",
+          "width",
+          "height",
+          "fps_num",
+          "fps_den",
+          "duration_ns",
+          "target_snapshots",
+          "source_mapping"
+        ],
+        "title": "ReviewTaskPack",
         "type": "object"
       },
       "ReviewTimelineItem": {
@@ -1122,6 +1277,24 @@
           }
         },
         "summary": "Current Review"
+      }
+    },
+    "/api/v3/review/task-pack": {
+      "get": {
+        "operationId": "getReviewTaskPack",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewTaskPack"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Review Task Pack"
       }
     },
     "/api/v3/status": {

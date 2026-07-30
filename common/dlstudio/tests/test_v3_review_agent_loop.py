@@ -81,15 +81,9 @@ from fastapi.testclient import TestClient
 from dlstudio.adapters.http import create_app
 
 with TestClient(create_app(Path(sys.argv[1]))) as client:
-    verdict = client.get("/api/v3/review/current")
-    context = client.get("/api/v3/review/context")
-    verdict.raise_for_status()
-    context.raise_for_status()
-    print(json.dumps({
-        "verdict": verdict.json(),
-        "context": context.json(),
-        "source_mapping": {"status": "unavailable"},
-    }, sort_keys=True))
+    task_pack = client.get("/api/v3/review/task-pack")
+    task_pack.raise_for_status()
+    print(json.dumps(task_pack.json(), sort_keys=True))
 """
     completed = subprocess.run(
         [sys.executable, "-c", script, str(manifest)],
@@ -165,11 +159,22 @@ def test_exact_feedback_drives_a_fresh_process_authoring_revision(
     handoff = _fresh_process_handoff(manifest)
     assert handoff["source_mapping"] == {"status": "unavailable"}
     verdict = handoff["verdict"]
-    previous_context = handoff["context"]
+    previous_context = handoff
     assert isinstance(verdict, dict)
     assert isinstance(previous_context, dict)
     assert verdict["findings"][0]["locator"]["target_ids"] == [
         "visual.000"
+    ]
+    assert handoff["target_snapshots"] == [
+        {
+            "item_id": "visual.000",
+            "kind": "visual",
+            "lane": "layer.0",
+            "label": "solid #112233",
+            "start_ns": 0,
+            "duration_ns": 200_000_000,
+            "z": 0,
+        }
     ]
 
     source = authoring.read_text(encoding="utf-8")

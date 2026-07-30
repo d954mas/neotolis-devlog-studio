@@ -8,9 +8,10 @@ from threading import Barrier, Lock
 from time import sleep
 
 import pytest
+from fastapi.encoders import jsonable_encoder
 from fastapi.testclient import TestClient
 
-from dlstudio.application.api import start_workflow
+from dlstudio.application.api import query_review_task_pack, start_workflow
 from dlstudio.foundation.api import BlobRef, canonical_bytes
 from dlstudio.persistence.api import open_local_repositories
 from dlstudio.review.api import ReviewRound, ReviewVerdict
@@ -46,7 +47,11 @@ def _save_stage(
     )
 
 
-def _review_ready_production(root: Path) -> tuple[Path, BlobRef]:
+def _review_ready_production(
+    root: Path,
+    *,
+    visual_start_ns: int = 0,
+) -> tuple[Path, BlobRef]:
     root.mkdir()
     (root / "edit.py").write_text("EDIT = None\n", encoding="utf-8")
     manifest = root / "production.toml"
@@ -79,8 +84,8 @@ def _review_ready_production(root: Path) -> tuple[Path, BlobRef]:
         visuals=(
             VisualInstruction(
                 "solid",
-                0,
-                200_000_000,
+                visual_start_ns,
+                200_000_000 - visual_start_ns,
                 0,
                 0,
                 0,
@@ -123,6 +128,46 @@ def _review_ready_production(root: Path) -> tuple[Path, BlobRef]:
         ),
     )
     return manifest, artifact_ref
+
+
+def test_review_http_rejects_a_target_outside_the_selected_range(
+    tmp_path: Path,
+) -> None:
+    from dlstudio.adapters.http import create_app
+
+    manifest, _ = _review_ready_production(
+        tmp_path / "inactive-target",
+        visual_start_ns=100_000_000,
+    )
+    client = TestClient(create_app(manifest))
+    context = client.get("/api/v3/review/context").json()
+
+    response = client.post(
+        "/api/v3/review",
+        json=_changes_payload(
+            context=context,
+            end_frame_exclusive=1,
+            target_ids=["visual.000"],
+        )
+        | {
+            "findings": [
+                {
+                    "finding_id": "studio.ui.inactive",
+                    "text": "This target is not active yet.",
+                    "requires_change": True,
+                    "locator": {
+                        "start_frame": 0,
+                        "end_frame_exclusive": 1,
+                        "region": None,
+                        "target_ids": ["visual.000"],
+                    },
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 409
+    assert "inactive targets" in response.json()["detail"]
 
 
 def _changes_payload(
@@ -210,8 +255,10 @@ def test_review_http_validates_exact_frames_targets_and_survives_submission(
 ) -> None:
     from dlstudio.adapters.http import create_app
 
-    manifest, _ = _review_ready_production(tmp_path / "production")
+    production_root = tmp_path / "production"
+    manifest, _ = _review_ready_production(production_root)
     client = TestClient(create_app(manifest))
+    assert client.get("/api/v3/review/task-pack").status_code == 404
 
     context = client.get("/api/v3/review/context")
     assert context.status_code == 200
@@ -270,6 +317,22 @@ def test_review_http_validates_exact_frames_targets_and_survives_submission(
     assert accepted.json()["current_stage"] == "review"
     assert accepted.json()["action"] == "review"
     assert client.get("/api/v3/review/context").status_code == 200
+    task_pack = client.get("/api/v3/review/task-pack")
+    assert task_pack.status_code == 200
+    assert task_pack.json()["verdict"] == current.json()
+    assert task_pack.json()["source_mapping"] == {
+        "status": "unavailable"
+    }
+    repository, _, workflows = open_local_repositories(
+        production_root,
+        "fixture.reel",
+    )
+    expected_pack = query_review_task_pack(
+        workflows,
+        repository.objects,
+    )
+    assert expected_pack is not None
+    assert task_pack.json() == jsonable_encoder(expected_pack)
 
 
 def test_block_review_remains_the_current_review_action(
@@ -468,6 +531,11 @@ def test_review_round_fields_survive_invalidation_and_authorize_lineage_media(
     after_invalidation = client.get("/api/v3/review/current")
     assert after_invalidation.status_code == 200
     assert after_invalidation.json()["artifact"] == first_artifact.as_payload()
+    historical_pack = client.get("/api/v3/review/task-pack")
+    assert historical_pack.status_code == 200
+    assert historical_pack.json()["latest_round"] == first_round.as_payload()
+    assert historical_pack.json()["artifact"] == first_artifact.as_payload()
+    assert historical_pack.json()["timeline"] == first_context["timeline"]
 
     _save_stage(
         workflows,

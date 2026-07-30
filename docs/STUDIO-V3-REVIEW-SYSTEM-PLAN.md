@@ -194,25 +194,52 @@ TimelineIR ──→ render/execution cache ──→ exact final BlobRef
 
 ```json
 {
+  "latest_round": {"sha256": "...", "size": 321},
+  "review_round": {"verdict": {"sha256": "...", "size": 654}},
+  "verdict_ref": {"sha256": "...", "size": 654},
+  "verdict": {
+    "artifact": {"sha256": "...", "size": 123},
+    "findings": [{
+      "finding_id": "studio.ui.001",
+      "locator": {
+        "start_frame": 120,
+        "end_frame_exclusive": 151,
+        "region": {
+          "x_milli": 120,
+          "y_milli": 180,
+          "width_milli": 420,
+          "height_milli": 260
+        },
+        "target_ids": [
+          "visual.002",
+          "transition.visual.002",
+          "audio.001"
+        ]
+      },
+      "text": "Переход слишком резкий, музыка перекрывает фразу"
+    }]
+  },
   "artifact": {"sha256": "...", "size": 123},
   "timeline": {"sha256": "...", "size": 456},
-  "finding_id": "studio.ui.001",
-  "frames": [120, 151],
-  "region_milli": [120, 180, 420, 260],
-  "target_ids": ["visual.002", "transition.visual.002", "audio.001"],
   "target_snapshots": [
-    {"id": "visual.002", "kind": "visual", "label": "Заголовок"}
+    {
+      "item_id": "visual.002",
+      "kind": "visual",
+      "lane": "layer.2",
+      "label": "Заголовок",
+      "start_ns": 4000000000,
+      "duration_ns": 1000000000
+    }
   ],
-  "source_mapping": {"status": "unavailable"},
-  "text": "Переход слишком резкий, музыка перекрывает фразу",
-  "evidence": null
+  "source_mapping": {"status": "unavailable"}
 }
 ```
 
 Это projection для агента, а не новый владелец факта. Canonical source остаётся
-`ReviewVerdict`. Local authoring path или compile hint, если они доступны,
-остаются noncanonical agent hints и не попадают в `TimelineIR`, render identity
-или verdict.
+`ReviewVerdict`: findings не копируются во вторую enriched-модель, а связываются
+с единым списком snapshots через `locator.target_ids`. В первой версии source
+mapping честно остаётся `unavailable`; будущая карта должна принадлежать
+`authoring` и быть привязана к exact TimelineIR.
 
 ### Повторный review
 
@@ -410,22 +437,28 @@ Concrete limits:
 
 ### Phase 3 — минимальный agent task pack
 
+Status: completed on 2026-07-30.
+
 Цель: агент получает actionable context до появления A/B UI.
 
 Dependencies: Phases 0–2.
 
-- application query объединяет exact round/verdict/context и target snapshots;
+- application query один раз читает `review:latest`, валидирует lineage и
+  объединяет exact round/verdict/historical TimelineIR с target snapshots;
 - каждый target snapshot содержит kind/lane/label/start/duration;
-- adapter может добавить local authoring hint как noncanonical projection;
-- при отсутствии надёжного mapping возвращается
-  `source_mapping: unavailable`;
+- snapshots образуют один global unique list и связываются с canonical findings
+  только через `locator.target_ids`;
+- source mapping v1 всегда возвращает
+  `source_mapping: {"status": "unavailable"}`;
+- projection ограничена 2 MiB фактического compact JSON и 4096 snapshots;
+  превышение отклоняется без truncation;
 - HTTP отдаёт structured JSON; clipboard не является протоколом;
 - first version не генерирует evidence и не мутирует submitted verdict.
 
 HTTP contract: `GET /api/v3/review/task-pack` возвращает latest round ref,
-verdict ref/payload, artifact/timeline/check/constraints refs и findings с
-target snapshots. Если latest round отсутствует, endpoint отвечает not-found,
-а не строит feedback из browser draft.
+verdict ref/payload, artifact/timeline/check/constraints refs и отдельный global
+target snapshot list. Если latest round отсутствует, endpoint отвечает 404, а
+не строит feedback из browser draft; corrupt closure отвечает 500.
 
 Если Phase 0 показывает повторяемую проблему поиска source, source map
 проектируется отдельно в владельце `authoring`; он не попадает в `TimelineIR`.
@@ -435,7 +468,10 @@ target snapshots. Если latest round отсутствует, endpoint отв�
 - task pack восстанавливается в fresh process из canonical refs;
 - агенту не нужен `localStorage` или UI state;
 - target IDs и human labels соответствуют exact TimelineIR своего round;
-- CLI/HTTP transport-equivalence сохраняется.
+- application/HTTP projection-equivalence сохраняется; новая CLI-команда не
+  добавляется;
+- pointer выбирается один раз, oversized projection и inactive/unknown target
+  fail closed.
 
 ### Phase 4 — resolution UI и минимальный A/B
 

@@ -123,6 +123,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v3/review/task-pack": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Review Task Pack */
+        get: operations["getReviewTaskPack"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v3/status": {
         parameters: {
             query?: never;
@@ -290,6 +307,21 @@ export interface components {
             /** Y Milli */
             y_milli: number;
         };
+        /**
+         * ReviewResolution
+         * @description Typed resolution of one required finding from the previous round.
+         */
+        ReviewResolution: {
+            /** Current Finding Id */
+            current_finding_id?: string | null;
+            /** Previous Finding Id */
+            previous_finding_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "fixed" | "obsolete" | "still_wrong";
+        };
         /** ReviewResolutionBody */
         ReviewResolutionBody: {
             /** Current Finding Id */
@@ -301,6 +333,52 @@ export interface components {
              * @enum {string}
              */
             status: "fixed" | "obsolete" | "still_wrong";
+        };
+        /**
+         * ReviewRound
+         * @description Immutable link between an exact verdict and its previous review.
+         */
+        ReviewRound: {
+            previous_round?: components["schemas"]["BlobRef"] | null;
+            /**
+             * Resolutions
+             * @default []
+             */
+            resolutions: components["schemas"]["ReviewResolution"][];
+            verdict: components["schemas"]["BlobRef"];
+        };
+        /** ReviewSourceMapping */
+        ReviewSourceMapping: {
+            /**
+             * Status
+             * @default unavailable
+             * @constant
+             */
+            status: "unavailable";
+        };
+        /** ReviewTaskPack */
+        ReviewTaskPack: {
+            artifact: components["schemas"]["BlobRef"];
+            check_report: components["schemas"]["BlobRef"];
+            constraints: components["schemas"]["BlobRef"];
+            /** Duration Ns */
+            duration_ns: number;
+            /** Fps Den */
+            fps_den: number;
+            /** Fps Num */
+            fps_num: number;
+            /** Height */
+            height: number;
+            latest_round: components["schemas"]["BlobRef"];
+            review_round: components["schemas"]["ReviewRound"];
+            source_mapping: components["schemas"]["ReviewSourceMapping"];
+            /** Target Snapshots */
+            target_snapshots: components["schemas"]["ReviewTimelineItem"][];
+            timeline: components["schemas"]["BlobRef"];
+            verdict: components["schemas"]["ReviewVerdict"];
+            verdict_ref: components["schemas"]["BlobRef"];
+            /** Width */
+            width: number;
         };
         /** ReviewTimelineItem */
         ReviewTimelineItem: {
@@ -649,6 +727,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReviewVerdict"];
+                };
+            };
+        };
+    };
+    getReviewTaskPack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewTaskPack"];
                 };
             };
         };

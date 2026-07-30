@@ -8,7 +8,14 @@ from threading import Lock
 from typing import Literal
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, Path as PathParam, Query, Request, Response
+from fastapi import (
+    FastAPI,
+    HTTPException,
+    Path as PathParam,
+    Query,
+    Request,
+    Response,
+)
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -25,8 +32,10 @@ from dlstudio.application.api import (
     query_authorized_review_artifacts,
     query_current_review,
     query_review_context,
+    query_review_task_pack,
     query_status,
     ReviewContext,
+    ReviewTaskPack,
     ReviewVerdict,
     resolve_blob,
     submit_review_payload,
@@ -208,6 +217,22 @@ def create_app(manifest_path: str | Path) -> FastAPI:
             production.workflows,
             production.repository.objects,
         )
+
+    @app.get(
+        "/api/v3/review/task-pack",
+        operation_id="getReviewTaskPack",
+    )
+    def review_task_pack() -> ReviewTaskPack:
+        pack = query_review_task_pack(
+            production.workflows,
+            production.repository.objects,
+        )
+        if pack is None:
+            raise HTTPException(
+                status_code=404,
+                detail="no submitted review round",
+            )
+        return pack
 
     @app.get(
         "/api/v3/review/artifacts/{sha256}",

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import asdict, dataclass
 from typing import Literal
 
 from dlstudio.foundation.api import BlobRef, CorruptObject
@@ -17,6 +18,8 @@ from dlstudio.workflow.api import WorkflowStore, WorkflowRun
 from .release import BlobStore
 
 MAX_REVIEW_LINEAGE_DEPTH = 1024
+MAX_REVIEW_TASK_TARGETS = 4096
+MAX_REVIEW_TASK_PACK_BYTES = 2 * 1024 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +55,30 @@ class ReviewHistoryEntry:
     review_round: ReviewRound
     verdict: ReviewVerdict
     timeline: BlobRef
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewSourceMapping:
+    status: Literal["unavailable"] = "unavailable"
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewTaskPack:
+    latest_round: BlobRef
+    review_round: ReviewRound
+    verdict_ref: BlobRef
+    verdict: ReviewVerdict
+    artifact: BlobRef
+    timeline: BlobRef
+    check_report: BlobRef
+    constraints: BlobRef
+    width: int
+    height: int
+    fps_num: int
+    fps_den: int
+    duration_ns: int
+    target_snapshots: tuple[ReviewTimelineItem, ...]
+    source_mapping: ReviewSourceMapping
 
 
 def _outputs(workflow: WorkflowRun, stage: str) -> dict[str, BlobRef]:
@@ -250,6 +277,8 @@ def _load_review_history(
         selected = review_round.previous_round
 
     for index, entry in enumerate(entries):
+        if entry.review_round.ref != entry.round_ref:
+            raise CorruptObject("invalid review round lineage")
         previous = entries[index + 1] if index + 1 < len(entries) else None
         try:
             validate_review_round_transition(
@@ -277,6 +306,102 @@ def query_review_history(
         workflows.read_latest_review_round_ref(),
         store,
     )
+
+
+def query_review_task_pack(
+    workflows: WorkflowStore,
+    store: BlobStore,
+) -> ReviewTaskPack | None:
+    """Build one bounded agent projection from the exact latest review."""
+
+    history = query_review_history(workflows, store)
+    if not history:
+        return None
+    latest = history[0]
+    try:
+        timeline = TimelineIR.from_canonical_bytes(
+            store.read(latest.timeline)
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise CorruptObject("invalid task-pack timeline") from exc
+    if timeline.ref != latest.timeline:
+        raise CorruptObject("task-pack timeline identity changed")
+
+    timeline_items = _timeline_items(timeline)
+    by_id = {item.item_id: item for item in timeline_items}
+    if len(by_id) != len(timeline_items):
+        raise CorruptObject("task-pack timeline has duplicate target IDs")
+    target_ids = {
+        target_id
+        for finding in latest.verdict.findings
+        if finding.locator is not None
+        for target_id in finding.locator.target_ids
+    }
+    unknown = target_ids - by_id.keys()
+    if unknown:
+        raise CorruptObject(
+            f"task pack has unknown review targets: {sorted(unknown)}"
+        )
+    frame_denominator = 1_000_000_000 * timeline.fps_den
+    inactive: set[str] = set()
+    for finding in latest.verdict.findings:
+        locator = finding.locator
+        if locator is None:
+            continue
+        for target_id in locator.target_ids:
+            item = by_id.get(target_id)
+            if item is None:
+                continue
+            item_start = (
+                item.start_ns * timeline.fps_num
+                + frame_denominator
+                - 1
+            ) // frame_denominator
+            item_end = (
+                (item.start_ns + item.duration_ns) * timeline.fps_num
+                + frame_denominator
+                - 1
+            ) // frame_denominator
+            if (
+                item_start >= locator.end_frame_exclusive
+                or item_end <= locator.start_frame
+            ):
+                inactive.add(target_id)
+    if inactive:
+        raise CorruptObject(
+            f"task pack has inactive review targets: {sorted(inactive)}"
+        )
+    if len(target_ids) > MAX_REVIEW_TASK_TARGETS:
+        raise CorruptObject("review task pack has too many targets")
+    selected_targets = tuple(
+        by_id[target_id] for target_id in sorted(target_ids)
+    )
+    task_pack = ReviewTaskPack(
+        latest_round=latest.round_ref,
+        review_round=latest.review_round,
+        verdict_ref=latest.review_round.verdict,
+        verdict=latest.verdict,
+        artifact=latest.verdict.artifact,
+        timeline=latest.timeline,
+        check_report=latest.verdict.check_report,
+        constraints=latest.verdict.constraints,
+        width=timeline.width,
+        height=timeline.height,
+        fps_num=timeline.fps_num,
+        fps_den=timeline.fps_den,
+        duration_ns=timeline.duration_ns,
+        target_snapshots=selected_targets,
+        source_mapping=ReviewSourceMapping(),
+    )
+    encoded = json.dumps(
+        asdict(task_pack),
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    if len(encoded) > MAX_REVIEW_TASK_PACK_BYTES:
+        raise CorruptObject("review projection exceeds the task-pack limit")
+    return task_pack
 
 
 def query_current_review(

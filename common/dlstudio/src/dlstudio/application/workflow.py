@@ -402,16 +402,45 @@ def submit_review_payload(
         + 1_000_000_000 * context.fps_den
         - 1
     ) // (1_000_000_000 * context.fps_den)
-    target_ids = {item.item_id for item in context.items}
+    targets = {item.item_id: item for item in context.items}
+    frame_denominator = 1_000_000_000 * context.fps_den
     for finding in findings:
         locator = finding.locator
         if locator is None:
             continue
         if locator.end_frame_exclusive > frame_count:
             raise ValueError("review locator exceeds the final artifact")
-        unknown = set(locator.target_ids) - target_ids
+        unknown = set(locator.target_ids) - targets.keys()
         if unknown:
             raise ValueError(f"review locator has unknown targets: {sorted(unknown)}")
+        inactive = {
+            target_id
+            for target_id in locator.target_ids
+            if (
+                (
+                    targets[target_id].start_ns * context.fps_num
+                    + frame_denominator
+                    - 1
+                )
+                // frame_denominator
+                >= locator.end_frame_exclusive
+                or (
+                    (
+                        targets[target_id].start_ns
+                        + targets[target_id].duration_ns
+                    )
+                    * context.fps_num
+                    + frame_denominator
+                    - 1
+                )
+                // frame_denominator
+                <= locator.start_frame
+            )
+        }
+        if inactive:
+            raise ValueError(
+                f"review locator has inactive targets: {sorted(inactive)}"
+            )
     verdict = ReviewVerdict(
         artifact=context.artifact,
         outcome=payload["outcome"],
