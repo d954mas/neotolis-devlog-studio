@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { studioV3 } from "./api/v3.client";
 import type { components } from "./api/v3.gen";
 import { ReviewWorkspace } from "./review/ReviewWorkspace";
+import { sameBlobRef } from "./review/types";
 import { WorkflowDashboard } from "./WorkflowDashboard";
 
 type Status = components["schemas"]["WorkflowStatus"];
@@ -50,15 +51,29 @@ export function App() {
 
   const workflow = status?.workflow;
   const stage = status?.current_stage;
-  const finalArtifact = workflow?.attempts
-    .find((attempt) => attempt.stage === "final")
+  const prepared = workflow?.attempts.find(
+    (attempt) =>
+      attempt.stage === "prepare" && attempt.state === "succeeded",
+  );
+  const finalized = workflow?.attempts.find(
+    (attempt) =>
+      attempt.stage === "final" && attempt.state === "succeeded",
+  );
+  const finalArtifact = finalized
     ?.outputs.find((output) => output.name === "artifact")?.blob;
+  const currentCheckReport = prepared?.outputs.find(
+    (output) => output.name === "check_report",
+  )?.blob;
+  const currentConstraints = prepared?.outputs.find(
+    (output) => output.name === "constraints",
+  )?.blob;
   const waitingForRevision =
     stage === "review" &&
     currentReview !== null &&
     currentReview.outcome !== "pass" &&
-    currentReview.artifact.sha256 === finalArtifact?.sha256 &&
-    currentReview.artifact.size === finalArtifact.size;
+    sameBlobRef(currentReview.artifact, finalArtifact) &&
+    sameBlobRef(currentReview.check_report, currentCheckReport) &&
+    sameBlobRef(currentReview.constraints, currentConstraints);
   const reviewing =
     status?.action === "review" &&
     workflow !== undefined &&

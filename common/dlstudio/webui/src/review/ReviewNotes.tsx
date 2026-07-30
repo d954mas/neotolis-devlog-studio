@@ -1,14 +1,19 @@
 import type {
   FrameSelection,
-  ResolutionDraft,
-  ResolutionStatus,
   ReviewContext,
   ReviewFindingBody,
   ReviewRegion,
-  ReviewTimelineItem,
 } from "./types";
-import { useRef } from "preact/hooks";
-import { formatSelection } from "./types";
+import { useEffect, useRef } from "preact/hooks";
+import { formatSelection, targetLabel } from "./types";
+
+export type ResolutionSummary = {
+  total: number;
+  fixed: number;
+  stillWrong: number;
+  obsolete: number;
+  pending: number;
+};
 
 type ReviewNotesProps = {
   context: ReviewContext;
@@ -16,55 +21,19 @@ type ReviewNotesProps = {
   region: ReviewRegion | null;
   activeTargets: string[];
   findings: ReviewFindingBody[];
-  previousFindings: ReviewFindingBody[];
-  resolutionDrafts: Record<string, ResolutionDraft>;
+  resolutionSummary: ResolutionSummary;
+  pendingPreviousText: string | null;
+  focusComposerToken: number;
   note: string;
   submitting: boolean;
+  readOnly: boolean;
+  reviewReady: boolean;
   onNote: (value: string) => void;
   onAdd: () => void;
   onRemove: (findingId: string) => void;
   onSelect: (finding: ReviewFindingBody) => void;
-  onResolve: (
-    findingId: string,
-    status: ResolutionStatus,
-    currentFindingId?: string | null,
-  ) => void;
-  onResolveAll: () => void;
   onSubmit: (outcome: "pass" | "changes_requested") => void;
 };
-
-function targetLabel(
-  targetId: string,
-  items: ReviewTimelineItem[],
-): string {
-  const item = items.find((candidate) => candidate.item_id === targetId);
-  if (!item) return targetId;
-  if (item.kind === "audio") {
-    const role = item.lane.slice("audio.".length);
-    const labels: Record<string, string> = {
-      voice: "Голос",
-      music: "Музыка",
-      sfx: "Звуковой эффект",
-      ambient: "Атмосфера",
-    };
-    return labels[role] ?? "Звук";
-  }
-  if (item.kind === "transition") {
-    const labels: Record<string, string> = {
-      fade: "Плавный переход",
-      "fade in": "Появление",
-      "fade out": "Затемнение",
-      "dip black": "Переход через чёрный",
-      "slide left": "Сдвиг влево",
-      "slide right": "Сдвиг вправо",
-    };
-    return labels[item.label] ?? "Переход";
-  }
-  if (item.label.startsWith("solid ")) {
-    return item.z === 0 ? "Фон" : "Графический слой";
-  }
-  return item.label;
-}
 
 export function ReviewNotes({
   context,
@@ -72,20 +41,30 @@ export function ReviewNotes({
   region,
   activeTargets,
   findings,
-  previousFindings,
-  resolutionDrafts,
+  resolutionSummary,
+  pendingPreviousText,
+  focusComposerToken,
   note,
   submitting,
+  readOnly,
+  reviewReady,
   onNote,
   onAdd,
   onRemove,
   onSelect,
-  onResolve,
-  onResolveAll,
   onSubmit,
 }: ReviewNotesProps) {
   const noteRef = useRef<HTMLTextAreaElement>(null);
   const hasUnsavedNote = note.trim().length > 0;
+
+  useEffect(() => {
+    if (
+      focusComposerToken > 0 &&
+      window.matchMedia("(min-width: 901px)").matches
+    ) {
+      noteRef.current?.focus();
+    }
+  }, [focusComposerToken]);
 
   function saveFinding() {
     onAdd();
@@ -98,79 +77,33 @@ export function ReviewNotes({
   }
 
   return (
-    <aside class="review-notes" aria-labelledby="notes-title">
+    <aside
+      class={`review-notes ${readOnly ? "read-only" : ""}`}
+      aria-labelledby="notes-title"
+    >
       <div>
-        <p class="label">Комментарий к этому моменту</p>
-        <h3 id="notes-title">Что изменить?</h3>
+        <p class="label">
+          {readOnly ? "Прошлая версия" : "Комментарий к этому моменту"}
+        </p>
+        <h3 id="notes-title">
+          {readOnly ? "Смотрите и слушайте" : "Что изменить?"}
+        </h3>
       </div>
-      {previousFindings.length > 0 && (
-        <section
-          class="resolution-review"
-          aria-labelledby="resolution-title"
-        >
-          <div class="resolution-head">
-            <div>
-              <p class="label">Прошлый раунд</p>
-              <h3 id="resolution-title">Что стало с замечаниями?</h3>
-            </div>
-            <button type="button" class="quiet" onClick={onResolveAll}>
-              Все исправлены
-            </button>
-          </div>
-          <ol>
-            {previousFindings.map((finding) => {
-              const draft = resolutionDrafts[finding.finding_id] ?? {
-                status: "unresolved",
-                currentFindingId: null,
-              };
-              return (
-                <li key={finding.finding_id}>
-                  <p>{finding.text}</p>
-                  <select
-                    value={draft.status}
-                    disabled={submitting}
-                    aria-label={`Результат: ${finding.text}`}
-                    onInput={(event) =>
-                      onResolve(
-                        finding.finding_id,
-                        event.currentTarget.value as ResolutionStatus,
-                      )
-                    }
-                  >
-                    <option value="unresolved">Выберите результат</option>
-                    <option value="fixed">Исправлено</option>
-                    <option value="still_wrong">Всё ещё не так</option>
-                    <option value="obsolete">Больше не актуально</option>
-                  </select>
-                  {draft.status === "still_wrong" && (
-                    <select
-                      value={draft.currentFindingId ?? ""}
-                      disabled={submitting}
-                      aria-label={`Новый комментарий: ${finding.text}`}
-                      onInput={(event) =>
-                        onResolve(
-                          finding.finding_id,
-                          "still_wrong",
-                          event.currentTarget.value || null,
-                        )
-                      }
-                    >
-                      <option value="">Выберите новый комментарий</option>
-                      {findings.map((current) => (
-                        <option
-                          key={current.finding_id}
-                          value={current.finding_id}
-                        >
-                          {current.text}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </li>
-              );
-            })}
-          </ol>
-        </section>
+      {readOnly && (
+        <div class="old-version-lock" role="status" aria-live="polite">
+          До · сравнение без разметки. Вернитесь к «Сейчас», чтобы
+          оставить комментарий.
+        </div>
+      )}
+      {pendingPreviousText && !readOnly && (
+        <div class="continued-finding" role="status">
+          <strong>Уточните, что всё ещё не так</strong>
+          <p>{pendingPreviousText}</p>
+          <small>
+            Мы открыли примерно тот же момент. Проверьте диапазон и отметьте
+            область заново, если она нужна.
+          </small>
+        </div>
       )}
       <div class="locator-summary">
         <strong>{formatSelection(selection, context)}</strong>
@@ -192,7 +125,7 @@ export function ReviewNotes({
         <textarea
           ref={noteRef}
           value={note}
-          disabled={submitting}
+          disabled={submitting || readOnly || !reviewReady}
           onInput={(event) => onNote(event.currentTarget.value)}
           placeholder="Например: переход слишком резкий, а музыка перекрывает фразу"
         />
@@ -200,7 +133,9 @@ export function ReviewNotes({
       <button
         type="button"
         class="primary add-note"
-        disabled={submitting || !hasUnsavedNote}
+        disabled={
+          submitting || readOnly || !reviewReady || !hasUnsavedNote
+        }
         onClick={saveFinding}
       >
         Сохранить комментарий
@@ -222,6 +157,7 @@ export function ReviewNotes({
                 <button
                   type="button"
                   class="finding-jump"
+                  disabled={readOnly}
                   onClick={() => onSelect(finding)}
                 >
                   <span>{String(index + 1).padStart(2, "0")}</span>
@@ -252,7 +188,7 @@ export function ReviewNotes({
                 <button
                   type="button"
                   class="remove-finding"
-                  disabled={submitting}
+                  disabled={submitting || readOnly}
                   onClick={() => removeFinding(finding.finding_id)}
                   aria-label={`Удалить замечание ${index + 1}`}
                 >
@@ -266,26 +202,49 @@ export function ReviewNotes({
 
       <div class="review-note-actions">
         <p>
-          {hasUnsavedNote
+          {readOnly
+            ? "Версия «До» открыта только для сравнения."
+            : !reviewReady
+            ? "Сначала загрузится точное видео и данные сравнения."
+            : hasUnsavedNote
             ? "Сначала сохраните написанный комментарий."
             : findings.length === 0
-            ? "Можно одобрить версию или добавить комментарий."
-            : `Готово к отправке: ${findings.length}`}
+            ? resolutionSummary.total > 0
+              ? `${resolutionSummary.fixed} исправлено · ${resolutionSummary.obsolete} неактуально`
+              : "Можно одобрить версию или добавить комментарий."
+            : `${findings.length} новых · ${resolutionSummary.fixed} исправлено · ${resolutionSummary.obsolete} неактуально`}
         </p>
         <div>
           <button
             type="button"
             class="quiet"
-            disabled={submitting || findings.length > 0 || hasUnsavedNote}
+            disabled={
+              submitting ||
+              readOnly ||
+              !reviewReady ||
+              findings.length > 0 ||
+              hasUnsavedNote ||
+              resolutionSummary.pending > 0 ||
+              resolutionSummary.stillWrong > 0
+            }
             onClick={() => onSubmit("pass")}
           >
-            Всё устраивает
+            {resolutionSummary.total > 0
+              ? resolutionSummary.obsolete > 0
+                ? `Подтвердить: ${resolutionSummary.fixed} исправлено`
+                : "Подтвердить: всё исправлено"
+              : "Всё устраивает"}
           </button>
           <button
             type="button"
             class="primary"
             disabled={
-              submitting || findings.length === 0 || hasUnsavedNote
+              submitting ||
+              readOnly ||
+              !reviewReady ||
+              findings.length === 0 ||
+              hasUnsavedNote ||
+              resolutionSummary.pending > 0
             }
             onClick={() => onSubmit("changes_requested")}
           >

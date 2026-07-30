@@ -172,6 +172,7 @@ def run(
     for name, command in (
         ("webui-tests", [npm, "test"]),
         ("webui-build", [npm, "run", "build"]),
+        ("webui-e2e", [npm, "run", "test:e2e"]),
     ):
         returncode = _process(command, webui_root, env)
         results.append(_external_result(name, command, returncode))

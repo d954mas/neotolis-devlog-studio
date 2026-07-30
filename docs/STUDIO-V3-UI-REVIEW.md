@@ -26,6 +26,28 @@ fact ownership, rendering, immutable artifacts, or cache behavior:
 - the review-only layout was checked at 1440×900, 1024×768, 768×1024,
   390×844 and 320×700 with no horizontal overflow.
 
+The repeat-review follow-up adds the deliberately small A/B layer:
+
+- one previous finding at a time, with previous/next navigation and a
+  hold-or-toggle `До исправления` control;
+- presentation-time navigation with independent FPS/duration clamping, while
+  every locator remains bound to its own exact artifact;
+- read-only old-video annotation with working playback, frame-step and audio
+  controls;
+- default-fixed resolutions, with only `still_wrong` and `obsolete`
+  exceptions exposed to the owner;
+- atomic local restoration of the active finding, note, range and region, plus
+  migration of pre-redesign drafts;
+- visible media failure/retry states and full stale-round refresh after a
+  two-tab CAS conflict.
+
+Independent subagent reviews found and drove fixes for current/old frame
+desynchronization, lost legacy drafts, orphaned continuation findings,
+stuck hold-preview state, mobile overflow, volume jumps, failed thumbnail
+retry, incorrect pending-draft restoration and cached-media readiness races.
+The final full gate passes 212 Python tests, 6 fast UI tests and 8 real-browser
+Playwright scenarios.
+
 Post-redesign evidence:
 
 - `output/playwright/ui-redesign-20260730/desktop-final.png`

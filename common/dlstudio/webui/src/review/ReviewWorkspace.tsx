@@ -1,6 +1,5 @@
 import type { RefObject } from "preact";
 import {
-  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -8,8 +7,18 @@ import {
 } from "preact/hooks";
 import { studioV3 } from "../api/v3.client";
 import { FrameStrip } from "./FrameStrip";
-import { ReviewNotes } from "./ReviewNotes";
-import { ReviewPlayer } from "./ReviewPlayer";
+import {
+  PreviousFindingsReview,
+  type PreviousPackState,
+} from "./PreviousFindingsReview";
+import {
+  ReviewNotes,
+  type ResolutionSummary,
+} from "./ReviewNotes";
+import {
+  ReviewPlayer,
+  type ReviewMediaState,
+} from "./ReviewPlayer";
 import { ReviewTimeline } from "./ReviewTimeline";
 import type {
   FrameSelection,
@@ -18,14 +27,33 @@ import type {
   ReviewContext,
   ReviewFindingBody,
   ReviewRegion,
+  ReviewTaskPack,
   WorkflowStatus,
 } from "./types";
-import { clampFrame, frameToSeconds, nsToFrameCeil } from "./types";
+import {
+  clampFrame,
+  frameToSeconds,
+  mapFrameBoundaryByPresentationTime,
+  mapFrameByPresentationTime,
+  nsToFrameCeil,
+  sameBlobRef,
+} from "./types";
 
 type ReviewWorkspaceProps = {
   onError: (message: string | null) => void;
   onSubmitted: (status: WorkflowStatus) => void;
 };
+
+const DRAFT_STORAGE_WARNING =
+  "Черновик останется в этой вкладке, но браузер не смог сохранить его для перезагрузки.";
+
+function removeLocalDraft(key: string): void {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // Storage can be disabled. The in-memory draft remains usable.
+  }
+}
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -54,7 +82,90 @@ function isDraftFinding(value: unknown): value is ReviewFindingBody {
   );
 }
 
+function isResolutionDraft(value: unknown): value is ResolutionDraft {
+  if (typeof value !== "object" || value === null) return false;
+  const draft = value as Partial<ResolutionDraft>;
+  return (
+    (draft.status === "unresolved" ||
+      draft.status === "fixed" ||
+      draft.status === "obsolete" ||
+      draft.status === "still_wrong") &&
+    (draft.currentFindingId === null ||
+      typeof draft.currentFindingId === "string")
+  );
+}
+
+function readDraftSelection(
+  value: unknown,
+  context: ReviewContext,
+): FrameSelection | null {
+  if (typeof value !== "object" || value === null) return null;
+  const selection = value as Partial<FrameSelection>;
+  if (
+    !Number.isSafeInteger(selection.startFrame) ||
+    !Number.isSafeInteger(selection.endFrameExclusive)
+  ) {
+    return null;
+  }
+  const startFrame = selection.startFrame as number;
+  const endFrameExclusive = selection.endFrameExclusive as number;
+  if (
+    startFrame < 0 ||
+    endFrameExclusive <= startFrame ||
+    clampFrame(startFrame, context) !== startFrame ||
+    clampFrame(endFrameExclusive - 1, context) !==
+      endFrameExclusive - 1
+  ) {
+    return null;
+  }
+  return { startFrame, endFrameExclusive };
+}
+
+function readDraftRegion(
+  value: unknown,
+): ReviewRegion | null | undefined {
+  if (value === null) return null;
+  if (typeof value !== "object") return undefined;
+  const region = value as Partial<ReviewRegion>;
+  const coordinates = [
+    region.x_milli,
+    region.y_milli,
+    region.width_milli,
+    region.height_milli,
+  ];
+  if (!coordinates.every(Number.isSafeInteger)) return undefined;
+  const [x, y, width, height] = coordinates as number[];
+  if (
+    x < 0 ||
+    y < 0 ||
+    width <= 0 ||
+    height <= 0 ||
+    x + width > 1000 ||
+    y + height > 1000
+  ) {
+    return undefined;
+  }
+  return {
+    x_milli: x,
+    y_milli: y,
+    width_milli: width,
+    height_milli: height,
+  };
+}
+
 function draftStorageKey(context: ReviewContext): string {
+  return [
+    "dlstudio.review",
+    context.artifact.sha256,
+    context.timeline.sha256,
+    context.check_report.sha256,
+    context.constraints.sha256,
+    context.latest_round?.sha256 ?? "first",
+    context.latest_round?.size ?? 0,
+  ].join(".");
+}
+
+function legacyDraftStorageKey(context: ReviewContext): string {
   return [
     "dlstudio.review",
     context.artifact.sha256,
@@ -83,7 +194,22 @@ export function ReviewWorkspace({
   const [resolutionDrafts, setResolutionDrafts] = useState<
     Record<string, ResolutionDraft>
   >({});
+  const [previousPack, setPreviousPack] =
+    useState<ReviewTaskPack | null>(null);
+  const [previousPackState, setPreviousPackState] =
+    useState<PreviousPackState>("loading");
+  const [activePreviousIndex, setActivePreviousIndex] = useState(0);
+  const [showingOld, setShowingOld] = useState(false);
+  const [pendingPreviousFindingId, setPendingPreviousFindingId] =
+    useState<string | null>(null);
+  const [focusComposerToken, setFocusComposerToken] = useState(0);
   const [loadedDraftKey, setLoadedDraftKey] = useState<string | null>(null);
+  const [draftStorageWarning, setDraftStorageWarning] =
+    useState<string | null>(null);
+  const [currentMediaState, setCurrentMediaState] =
+    useState<ReviewMediaState>("loading");
+  const [comparisonMediaState, setComparisonMediaState] =
+    useState<ReviewMediaState>("ready");
   const [contextRequest, setContextRequest] = useState(0);
 
   useEffect(() => {
@@ -114,13 +240,154 @@ export function ReviewWorkspace({
   useEffect(() => {
     if (!context) return;
     const key = draftStorageKey(context);
+    const requiredFindings =
+      context.latest_verdict?.findings.filter(
+        (finding) => finding.requires_change,
+      ) ?? [];
+    const requiredIds = new Set(
+      requiredFindings.map((finding) => finding.finding_id),
+    );
+    const defaults = Object.fromEntries(
+      [...requiredIds].map((findingId) => [
+        findingId,
+        { status: "unresolved", currentFindingId: null },
+      ]),
+    ) as Record<string, ResolutionDraft>;
     try {
-      const value = JSON.parse(localStorage.getItem(key) ?? "[]");
-      if (Array.isArray(value)) {
-        setFindings(value.filter(isDraftFinding));
+      const currentRaw = localStorage.getItem(key);
+      let value = JSON.parse(currentRaw ?? "null") as {
+        findings?: unknown;
+        resolutions?: unknown;
+        pendingPreviousFindingId?: unknown;
+        activePreviousIndex?: unknown;
+        note?: unknown;
+        selection?: unknown;
+        region?: unknown;
+      } | null;
+      if (currentRaw === null) {
+        const legacyRaw = localStorage.getItem(
+          legacyDraftStorageKey(context),
+        );
+        if (legacyRaw !== null) {
+          const legacyValue = JSON.parse(legacyRaw) as unknown;
+          if (Array.isArray(legacyValue)) {
+            value = { findings: legacyValue };
+            try {
+              localStorage.setItem(key, JSON.stringify(value));
+            } catch {
+              setDraftStorageWarning(DRAFT_STORAGE_WARNING);
+            }
+          }
+        }
+      }
+      const storedFindings = Array.isArray(value?.findings)
+        ? value.findings.filter(isDraftFinding)
+        : [];
+      const storedResolutions =
+        typeof value?.resolutions === "object" &&
+        value.resolutions !== null
+          ? Object.fromEntries(
+              Object.entries(value.resolutions).filter(
+                ([findingId, draft]) =>
+                  requiredIds.has(findingId) && isResolutionDraft(draft),
+              ),
+            )
+          : {};
+      const nextResolutions = {
+        ...defaults,
+        ...storedResolutions,
+      };
+      const storedSelection = readDraftSelection(
+        value?.selection,
+        context,
+      );
+      const storedRegion = readDraftRegion(value?.region);
+      const storedNote =
+        typeof value?.note === "string" ? value.note : "";
+      const storedActiveIndex =
+        Number.isSafeInteger(value?.activePreviousIndex) &&
+        Number(value?.activePreviousIndex) >= 0
+          ? Math.min(
+              Number(value?.activePreviousIndex),
+              Math.max(0, requiredFindings.length - 1),
+            )
+          : 0;
+      const pendingId =
+        typeof value?.pendingPreviousFindingId === "string" &&
+        requiredIds.has(value.pendingPreviousFindingId)
+          ? value.pendingPreviousFindingId
+          : null;
+      const pendingDraft =
+        pendingId === null ? null : nextResolutions[pendingId];
+      const canRestorePending =
+        pendingId !== null &&
+        pendingDraft?.status === "still_wrong" &&
+        pendingDraft.currentFindingId === null &&
+        storedNote.trim().length > 0 &&
+        storedSelection !== null &&
+        storedRegion !== undefined;
+      for (const [findingId, draft] of Object.entries(
+        nextResolutions,
+      )) {
+        if (
+          draft.status === "still_wrong" &&
+          draft.currentFindingId === null &&
+          (!canRestorePending || findingId !== pendingId)
+        ) {
+          nextResolutions[findingId] = {
+            status: "unresolved",
+            currentFindingId: null,
+          };
+        }
+      }
+      setFindings(storedFindings);
+      setResolutionDrafts(nextResolutions);
+      setPendingPreviousFindingId(
+        canRestorePending ? pendingId : null,
+      );
+      setActivePreviousIndex(
+        canRestorePending && pendingId
+          ? requiredFindings.findIndex(
+              (finding) => finding.finding_id === pendingId,
+            )
+          : storedActiveIndex,
+      );
+      if (
+        storedSelection !== null &&
+        storedRegion !== undefined
+      ) {
+        setSelection(storedSelection);
+        setRegion(storedRegion);
+        setNote(storedNote);
+        setCurrentFrame(storedSelection.startFrame);
+        requestAnimationFrame(() => {
+          const video = videoRef.current;
+          if (video) {
+            video.pause();
+            video.currentTime = frameToSeconds(
+              storedSelection.startFrame,
+              context,
+            );
+          }
+        });
+      } else {
+        setSelection({ startFrame: 0, endFrameExclusive: 1 });
+        setRegion(null);
+        setNote("");
+        setCurrentFrame(0);
       }
     } catch {
-      localStorage.removeItem(key);
+      removeLocalDraft(key);
+      removeLocalDraft(legacyDraftStorageKey(context));
+      setFindings([]);
+      setResolutionDrafts(defaults);
+      setPendingPreviousFindingId(null);
+      setActivePreviousIndex(0);
+      setSelection({ startFrame: 0, endFrameExclusive: 1 });
+      setRegion(null);
+      setNote("");
+      setCurrentFrame(0);
+      setDraftStorageWarning(DRAFT_STORAGE_WARNING);
     }
     setLoadedDraftKey(key);
   }, [context]);
@@ -129,22 +396,120 @@ export function ReviewWorkspace({
     if (!context) return;
     const key = draftStorageKey(context);
     if (loadedDraftKey !== key) return;
-    localStorage.setItem(key, JSON.stringify(findings));
-  }, [context, findings, loadedDraftKey]);
+    try {
+      localStorage.setItem(
+        key,
+        JSON.stringify({
+          findings,
+          resolutions: resolutionDrafts,
+          pendingPreviousFindingId,
+          activePreviousIndex,
+          note,
+          selection,
+          region,
+        }),
+      );
+      setDraftStorageWarning(null);
+    } catch {
+      setDraftStorageWarning(DRAFT_STORAGE_WARNING);
+    }
+  }, [
+    context,
+    activePreviousIndex,
+    findings,
+    loadedDraftKey,
+    note,
+    pendingPreviousFindingId,
+    region,
+    resolutionDrafts,
+    selection,
+  ]);
 
   useEffect(() => {
-    const required = context?.latest_verdict?.findings.filter(
+    let active = true;
+    setPreviousPack(null);
+    setShowingOld(false);
+    const expectedLatestRound = context?.latest_round;
+    if (!expectedLatestRound) {
+      setPreviousPackState("ready");
+      return () => {
+        active = false;
+      };
+    }
+    setPreviousPackState("loading");
+    async function loadPreviousPack() {
+      const result = await studioV3.GET("/api/v3/review/task-pack");
+      if (!active) return;
+      if (!result.data) {
+        setPreviousPackState("unavailable");
+        return;
+      }
+      if (!sameBlobRef(result.data.latest_round, expectedLatestRound)) {
+        setPreviousPackState("mismatch");
+        return;
+      }
+      setPreviousPack(result.data);
+      setPreviousPackState("ready");
+    }
+    void loadPreviousPack().catch(() => {
+      if (active) setPreviousPackState("unavailable");
+    });
+    return () => {
+      active = false;
+    };
+  }, [
+    context?.latest_round?.sha256,
+    context?.latest_round?.size,
+    contextRequest,
+  ]);
+
+  useEffect(() => {
+    setComparisonMediaState("ready");
+  }, [
+    previousPack?.artifact.sha256,
+    previousPack?.artifact.size,
+  ]);
+
+  useEffect(() => {
+    if (
+      !context ||
+      !previousPack ||
+      previousPackState !== "ready"
+    ) {
+      return;
+    }
+    const required = previousPack.verdict.findings.filter(
       (finding) => finding.requires_change,
     );
-    setResolutionDrafts(
-      Object.fromEntries(
-        (required ?? []).map((finding) => [
-          finding.finding_id,
-          { status: "unresolved", currentFindingId: null },
-        ]),
-      ),
-    );
-  }, [context?.latest_round?.sha256, context?.latest_round?.size]);
+    const finding =
+      required[Math.min(activePreviousIndex, required.length - 1)];
+    if (!finding) return;
+    if (
+      pendingPreviousFindingId === finding.finding_id ||
+      note.trim().length > 0
+    ) {
+      return;
+    }
+    const currentFindingId =
+      resolutionDrafts[finding.finding_id]?.currentFindingId;
+    const linked =
+      currentFindingId == null
+        ? null
+        : (findings.find(
+            (candidate) =>
+              candidate.finding_id === currentFindingId,
+          ) ?? null);
+    focusPreviousOnCurrent(finding, linked);
+  }, [
+    activePreviousIndex,
+    context?.artifact.sha256,
+    context?.artifact.size,
+    loadedDraftKey,
+    pendingPreviousFindingId,
+    previousPack?.latest_round.sha256,
+    previousPack?.latest_round.size,
+    previousPackState,
+  ]);
 
   const activeTargets = useMemo(() => {
     if (!context) return [];
@@ -189,13 +554,120 @@ export function ReviewWorkspace({
     );
   }
 
+  const contextPreviousFindings =
+    context.latest_verdict?.findings.filter(
+      (finding) => finding.requires_change,
+    ) ?? [];
+  const previousFindings =
+    previousPackState === "ready" && previousPack
+      ? previousPack.verdict.findings.filter(
+          (finding) => finding.requires_change,
+        )
+      : contextPreviousFindings;
+  const activePreviousFinding =
+    previousFindings.length === 0
+      ? null
+      : previousFindings[
+          Math.min(activePreviousIndex, previousFindings.length - 1)
+        ];
+  const activePreviousDraft =
+    activePreviousFinding === null
+      ? null
+      : (resolutionDrafts[activePreviousFinding.finding_id] ?? {
+          status: "unresolved",
+          currentFindingId: null,
+        });
+  const activeCurrentFinding =
+    activePreviousDraft?.currentFindingId === null ||
+    activePreviousDraft?.currentFindingId === undefined
+      ? null
+      : (findings.find(
+          (finding) =>
+            finding.finding_id === activePreviousDraft.currentFindingId,
+        ) ?? null);
+  const sameMedia =
+    previousPack !== null &&
+    sameBlobRef(previousPack.artifact, context.artifact);
+  const comparison =
+    showingOld &&
+    previousPack !== null &&
+    activePreviousFinding?.locator
+      ? {
+          context: previousPack,
+          frame: clampFrame(
+            activePreviousFinding.locator.start_frame,
+            previousPack,
+          ),
+          region: activePreviousFinding.locator.region ?? null,
+          sameMedia,
+        }
+      : null;
+  const reviewReady =
+    (previousFindings.length === 0 ||
+      (previousPackState === "ready" && previousPack !== null)) &&
+    currentMediaState === "ready" &&
+    comparisonMediaState === "ready";
+  const mediaError =
+    currentMediaState === "error"
+      ? "Не удалось открыть текущую точную версию."
+      : comparisonMediaState === "error"
+        ? "Не удалось открыть точную версию «До»."
+        : null;
+  const resolutionSummary = previousFindings.reduce<ResolutionSummary>(
+    (summary, finding) => {
+      const draft = resolutionDrafts[finding.finding_id] ?? {
+        status: "unresolved",
+        currentFindingId: null,
+      };
+      if (draft.status === "obsolete") {
+        summary.obsolete += 1;
+      } else if (draft.status === "still_wrong") {
+        summary.stillWrong += 1;
+        if (
+          draft.currentFindingId === null ||
+          !findings.some(
+            (current) =>
+              current.finding_id === draft.currentFindingId,
+          )
+        ) {
+          summary.pending += 1;
+        }
+      } else {
+        summary.fixed += 1;
+      }
+      return summary;
+    },
+    {
+      total: previousFindings.length,
+      fixed: 0,
+      stillWrong: 0,
+      obsolete: 0,
+      pending: 0,
+    },
+  );
+  const pendingPreviousText =
+    pendingPreviousFindingId === null
+      ? null
+      : (previousFindings.find(
+          (finding) =>
+            finding.finding_id === pendingPreviousFindingId,
+        )?.text ?? null);
+
   function seekVideo(frame: number): number | undefined {
     if (!context) return undefined;
     const next = clampFrame(frame, context);
-    const video = videoRef.current;
-    if (video) {
-      video.pause();
-      video.currentTime = frameToSeconds(next, context);
+    const applySeek = () => {
+      const video = videoRef.current;
+      if (video) {
+        video.pause();
+        video.currentTime = frameToSeconds(next, context);
+      }
+    };
+    if (showingOld) {
+      setShowingOld(false);
+      requestAnimationFrame(applySeek);
+    } else {
+      applySeek();
     }
     setCurrentFrame(next);
     return next;
@@ -231,14 +703,15 @@ export function ReviewWorkspace({
     seekVideo(focusFrame);
   }
 
-  const handlePlaybackFrame = useCallback((frame: number) => {
+  function handlePlaybackFrame(frame: number) {
+    if (showingOld) return;
     setCurrentFrame(frame);
     setSelection((current) =>
       current.endFrameExclusive === current.startFrame + 1
         ? { startFrame: frame, endFrameExclusive: frame + 1 }
         : current,
     );
-  }, []);
+  }
 
   function addFinding() {
     const text = note.trim();
@@ -253,20 +726,27 @@ export function ReviewWorkspace({
     ) {
       sequence += 1;
     }
-    setFindings((current) => [
-      ...current,
-      {
-        finding_id: `studio.ui.${String(sequence).padStart(3, "0")}`,
-        text,
-        requires_change: true,
-        locator: {
-          start_frame: selection.startFrame,
-          end_frame_exclusive: selection.endFrameExclusive,
-          region,
-          target_ids: activeTargets,
-        },
+    const findingId = `studio.ui.${String(sequence).padStart(3, "0")}`;
+    const finding: ReviewFindingBody = {
+      finding_id: findingId,
+      text,
+      requires_change: true,
+      locator: {
+        start_frame: selection.startFrame,
+        end_frame_exclusive: selection.endFrameExclusive,
+        region,
+        target_ids: activeTargets,
       },
-    ]);
+    };
+    setFindings((current) => [...current, finding]);
+    if (pendingPreviousFindingId !== null) {
+      resolvePrevious(
+        pendingPreviousFindingId,
+        "still_wrong",
+        findingId,
+      );
+      setPendingPreviousFindingId(null);
+    }
     setNote("");
     setRegion(null);
   }
@@ -282,19 +762,152 @@ export function ReviewWorkspace({
     seekVideo(locator.start_frame);
   }
 
+  function focusPreviousOnCurrent(
+    finding: ReviewFindingBody,
+    linkedFinding: ReviewFindingBody | null,
+  ) {
+    if (linkedFinding?.locator) {
+      selectFinding(linkedFinding);
+      return;
+    }
+    if (!previousPack || !context || !finding.locator) return;
+    const startFrame = mapFrameByPresentationTime(
+      finding.locator.start_frame,
+      previousPack,
+      context,
+    );
+    const mappedEnd = mapFrameBoundaryByPresentationTime(
+      finding.locator.end_frame_exclusive,
+      previousPack,
+      context,
+    );
+    setSelection({
+      startFrame,
+      endFrameExclusive: Math.max(startFrame + 1, mappedEnd),
+    });
+    setRegion(null);
+    setCurrentFrame(startFrame);
+    requestAnimationFrame(() => {
+      const video = videoRef.current;
+      if (video) {
+        video.pause();
+        video.currentTime = frameToSeconds(startFrame, context);
+      }
+    });
+  }
+
   function resolvePrevious(
     findingId: string,
     status: ResolutionStatus,
     currentFindingId: string | null = null,
   ) {
+    if (
+      findingId === pendingPreviousFindingId &&
+      (status !== "still_wrong" || currentFindingId !== null)
+    ) {
+      setPendingPreviousFindingId(null);
+      setNote("");
+    }
     setResolutionDrafts((current) => ({
       ...current,
       [findingId]: { status, currentFindingId },
     }));
   }
 
+  function replacePreviousResolution(
+    findingId: string,
+    status: "unresolved" | "obsolete",
+  ) {
+    const linkedFindingId =
+      resolutionDrafts[findingId]?.currentFindingId;
+    if (linkedFindingId) {
+      setFindings((current) =>
+        current.filter(
+          (finding) => finding.finding_id !== linkedFindingId,
+        ),
+      );
+    }
+    resolvePrevious(findingId, status);
+  }
+
+  function continuePreviousFinding(finding: ReviewFindingBody) {
+    if (previousPack === null || context === null || !reviewReady) return;
+    if (note.trim()) {
+      onError(
+        "Сначала сохраните или очистите текущий комментарий, затем продолжите прошлое замечание.",
+      );
+      return;
+    }
+    const draft = resolutionDrafts[finding.finding_id];
+    const linked =
+      draft?.currentFindingId === null ||
+      draft?.currentFindingId === undefined
+        ? null
+        : findings.find(
+            (current) =>
+              current.finding_id === draft.currentFindingId,
+          );
+    if (linked) {
+      selectFinding(linked);
+      return;
+    }
+    setShowingOld(false);
+    setPendingPreviousFindingId(finding.finding_id);
+    resolvePrevious(finding.finding_id, "still_wrong", null);
+    focusPreviousOnCurrent(finding, null);
+    setNote(finding.text);
+    setFocusComposerToken((current) => current + 1);
+    onError(null);
+  }
+
+  function removeFinding(findingId: string) {
+    const removed = findings.find(
+      (finding) => finding.finding_id === findingId,
+    );
+    const linkedPrevious = Object.entries(resolutionDrafts).find(
+      ([, draft]) => draft.currentFindingId === findingId,
+    )?.[0];
+    setFindings((current) =>
+      current.filter((finding) => finding.finding_id !== findingId),
+    );
+    if (linkedPrevious) {
+      setPendingPreviousFindingId(linkedPrevious);
+      resolvePrevious(linkedPrevious, "still_wrong", null);
+      const previous = previousFindings.find(
+        (finding) => finding.finding_id === linkedPrevious,
+      );
+      setNote(previous?.text ?? "");
+      if (removed?.locator) {
+        setSelection({
+          startFrame: removed.locator.start_frame,
+          endFrameExclusive: removed.locator.end_frame_exclusive,
+        });
+        setRegion(removed.locator.region ?? null);
+        seekVideo(removed.locator.start_frame);
+      }
+      setFocusComposerToken((current) => current + 1);
+    }
+  }
+
+  function retryMedia() {
+    if (currentMediaState === "error") {
+      setCurrentMediaState("loading");
+      videoRef.current?.load();
+      return;
+    }
+    if (comparisonMediaState === "error") {
+      setComparisonMediaState("loading");
+      setShowingOld(false);
+      requestAnimationFrame(() => setShowingOld(true));
+    }
+  }
+
   async function submit(outcome: "pass" | "changes_requested") {
     if (!context) return;
+    if (!reviewReady) {
+      onError("Сначала загрузите точную прошлую версию.");
+      return;
+    }
     if (
       context.latest_round !== null &&
       context.latest_verdict === null
@@ -303,28 +916,19 @@ export function ReviewWorkspace({
       return;
     }
     const draftKey = draftStorageKey(context);
-    const previousFindings =
-      context.latest_verdict?.findings.filter(
-        (finding) => finding.requires_change,
-      ) ?? [];
     const resolutions = [];
+    const linkedCurrentFindings = new Set<string>();
     for (const previous of previousFindings) {
       const draft = resolutionDrafts[previous.finding_id];
-      let status = draft?.status;
+      let status = draft?.status ?? "unresolved";
       if (outcome === "pass" && status === "still_wrong") {
         onError(
           "Нельзя одобрить версию, пока замечание отмечено «всё ещё не так».",
         );
         return;
       }
-      if (outcome === "pass") {
-        if (status === undefined || status === "unresolved") {
-          status = "fixed";
-        }
-      }
-      if (!status || status === "unresolved") {
-        onError("Укажите результат для каждого прошлого замечания.");
-        return;
+      if (status === "unresolved") {
+        status = "fixed";
       }
       const currentFindingId =
         status === "still_wrong" ? draft?.currentFindingId : null;
@@ -338,6 +942,18 @@ export function ReviewWorkspace({
           "Для «всё ещё не так» выберите новый точный комментарий.",
         );
         return;
+      }
+      if (
+        currentFindingId &&
+        linkedCurrentFindings.has(currentFindingId)
+      ) {
+        onError(
+          "Один новый комментарий нельзя связать с двумя прошлыми замечаниями.",
+        );
+        return;
+      }
+      if (currentFindingId) {
+        linkedCurrentFindings.add(currentFindingId);
       }
       resolutions.push({
         previous_finding_id: previous.finding_id,
@@ -366,10 +982,7 @@ export function ReviewWorkspace({
       if (result.error || !result.data) {
         if (result.response.status === 409) {
           const statusResult = await studioV3.GET("/api/v3/status");
-          if (
-            statusResult.data &&
-            statusResult.data.action !== "review"
-          ) {
+          if (statusResult.data) {
             onSubmitted(statusResult.data);
           } else {
             setContextRequest((current) => current + 1);
@@ -380,7 +993,8 @@ export function ReviewWorkspace({
         );
         return;
       }
-      localStorage.removeItem(draftKey);
+      removeLocalDraft(draftKey);
+      removeLocalDraft(legacyDraftStorageKey(context));
       onSubmitted(result.data);
     } catch (cause) {
       onError(errorMessage(cause));
@@ -393,31 +1007,130 @@ export function ReviewWorkspace({
     <section class="review-workspace" aria-labelledby="review-title">
       <div class="review-heading">
         <div>
-          <h2 id="review-title">Посмотрите и отметьте, что изменить</h2>
+          <h2 id="review-title">
+            {previousFindings.length > 0
+              ? "Проверьте исправления"
+              : "Посмотрите и отметьте, что изменить"}
+          </h2>
           <p class="review-intro">
-            Кликните по кадру или протяните диапазон на шкале. Рамкой на
-            видео можно показать точную область.
+            {previousFindings.length > 0
+              ? "Сравните исправления. Если что-то всё ещё не так — отметьте это."
+              : "Кликните по кадру или протяните диапазон на шкале. Рамкой на видео можно показать точную область."}
           </p>
         </div>
       </div>
+      {draftStorageWarning && (
+        <p class="draft-storage-warning" role="status">
+          {draftStorageWarning}
+        </p>
+      )}
 
       <div class="review-grid">
         <div class="review-visuals">
+          {activePreviousFinding && activePreviousDraft && (
+            <PreviousFindingsReview
+              pack={previousPack}
+              packState={previousPackState}
+              finding={activePreviousFinding}
+              index={Math.min(
+                activePreviousIndex,
+                previousFindings.length - 1,
+              )}
+              total={previousFindings.length}
+              draft={activePreviousDraft}
+              currentFinding={activeCurrentFinding}
+              pendingCapture={
+                pendingPreviousFindingId ===
+                activePreviousFinding.finding_id
+              }
+              showingOld={showingOld}
+              sameMedia={sameMedia}
+              submitting={submitting}
+              reviewReady={reviewReady}
+              navigationLocked={
+                pendingPreviousFindingId !== null ||
+                note.trim().length > 0
+              }
+              onPrevious={() => {
+                setShowingOld(false);
+                setActivePreviousIndex((current) =>
+                  (current - 1 + previousFindings.length) %
+                  previousFindings.length,
+                );
+              }}
+              onNext={() => {
+                setShowingOld(false);
+                setActivePreviousIndex(
+                  (current) => (current + 1) % previousFindings.length,
+                );
+              }}
+              onShowOld={setShowingOld}
+              onStillWrong={() =>
+                continuePreviousFinding(activePreviousFinding)
+              }
+              onObsolete={() => {
+                setShowingOld(false);
+                replacePreviousResolution(
+                  activePreviousFinding.finding_id,
+                  activePreviousDraft.status === "obsolete"
+                    ? "unresolved"
+                    : "obsolete",
+                );
+              }}
+              onDefaultFixed={() =>
+                replacePreviousResolution(
+                  activePreviousFinding.finding_id,
+                  "unresolved",
+                )
+              }
+              onOpenCurrentFinding={() => {
+                if (activeCurrentFinding) {
+                  selectFinding(activeCurrentFinding);
+                }
+              }}
+              onRetry={() =>
+                setContextRequest((current) => current + 1)
+              }
+            />
+          )}
           <ReviewPlayer
             context={context}
             currentFrame={currentFrame}
             videoRef={videoRef as RefObject<HTMLVideoElement>}
             region={region}
+            comparison={comparison}
+            comparisonLabel={
+              showingOld
+                ? "ДО · прошлая версия · без разметки"
+                : previousFindings.length > 0
+                  ? "СЕЙЧАС · новая версия"
+                  : null
+            }
+            onCurrentMediaState={setCurrentMediaState}
+            onComparisonMediaState={setComparisonMediaState}
             onFrame={handlePlaybackFrame}
             onRegion={setRegion}
             onSeek={seek}
           />
-          <FrameStrip
-            context={context}
-            currentFrame={currentFrame}
-            selection={selection}
-            onSelect={selectTime}
-          />
+          {mediaError && (
+            <div class="media-error" role="alert">
+              <span>
+                {mediaError} Подтверждение заблокировано, пока видео
+                недоступно.
+              </span>
+              <button type="button" class="quiet" onClick={retryMedia}>
+                Повторить
+              </button>
+            </div>
+          )}
+          <div hidden={showingOld}>
+            <FrameStrip
+              context={context}
+              currentFrame={currentFrame}
+              selection={selection}
+              onSelect={selectTime}
+            />
+          </div>
         </div>
         <ReviewNotes
           context={context}
@@ -425,44 +1138,22 @@ export function ReviewWorkspace({
           region={region}
           activeTargets={activeTargets}
           findings={findings}
+          resolutionSummary={resolutionSummary}
+          pendingPreviousText={pendingPreviousText}
+          focusComposerToken={focusComposerToken}
           note={note}
           submitting={submitting}
-          previousFindings={
-            context.latest_verdict?.findings.filter(
-              (finding) => finding.requires_change,
-            ) ?? []
-          }
-          resolutionDrafts={resolutionDrafts}
+          readOnly={showingOld}
+          reviewReady={reviewReady}
           onNote={setNote}
           onAdd={addFinding}
-          onRemove={(findingId) =>
-            setFindings((current) =>
-              current.filter(
-                (finding) => finding.finding_id !== findingId,
-              ),
-            )
-          }
+          onRemove={removeFinding}
           onSelect={selectFinding}
-          onResolve={resolvePrevious}
-          onResolveAll={() =>
-            setResolutionDrafts(
-              Object.fromEntries(
-                (
-                  context.latest_verdict?.findings.filter(
-                    (finding) => finding.requires_change,
-                  ) ?? []
-                ).map((finding) => [
-                  finding.finding_id,
-                  { status: "fixed", currentFindingId: null },
-                ]),
-              ),
-            )
-          }
           onSubmit={(outcome) => void submit(outcome)}
         />
       </div>
 
-      <details class="technical-details">
+      <details class="technical-details" hidden={showingOld}>
         <summary>
           <span>Слои, переходы и звук</span>
           <small>

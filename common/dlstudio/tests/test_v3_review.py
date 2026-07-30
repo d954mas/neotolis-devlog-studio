@@ -281,6 +281,78 @@ def test_passing_round_rejects_successor_for_the_same_exact_context() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "previous_outcome",
+    ["changes_requested", "block"],
+)
+def test_non_pass_round_cannot_be_promoted_without_a_new_exact_context(
+    previous_outcome: str,
+) -> None:
+    previous_finding = ReviewFinding(
+        "issue.previous",
+        "Move this title.",
+        True,
+    )
+    previous_verdict = _verdict(
+        outcome=previous_outcome,
+        findings=(previous_finding,),
+    )
+    previous_round = ReviewRound(previous_verdict.ref)
+    metadata_only_pass = _verdict(
+        reviewed_at="2026-07-30T00:00:00Z",
+    )
+
+    with pytest.raises(ValueError, match="same-context successor"):
+        validate_review_round_transition(
+            ReviewRound(
+                metadata_only_pass.ref,
+                previous_round.ref,
+                (ReviewResolution("issue.previous", "fixed"),),
+            ),
+            metadata_only_pass,
+            previous_round=previous_round,
+            previous_verdict=previous_verdict,
+        )
+
+
+@pytest.mark.parametrize(
+    "changed_context",
+    [
+        {"artifact": BlobRef("2" * 64, 101)},
+        {"check_report": BlobRef("7" * 64, 91)},
+        {"constraints": BlobRef("6" * 64, 81)},
+    ],
+)
+def test_non_pass_round_allows_pass_after_exact_context_changed(
+    changed_context: dict[str, BlobRef],
+) -> None:
+    previous_finding = ReviewFinding(
+        "issue.previous",
+        "Move this title.",
+        True,
+    )
+    previous_verdict = _verdict(
+        outcome="changes_requested",
+        findings=(previous_finding,),
+    )
+    previous_round = ReviewRound(previous_verdict.ref)
+    current_verdict = _verdict(
+        **changed_context,
+        reviewed_at="2026-07-30T00:00:00Z",
+    )
+
+    validate_review_round_transition(
+        ReviewRound(
+            current_verdict.ref,
+            previous_round.ref,
+            (ReviewResolution("issue.previous", "fixed"),),
+        ),
+        current_verdict,
+        previous_round=previous_round,
+        previous_verdict=previous_verdict,
+    )
+
+
 def test_block_round_keeps_required_issue_lineage_open() -> None:
     blocked_finding = ReviewFinding(
         "issue.blocked",

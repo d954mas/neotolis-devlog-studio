@@ -66,6 +66,7 @@ export function FrameStrip({
 }: FrameStripProps) {
   const [thumbnails, setThumbnails] = useState<Thumbnail[]>([]);
   const [failed, setFailed] = useState(false);
+  const [captureRequest, setCaptureRequest] = useState(0);
   const [dragSelection, setDragSelection] =
     useState<FrameSelection | null>(null);
   const dragAnchor = useRef<number | null>(null);
@@ -78,11 +79,13 @@ export function FrameStrip({
 
   useEffect(() => {
     let cancelled = false;
+    setFailed(false);
+    setThumbnails([]);
     const media = document.createElement("video");
     media.preload = "auto";
     media.muted = true;
     media.playsInline = true;
-    media.src = artifactVideoUrl(context);
+    media.src = artifactVideoUrl(context.artifact);
 
     async function capture() {
       if (media.readyState < HTMLMediaElement.HAVE_METADATA) {
@@ -141,6 +144,7 @@ export function FrameStrip({
     context.fps_num,
     context.height,
     context.width,
+    captureRequest,
     totalFrames,
   ]);
 
@@ -269,9 +273,18 @@ export function FrameStrip({
       </div>
 
       {failed ? (
-        <p class="filmstrip-fallback">
-          Превью недоступны — выбрать время всё ещё можно на шкале.
-        </p>
+        <div class="filmstrip-fallback" role="status">
+          <span>
+            Превью недоступны — выбрать время всё ещё можно на шкале.
+          </span>
+          <button
+            type="button"
+            class="quiet"
+            onClick={() => setCaptureRequest((current) => current + 1)}
+          >
+            Повторить
+          </button>
+        </div>
       ) : thumbnails.length === 0 ? (
         <div
           class="filmstrip filmstrip-loading"

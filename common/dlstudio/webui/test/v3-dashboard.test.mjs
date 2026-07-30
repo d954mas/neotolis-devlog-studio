@@ -23,6 +23,13 @@ const reviewNotes = await readFile(
   new URL("../src/review/ReviewNotes.tsx", import.meta.url),
   "utf8",
 );
+const previousFindingsReview = await readFile(
+  new URL(
+    "../src/review/PreviousFindingsReview.tsx",
+    import.meta.url,
+  ),
+  "utf8",
+);
 const frameStrip = await readFile(
   new URL("../src/review/FrameStrip.tsx", import.meta.url),
   "utf8",
@@ -34,6 +41,7 @@ const ui = [
   reviewPlayer,
   reviewTimeline,
   reviewNotes,
+  previousFindingsReview,
   frameStrip,
 ].join("\n");
 const http = await readFile(
@@ -77,14 +85,14 @@ test("review surface captures exact frame, range, region and TimelineIR targets"
   assert.match(reviewWorkspace, /\bresolutions,/);
   assert.match(reviewWorkspace, /unresolved/);
   assert.match(reviewWorkspace, /still_wrong/);
-  assert.match(reviewNotes, /obsolete/);
+  assert.match(previousFindingsReview, /obsolete/);
   assert.match(
     reviewWorkspace,
     /outcome === "pass" && status === "still_wrong"/,
   );
   assert.match(
     reviewWorkspace,
-    /status === undefined \|\| status === "unresolved"/,
+    /status === "unresolved"/,
   );
   assert.doesNotMatch(app, /previousReview={currentReview}/);
   assert.match(reviewWorkspace, /nsToFrameCeil\(item\.start_ns/);
@@ -94,6 +102,7 @@ test("review surface captures exact frame, range, region and TimelineIR targets"
   assert.match(frameStrip, /onPointerDown={handlePointerDown}/);
   assert.match(frameStrip, /onPointerMove={handlePointerMove}/);
   assert.match(frameStrip, /setDragSelection/);
+  assert.match(frameStrip, /captureRequest/);
   assert.match(frameStrip, /role="slider"/);
   assert.match(frameStrip, /aria-pressed={selected}/);
   assert.match(reviewPlayer, /onPointerDown={startRegion}/);
@@ -102,11 +111,45 @@ test("review surface captures exact frame, range, region and TimelineIR targets"
   assert.match(reviewPlayer, /aria-label="На один кадр назад"/);
   assert.match(reviewPlayer, /toggleMute/);
   assert.match(reviewPlayer, /toggleFullscreen/);
+  assert.match(reviewPlayer, /onCurrentMediaState\("error"\)/);
   assert.match(reviewTimeline, /Слои, переходы и звук/);
   assert.match(reviewTimeline, /activeTargets\.includes\(item\.item_id\)/);
   assert.doesNotMatch(reviewTimeline, /onToggleTarget/);
   assert.match(reviewNotes, /hasUnsavedNote/);
   assert.match(reviewNotes, /role="status"/);
+});
+
+test("repeat review compares the exact old artifact and marks only exceptions", () => {
+  assert.match(
+    reviewWorkspace,
+    /studioV3\.GET\("\/api\/v3\/review\/task-pack"\)/,
+  );
+  assert.match(reviewWorkspace, /sameBlobRef/);
+  assert.match(reviewWorkspace, /previousPack\.artifact/);
+  assert.match(reviewWorkspace, /result\.data\.latest_round/);
+  assert.match(reviewWorkspace, /showingOld/);
+  assert.match(previousFindingsReview, /onPointerDown/);
+  assert.match(previousFindingsReview, /onPointerUp/);
+  assert.match(previousFindingsReview, /onPointerCancel/);
+  assert.match(previousFindingsReview, /onKeyDown/);
+  assert.match(previousFindingsReview, /onKeyUp/);
+  assert.match(previousFindingsReview, /Удерживайте.*До/);
+  assert.match(previousFindingsReview, /Прошлое замечание/);
+  assert.match(previousFindingsReview, /Всё ещё не так/);
+  assert.match(previousFindingsReview, /Больше не актуально/);
+  assert.match(reviewPlayer, /comparisonLabel/);
+  assert.match(reviewPlayer, /readOnly/);
+  assert.match(reviewPlayer, /function activeVideo/);
+  assert.match(reviewPlayer, /wasPlayingBeforeComparison/);
+  assert.match(reviewPlayer, /activeVideo\.volume = currentVideo\.volume/);
+  assert.match(reviewWorkspace, /focusPreviousOnCurrent/);
+  assert.match(reviewWorkspace, /legacyDraftStorageKey/);
+  assert.match(reviewWorkspace, /activePreviousIndex,\s+note,\s+selection,\s+region/);
+  assert.match(reviewWorkspace, /canRestorePending/);
+  assert.match(reviewWorkspace, /DRAFT_STORAGE_WARNING/);
+  assert.match(reviewWorkspace, /if \(statusResult\.data\) \{\s+onSubmitted/);
+  assert.match(app, /currentReview\.check_report/);
+  assert.match(app, /currentReview\.constraints/);
 });
 
 test("legacy component, manual API, job and file surfaces are gone", async () => {

@@ -5,7 +5,7 @@ from typing import Literal
 
 import pytest
 
-from dlstudio.foundation.api import BlobRef, CasConflict
+from dlstudio.foundation.api import BlobRef, CasConflict, CorruptObject
 from dlstudio.persistence import ProductionRepository, WorkflowRepository
 from dlstudio.review.api import (
     ReviewFinding,
@@ -209,6 +209,56 @@ def test_non_pass_atomically_publishes_only_latest_round(
         after_root.records["workflow:current"]
         == before_root.records["workflow:current"]
     )
+
+
+def test_same_context_changes_request_cannot_be_committed_as_pass(
+    tmp_path: Path,
+) -> None:
+    storage = _repository(tmp_path)
+    workflows, review_ready, refs = _review_ready(storage)
+    _, first_round = _store_round(
+        storage,
+        refs,
+        outcome="changes_requested",
+        finding_id="issue.same-context",
+    )
+    workflows.commit_review_round(
+        review_ready,
+        first_round.ref,
+        expected_workflow_revision=review_ready.revision,
+        expected_head_revision=workflows.head_revision(),
+        expected_latest_round=None,
+    )
+    passing_verdict, passing_round = _store_round(
+        storage,
+        refs,
+        outcome="pass",
+        previous_round=first_round,
+        resolutions=(
+            ReviewResolution("issue.same-context", "fixed"),
+        ),
+    )
+    desired = _passing_workflow(review_ready, passing_verdict)
+    before_head = storage.read_head()
+    assert before_head is not None
+    before_root = storage.read_root(before_head)
+
+    with pytest.raises(
+        CorruptObject,
+        match="invalid review round transition",
+    ):
+        workflows.commit_review_round(
+            desired,
+            passing_round.ref,
+            expected_workflow_revision=review_ready.revision,
+            expected_head_revision=before_head.revision,
+            expected_latest_round=first_round.ref,
+        )
+
+    assert storage.read_head() == before_head
+    assert storage.read_root() == before_root
+    assert workflows.read_latest_review_round_ref() == first_round.ref
+    assert workflows.read_current() == review_ready
 
 
 def test_pass_atomically_publishes_succeeded_workflow_and_latest_round(

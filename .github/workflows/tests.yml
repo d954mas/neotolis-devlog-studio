@@ -69,6 +69,16 @@ jobs:
         working-directory: common/dlstudio/webui
         run: npm ci
 
+      - name: Install Playwright Chromium on Ubuntu
+        if: runner.os == 'Linux'
+        working-directory: common/dlstudio/webui
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright Chromium on Windows
+        if: runner.os == 'Windows'
+        working-directory: common/dlstudio/webui
+        run: npx playwright install chromium
+
       - name: Install FFmpeg on Ubuntu
         if: runner.os == 'Linux'
         run: |

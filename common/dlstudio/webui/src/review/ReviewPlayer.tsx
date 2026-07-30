@@ -1,9 +1,14 @@
 import type { JSX, RefObject } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { ReviewContext, ReviewRegion } from "./types";
+import type {
+  ReviewContext,
+  ReviewRegion,
+  ReviewTaskPack,
+} from "./types";
 import {
   artifactVideoUrl,
   clampFrame,
+  frameToSeconds,
   formatTimecode,
   framesPerSecond,
 } from "./types";
@@ -13,10 +18,21 @@ type ReviewPlayerProps = {
   currentFrame: number;
   videoRef: RefObject<HTMLVideoElement>;
   region: ReviewRegion | null;
+  comparison: {
+    context: ReviewTaskPack;
+    frame: number;
+    region: ReviewRegion | null;
+    sameMedia: boolean;
+  } | null;
+  comparisonLabel: string | null;
+  onCurrentMediaState: (state: ReviewMediaState) => void;
+  onComparisonMediaState: (state: ReviewMediaState) => void;
   onFrame: (frame: number) => void;
   onRegion: (region: ReviewRegion | null) => void;
   onSeek: (frame: number) => void;
 };
+
+export type ReviewMediaState = "loading" | "ready" | "error";
 
 type Point = { x: number; y: number };
 
@@ -50,11 +66,18 @@ export function ReviewPlayer({
   currentFrame,
   videoRef,
   region,
+  comparison,
+  comparisonLabel,
+  onCurrentMediaState,
+  onComparisonMediaState,
   onFrame,
   onRegion,
   onSeek,
 }: ReviewPlayerProps) {
   const playerRef = useRef<HTMLElement>(null);
+  const comparisonVideoRef = useRef<HTMLVideoElement>(null);
+  const currentTimeBeforeComparison = useRef<number | null>(null);
+  const wasPlayingBeforeComparison = useRef(false);
   const dragStart = useRef<Point | null>(null);
   const regionBeforeDrag = useRef<ReviewRegion | null>(null);
   const wasPlayingBeforeDrag = useRef(false);
@@ -63,6 +86,31 @@ export function ReviewPlayer({
   const [muted, setMuted] = useState(false);
   const [volume, setVolume] = useState(1);
   const [fullscreen, setFullscreen] = useState(false);
+  const [comparisonFrame, setComparisonFrame] = useState<number | null>(
+    null,
+  );
+  const readOnly = comparison !== null;
+  const displayContext = comparison?.context ?? context;
+  const displayFrame =
+    comparison === null
+      ? currentFrame
+      : (comparisonFrame ?? comparison.frame);
+  const displayRegion = comparison?.region ?? region;
+
+  useEffect(() => {
+    const video = videoRef.current;
+    onCurrentMediaState(
+      video !== null &&
+        video.readyState >= HTMLMediaElement.HAVE_METADATA
+        ? "ready"
+        : "loading",
+    );
+  }, [
+    context.artifact.sha256,
+    context.artifact.size,
+    onCurrentMediaState,
+    videoRef,
+  ]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -72,12 +120,16 @@ export function ReviewPlayer({
         Math.floor(video.currentTime * framesPerSecond(context) + 0.0001),
         context,
       );
-      onFrame(next);
-      setPlaying(!video.paused);
+      if (!readOnly) {
+        onFrame(next);
+        setPlaying(!video.paused);
+      }
     };
     const syncVolume = () => {
-      setMuted(video.muted);
-      setVolume(video.volume);
+      if (!readOnly) {
+        setMuted(video.muted);
+        setVolume(video.volume);
+      }
     };
     video.addEventListener("timeupdate", syncFrame);
     video.addEventListener("seeked", syncFrame);
@@ -96,6 +148,7 @@ export function ReviewPlayer({
     context.fps_den,
     context.fps_num,
     onFrame,
+    readOnly,
     videoRef,
   ]);
 
@@ -109,12 +162,145 @@ export function ReviewPlayer({
     };
   }, []);
 
+  useEffect(() => {
+    const currentVideo = videoRef.current;
+    if (!comparison || !currentVideo) {
+      setComparisonFrame(null);
+      return;
+    }
+    wasPlayingBeforeComparison.current = !currentVideo.paused;
+    currentVideo.pause();
+    setComparisonFrame(comparison.frame);
+    const activeVideo = comparison.sameMedia
+      ? currentVideo
+      : comparisonVideoRef.current;
+    if (!activeVideo) return;
+
+    if (comparison.sameMedia) {
+      currentTimeBeforeComparison.current = currentVideo.currentTime;
+    } else {
+      activeVideo.volume = currentVideo.volume;
+      activeVideo.muted = currentVideo.muted;
+      onComparisonMediaState(
+        activeVideo.readyState >= HTMLMediaElement.HAVE_METADATA
+          ? "ready"
+          : "loading",
+      );
+    }
+    const seekComparisonFrame = () => {
+      activeVideo.currentTime = frameToSeconds(
+        comparison.frame,
+        comparison.context,
+      );
+    };
+    const syncComparison = () => {
+      setComparisonFrame(
+        clampFrame(
+          Math.floor(
+            activeVideo.currentTime *
+              framesPerSecond(comparison.context) +
+              0.0001,
+          ),
+          comparison.context,
+        ),
+      );
+      setPlaying(!activeVideo.paused);
+      setMuted(activeVideo.muted);
+      setVolume(activeVideo.volume);
+    };
+    activeVideo.addEventListener("timeupdate", syncComparison);
+    activeVideo.addEventListener("seeked", syncComparison);
+    activeVideo.addEventListener("play", syncComparison);
+    activeVideo.addEventListener("pause", syncComparison);
+    activeVideo.addEventListener("volumechange", syncComparison);
+    if (activeVideo.readyState >= HTMLMediaElement.HAVE_METADATA) {
+      seekComparisonFrame();
+      syncComparison();
+    } else {
+      activeVideo.addEventListener(
+        "loadedmetadata",
+        seekComparisonFrame,
+        {
+          once: true,
+        },
+      );
+      activeVideo.addEventListener("loadedmetadata", syncComparison, {
+        once: true,
+      });
+    }
+    return () => {
+      activeVideo.pause();
+      activeVideo.removeEventListener(
+        "loadedmetadata",
+        seekComparisonFrame,
+      );
+      activeVideo.removeEventListener(
+        "loadedmetadata",
+        syncComparison,
+      );
+      activeVideo.removeEventListener("timeupdate", syncComparison);
+      activeVideo.removeEventListener("seeked", syncComparison);
+      activeVideo.removeEventListener("play", syncComparison);
+      activeVideo.removeEventListener("pause", syncComparison);
+      activeVideo.removeEventListener(
+        "volumechange",
+        syncComparison,
+      );
+      if (
+        comparison.sameMedia &&
+        currentTimeBeforeComparison.current !== null
+      ) {
+        currentVideo.currentTime =
+          currentTimeBeforeComparison.current;
+      } else if (!comparison.sameMedia) {
+        currentVideo.volume = activeVideo.volume;
+        currentVideo.muted = activeVideo.muted;
+      }
+      currentTimeBeforeComparison.current = null;
+      setComparisonFrame(null);
+      setPlaying(false);
+      setMuted(currentVideo.muted);
+      setVolume(currentVideo.volume);
+      if (wasPlayingBeforeComparison.current) {
+        void currentVideo.play().catch(() => setPlaying(false));
+      }
+      wasPlayingBeforeComparison.current = false;
+    };
+  }, [
+    comparison?.context.artifact.sha256,
+    comparison?.context.artifact.size,
+    comparison?.context.fps_den,
+    comparison?.context.fps_num,
+    comparison?.frame,
+    comparison?.sameMedia,
+    onComparisonMediaState,
+    videoRef,
+  ]);
+
+  function activeVideo(): HTMLVideoElement | null {
+    if (comparison && !comparison.sameMedia) {
+      return comparisonVideoRef.current;
+    }
+    return videoRef.current;
+  }
+
   function step(delta: number) {
+    if (comparison) {
+      const next = clampFrame(displayFrame + delta, displayContext);
+      const video = activeVideo();
+      video?.pause();
+      if (video) {
+        video.currentTime = frameToSeconds(next, displayContext);
+      }
+      setComparisonFrame(next);
+      setPlaying(false);
+      return;
+    }
     onSeek(clampFrame(currentFrame + delta, context));
   }
 
   function togglePlayback() {
-    const video = videoRef.current;
+    const video = activeVideo();
     if (!video) return;
     if (video.paused) {
       void video.play().catch(() => setPlaying(false));
@@ -124,13 +310,13 @@ export function ReviewPlayer({
   }
 
   function toggleMute() {
-    const video = videoRef.current;
+    const video = activeVideo();
     if (!video) return;
     video.muted = !video.muted;
   }
 
   function changeVolume(event: JSX.TargetedInputEvent<HTMLInputElement>) {
-    const video = videoRef.current;
+    const video = activeVideo();
     if (!video) return;
     video.volume = Number(event.currentTarget.value);
     if (video.volume > 0) video.muted = false;
@@ -163,6 +349,7 @@ export function ReviewPlayer({
   function startRegion(
     event: JSX.TargetedPointerEvent<SVGSVGElement>,
   ) {
+    if (readOnly) return;
     const video = videoRef.current;
     wasPlayingBeforeDrag.current = Boolean(video && !video.paused);
     video?.pause();
@@ -175,6 +362,7 @@ export function ReviewPlayer({
   function moveRegion(
     event: JSX.TargetedPointerEvent<SVGSVGElement>,
   ) {
+    if (readOnly) return;
     if (!dragStart.current) return;
     const next = regionBetween(
       dragStart.current,
@@ -188,6 +376,7 @@ export function ReviewPlayer({
   function finishRegion(
     event: JSX.TargetedPointerEvent<SVGSVGElement>,
   ) {
+    if (readOnly) return;
     if (!dragStart.current) return;
     const next = regionBetween(
       dragStart.current,
@@ -231,53 +420,92 @@ export function ReviewPlayer({
     >
       <div class="player-readout">
         <span class="live-dot" aria-hidden="true" />
-        <strong>Кадр {currentFrame}</strong>
-        <span>{formatTimecode(currentFrame, context)}</span>
+        <strong>Кадр {displayFrame}</strong>
+        <span>{formatTimecode(displayFrame, displayContext)}</span>
         <span class="player-inline-hint">
-          Клик — пауза · протяните — область
+          {readOnly
+            ? "До · разметка отключена"
+            : "Клик — пауза · протяните — область"}
         </span>
       </div>
       <div class="video-well">
         <div
-          class="video-stage"
+          class={`video-stage ${readOnly ? "showing-old" : ""}`}
           style={{
-            aspectRatio: `${context.width} / ${context.height}`,
-            maxWidth: `${(context.width / context.height) * 45}vh`,
+            aspectRatio: `${displayContext.width} / ${displayContext.height}`,
+            maxWidth: `${
+              (displayContext.width / displayContext.height) * 45
+            }vh`,
           }}
         >
           <video
+            key={`${context.artifact.sha256}:${context.artifact.size}`}
             ref={videoRef}
-            src={artifactVideoUrl(context)}
+            class={
+              comparison && !comparison.sameMedia
+                ? "current-video hidden-by-comparison"
+                : "current-video"
+            }
+            src={artifactVideoUrl(context.artifact)}
             preload="metadata"
             playsInline
+            onLoadStart={() => onCurrentMediaState("loading")}
+            onLoadedMetadata={() => onCurrentMediaState("ready")}
+            onError={() => onCurrentMediaState("error")}
           />
+          {comparison && !comparison.sameMedia && (
+            <video
+              ref={comparisonVideoRef}
+              class="comparison-video"
+              src={artifactVideoUrl(comparison.context.artifact)}
+              preload="metadata"
+              playsInline
+              onLoadStart={() => onComparisonMediaState("loading")}
+              onLoadedMetadata={() => onComparisonMediaState("ready")}
+              onError={() => onComparisonMediaState("error")}
+            />
+          )}
+          {comparisonLabel && (
+            <div
+              class={`comparison-ribbon ${readOnly ? "old" : "current"}`}
+              role="status"
+              aria-live="polite"
+            >
+              {comparisonLabel}
+            </div>
+          )}
           <svg
-            class={`region-layer ${
+            class={`region-layer ${readOnly ? "read-only" : ""} ${
               draggingRegion ? "drawing" : ""
             }`}
             viewBox="0 0 1000 1000"
             preserveAspectRatio="none"
-            aria-label="Клик — воспроизведение, протягивание — область комментария"
+            aria-label={
+              readOnly
+                ? "Прошлая версия; область показана только для сравнения"
+                : "Клик — воспроизведение, протягивание — область комментария"
+            }
+            aria-disabled={readOnly}
             onPointerDown={startRegion}
             onPointerMove={moveRegion}
             onPointerUp={finishRegion}
             onPointerCancel={cancelRegion}
           >
-            {region && (
+            {displayRegion && (
               <g>
                 <rect
                   class="region-fill"
-                  x={region.x_milli}
-                  y={region.y_milli}
-                  width={region.width_milli}
-                  height={region.height_milli}
+                  x={displayRegion.x_milli}
+                  y={displayRegion.y_milli}
+                  width={displayRegion.width_milli}
+                  height={displayRegion.height_milli}
                 />
                 <rect
                   class="region-stroke"
-                  x={region.x_milli}
-                  y={region.y_milli}
-                  width={region.width_milli}
-                  height={region.height_milli}
+                  x={displayRegion.x_milli}
+                  y={displayRegion.y_milli}
+                  width={displayRegion.width_milli}
+                  height={displayRegion.height_milli}
                 />
               </g>
             )}
@@ -340,7 +568,7 @@ export function ReviewPlayer({
         >
           {fullscreen ? "Обычный вид" : "На весь экран"}
         </button>
-        {!region && (
+        {!readOnly && !region && (
           <button
             type="button"
             class="transport preset-region"
@@ -358,7 +586,7 @@ export function ReviewPlayer({
             Центр кадра
           </button>
         )}
-        {region && (
+        {!readOnly && region && (
           <button
             type="button"
             class="transport clear-region"

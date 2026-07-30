@@ -475,6 +475,8 @@ target snapshot list. Если latest round отсутствует, endpoint о�
 
 ### Phase 4 — resolution UI и минимальный A/B
 
+Status: completed on 2026-07-30.
+
 Цель: владелец быстро проверяет исправления без issue-tracker ceremony.
 
 Dependencies: Phases 1–3.
@@ -500,6 +502,12 @@ Presentation-time sync помогает навигации, но не стано
 - нет horizontal overflow на responsive matrix;
 - mobile bottom sheet добавляется только при превышении измеренного scroll
   budget.
+
+Реализация дополнительно закрывает stale two-tab flow, атомарное
+восстановление незавершённого `still_wrong` draft, media load/decode failure,
+legacy local draft migration и запрет same-context `pass` после non-pass
+round. Built FastAPI/UI gate использует временные production с валидными
+H.264/AAC и проходит 8 Playwright scenarios на Windows.
 
 ### Phase 5 — presentation evidence и final-mix waveform
 
