@@ -19,9 +19,12 @@ from .workflow import (
 from .production import advance_production
 from .review import (
     ReviewContext,
+    ReviewHistoryEntry,
     ReviewTimelineItem,
+    query_authorized_review_artifacts,
     query_current_review,
     query_review_context,
+    query_review_history,
 )
 from dlstudio.assets.api import MediaFacts
 from dlstudio.foundation.api import BlobRef, CasConflict, CorruptObject, StudioError
@@ -41,6 +44,7 @@ __all__ = [
     "WorkflowRun",
     "WorkflowStatus",
     "ReviewContext",
+    "ReviewHistoryEntry",
     "ReviewTimelineItem",
     "ReviewVerdict",
     "compile_production",
@@ -50,7 +54,9 @@ __all__ = [
     "project_status",
     "query_status",
     "query_current_review",
+    "query_authorized_review_artifacts",
     "query_review_context",
+    "query_review_history",
     "ingest_asset",
     "recover_local_delivery",
     "resolve_blob",

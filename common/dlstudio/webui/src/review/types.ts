@@ -2,9 +2,21 @@ import type { components } from "../api/v3.gen";
 
 export type ReviewContext = components["schemas"]["ReviewContext"];
 export type ReviewFindingBody = components["schemas"]["ReviewFindingBody"];
+export type ReviewVerdict = components["schemas"]["ReviewVerdict"];
 export type ReviewRegion = components["schemas"]["ReviewRegionBody"];
 export type ReviewTimelineItem = components["schemas"]["ReviewTimelineItem"];
 export type WorkflowStatus = components["schemas"]["WorkflowStatus"];
+
+export type ResolutionStatus =
+  | "unresolved"
+  | "fixed"
+  | "obsolete"
+  | "still_wrong";
+
+export type ResolutionDraft = {
+  status: ResolutionStatus;
+  currentFindingId: string | null;
+};
 
 export type FrameSelection = {
   startFrame: number;

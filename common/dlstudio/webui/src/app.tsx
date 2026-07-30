@@ -5,19 +5,12 @@ import { ReviewWorkspace } from "./review/ReviewWorkspace";
 import { WorkflowDashboard } from "./WorkflowDashboard";
 
 type Status = components["schemas"]["WorkflowStatus"];
-type BlobRef = components["schemas"]["BlobRef"];
 type CurrentReview = components["schemas"]["ReviewVerdict"];
 
 function readStatus(data: Status | undefined, error: unknown): Status {
   if (error) throw new Error(JSON.stringify(error));
   if (!data) throw new Error("API не вернул состояние производства.");
   return data;
-}
-
-function shortHash(ref: BlobRef | null | undefined): string {
-  return ref
-    ? `${ref.sha256.slice(0, 12)} · ${ref.size.toLocaleString()} bytes`
-    : "—";
 }
 
 export function App() {
@@ -57,7 +50,19 @@ export function App() {
 
   const workflow = status?.workflow;
   const stage = status?.current_stage;
-  const reviewing = status?.action === "review" && workflow !== undefined;
+  const finalArtifact = workflow?.attempts
+    .find((attempt) => attempt.stage === "final")
+    ?.outputs.find((output) => output.name === "artifact")?.blob;
+  const waitingForRevision =
+    stage === "review" &&
+    currentReview !== null &&
+    currentReview.outcome !== "pass" &&
+    currentReview.artifact.sha256 === finalArtifact?.sha256 &&
+    currentReview.artifact.size === finalArtifact.size;
+  const reviewing =
+    status?.action === "review" &&
+    workflow !== undefined &&
+    !waitingForRevision;
 
   useEffect(() => {
     if (wasReviewing.current && !reviewing) {
@@ -67,7 +72,7 @@ export function App() {
   }, [reviewing]);
 
   useEffect(() => {
-    if (stage !== "package") {
+    if (!(stage === "review" || stage === "package")) {
       setCurrentReview(null);
       return;
     }
@@ -78,7 +83,7 @@ export function App() {
       .then((result) => {
         if (!active) return;
         if (!result.data) {
-          setError("Нет текущего verdict.");
+          if (stage === "package") setError("Нет текущего verdict.");
         } else {
           setCurrentReview(result.data);
         }
@@ -135,36 +140,14 @@ export function App() {
         </main>
       ) : (
         <main ref={contentRef} class={reviewing ? "review-main" : ""} tabIndex={-1}>
-          {!reviewing && (
-            <section class="summary" aria-labelledby="production-title">
-            <div>
-              <p class="label">Production</p>
-              <h2 id="production-title">{workflow.production_id}</h2>
-              <p class="muted">
-                {workflow.kind} · run {workflow.run_id} · revision{" "}
-                {workflow.revision}
-              </p>
-            </div>
-            <div class="fact">
-              <span>Текущий этап</span>
-              <strong>{stage ?? "готово"}</strong>
-            </div>
-            <div class="fact">
-              <span>Eligible candidate</span>
-              <strong class="hash">
-                {shortHash(workflow.eligible_candidate)}
-              </strong>
-            </div>
-            </section>
-          )}
-
-          {status.action === "review" ? (
+          {reviewing ? (
             <ReviewWorkspace
               key={`${workflow.run_id}:${workflow.revision}`}
               onError={setError}
               onSubmitted={(next) => {
                 setCurrentReview(null);
                 setStatus(next);
+                setReviewRequestVersion((current) => current + 1);
               }}
             />
           ) : (

@@ -159,8 +159,8 @@ def test_exact_feedback_drives_a_fresh_process_authoring_revision(
             },
         )
         assert submitted.status_code == 200
-        # Phase 0 records this existing semantic defect for Phase 2.
-        assert submitted.json()["current_stage"] == "package"
+        assert submitted.json()["current_stage"] == "review"
+        assert submitted.json()["action"] == "review"
 
     handoff = _fresh_process_handoff(manifest)
     assert handoff["source_mapping"] == {"status": "unavailable"}

@@ -163,6 +163,26 @@
             "title": "Items",
             "type": "array"
           },
+          "latest_round": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BlobRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "latest_verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewVerdict"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "timeline": {
             "$ref": "#/components/schemas/BlobRef"
           },
@@ -176,6 +196,8 @@
           "timeline",
           "check_report",
           "constraints",
+          "latest_round",
+          "latest_verdict",
           "width",
           "height",
           "fps_num",
@@ -384,6 +406,41 @@
         "title": "ReviewRegionBody",
         "type": "object"
       },
+      "ReviewResolutionBody": {
+        "additionalProperties": false,
+        "properties": {
+          "current_finding_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Finding Id"
+          },
+          "previous_finding_id": {
+            "title": "Previous Finding Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "fixed",
+              "obsolete",
+              "still_wrong"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "previous_finding_id",
+          "status"
+        ],
+        "title": "ReviewResolutionBody",
+        "type": "object"
+      },
       "ReviewTimelineItem": {
         "properties": {
           "duration_ns": {
@@ -524,6 +581,16 @@
           "expected_constraints": {
             "$ref": "#/components/schemas/BlobRef"
           },
+          "expected_latest_round": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BlobRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "expected_timeline": {
             "$ref": "#/components/schemas/BlobRef"
           },
@@ -542,6 +609,13 @@
             ],
             "title": "Outcome",
             "type": "string"
+          },
+          "resolutions": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewResolutionBody"
+            },
+            "title": "Resolutions",
+            "type": "array"
           },
           "reviewed_at": {
             "title": "Reviewed At",

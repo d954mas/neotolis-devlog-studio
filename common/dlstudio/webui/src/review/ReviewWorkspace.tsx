@@ -13,6 +13,8 @@ import { ReviewPlayer } from "./ReviewPlayer";
 import { ReviewTimeline } from "./ReviewTimeline";
 import type {
   FrameSelection,
+  ResolutionDraft,
+  ResolutionStatus,
   ReviewContext,
   ReviewFindingBody,
   ReviewRegion,
@@ -78,6 +80,9 @@ export function ReviewWorkspace({
   const [region, setRegion] = useState<ReviewRegion | null>(null);
   const [note, setNote] = useState("");
   const [findings, setFindings] = useState<ReviewFindingBody[]>([]);
+  const [resolutionDrafts, setResolutionDrafts] = useState<
+    Record<string, ResolutionDraft>
+  >({});
   const [loadedDraftKey, setLoadedDraftKey] = useState<string | null>(null);
   const [contextRequest, setContextRequest] = useState(0);
 
@@ -126,6 +131,20 @@ export function ReviewWorkspace({
     if (loadedDraftKey !== key) return;
     localStorage.setItem(key, JSON.stringify(findings));
   }, [context, findings, loadedDraftKey]);
+
+  useEffect(() => {
+    const required = context?.latest_verdict?.findings.filter(
+      (finding) => finding.requires_change,
+    );
+    setResolutionDrafts(
+      Object.fromEntries(
+        (required ?? []).map((finding) => [
+          finding.finding_id,
+          { status: "unresolved", currentFindingId: null },
+        ]),
+      ),
+    );
+  }, [context?.latest_round?.sha256, context?.latest_round?.size]);
 
   const activeTargets = useMemo(() => {
     if (!context) return [];
@@ -263,9 +282,69 @@ export function ReviewWorkspace({
     seekVideo(locator.start_frame);
   }
 
+  function resolvePrevious(
+    findingId: string,
+    status: ResolutionStatus,
+    currentFindingId: string | null = null,
+  ) {
+    setResolutionDrafts((current) => ({
+      ...current,
+      [findingId]: { status, currentFindingId },
+    }));
+  }
+
   async function submit(outcome: "pass" | "changes_requested") {
     if (!context) return;
+    if (
+      context.latest_round !== null &&
+      context.latest_verdict === null
+    ) {
+      onError("Предыдущий review повреждён или ещё не загружен.");
+      return;
+    }
     const draftKey = draftStorageKey(context);
+    const previousFindings =
+      context.latest_verdict?.findings.filter(
+        (finding) => finding.requires_change,
+      ) ?? [];
+    const resolutions = [];
+    for (const previous of previousFindings) {
+      const draft = resolutionDrafts[previous.finding_id];
+      let status = draft?.status;
+      if (outcome === "pass" && status === "still_wrong") {
+        onError(
+          "Нельзя одобрить версию, пока замечание отмечено «всё ещё не так».",
+        );
+        return;
+      }
+      if (outcome === "pass") {
+        if (status === undefined || status === "unresolved") {
+          status = "fixed";
+        }
+      }
+      if (!status || status === "unresolved") {
+        onError("Укажите результат для каждого прошлого замечания.");
+        return;
+      }
+      const currentFindingId =
+        status === "still_wrong" ? draft?.currentFindingId : null;
+      if (
+        status === "still_wrong" &&
+        !findings.some(
+          (finding) => finding.finding_id === currentFindingId,
+        )
+      ) {
+        onError(
+          "Для «всё ещё не так» выберите новый точный комментарий.",
+        );
+        return;
+      }
+      resolutions.push({
+        previous_finding_id: previous.finding_id,
+        status,
+        current_finding_id: currentFindingId ?? null,
+      });
+    }
     setSubmitting(true);
     onError(null);
     try {
@@ -275,6 +354,8 @@ export function ReviewWorkspace({
           expected_timeline: context.timeline,
           expected_check_report: context.check_report,
           expected_constraints: context.constraints,
+          expected_latest_round: context.latest_round,
+          resolutions,
           outcome,
           scope: ["visual", "audio", "constraints"],
           reviewer: "author",
@@ -346,6 +427,12 @@ export function ReviewWorkspace({
           findings={findings}
           note={note}
           submitting={submitting}
+          previousFindings={
+            context.latest_verdict?.findings.filter(
+              (finding) => finding.requires_change,
+            ) ?? []
+          }
+          resolutionDrafts={resolutionDrafts}
           onNote={setNote}
           onAdd={addFinding}
           onRemove={(findingId) =>
@@ -356,6 +443,21 @@ export function ReviewWorkspace({
             )
           }
           onSelect={selectFinding}
+          onResolve={resolvePrevious}
+          onResolveAll={() =>
+            setResolutionDrafts(
+              Object.fromEntries(
+                (
+                  context.latest_verdict?.findings.filter(
+                    (finding) => finding.requires_change,
+                  ) ?? []
+                ).map((finding) => [
+                  finding.finding_id,
+                  { status: "fixed", currentFindingId: null },
+                ]),
+              ),
+            )
+          }
           onSubmit={(outcome) => void submit(outcome)}
         />
       </div>

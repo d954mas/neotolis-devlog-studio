@@ -333,6 +333,24 @@ textarea { min-height: 84px; resize: vertical; }
   background: #171a17;
 }
 .review-notes h3 { font-size: 19px; }
+.resolution-review {
+  margin: 16px -20px 0;
+  padding: 16px 20px;
+  border-block: 1px solid var(--line);
+  background: #121512;
+}
+.resolution-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.resolution-head h3 { margin-top: 3px; font-size: 15px; }
+.resolution-head button { min-height: 36px; padding-inline: 10px; }
+.resolution-review ol { display: grid; gap: 10px; margin: 14px 0 0; padding: 0; list-style: none; }
+.resolution-review li { display: grid; gap: 7px; padding-top: 10px; border-top: 1px solid #292e29; }
+.resolution-review li p { color: #d8ded8; font-size: 12px; line-height: 1.4; }
+.resolution-review select { width: 100%; min-height: 38px; }
 .locator-summary {
   display: flex;
   flex-wrap: wrap;
@@ -563,6 +581,7 @@ textarea { min-height: 84px; resize: vertical; }
     overflow: visible;
     padding: 16px;
   }
+  .resolution-review { margin-inline: -16px; padding-inline: 16px; }
   .review-note-actions {
     margin: 14px -16px -16px;
     padding: 14px 16px calc(16px + env(safe-area-inset-bottom));

@@ -4,6 +4,7 @@ import type { components } from "./api/v3.gen";
 type Status = components["schemas"]["WorkflowStatus"];
 type Workflow = components["schemas"]["WorkflowRun"];
 type CurrentReview = components["schemas"]["ReviewVerdict"];
+type BlobRef = components["schemas"]["BlobRef"];
 
 type WorkflowDashboardProps = {
   status: Status;
@@ -13,6 +14,12 @@ type WorkflowDashboardProps = {
   onAdvance: () => void;
   onDeliver: (destinationId: string) => void;
 };
+
+function shortHash(ref: BlobRef | null | undefined): string {
+  return ref
+    ? `${ref.sha256.slice(0, 12)} · ${ref.size.toLocaleString()} bytes`
+    : "—";
+}
 
 export function WorkflowDashboard({
   status,
@@ -26,12 +33,33 @@ export function WorkflowDashboard({
   const stage = status.current_stage;
   const failed = workflow.attempts.find((item) => item.state === "failed");
   const waitingForRevision =
-    stage === "package" &&
+    (stage === "review" || stage === "package") &&
     currentReview !== null &&
     currentReview.outcome !== "pass";
 
   return (
     <>
+      <section class="summary" aria-labelledby="production-title">
+        <div>
+          <p class="label">Production</p>
+          <h2 id="production-title">{workflow.production_id}</h2>
+          <p class="muted">
+            {workflow.kind} · run {workflow.run_id} · revision{" "}
+            {workflow.revision}
+          </p>
+        </div>
+        <div class="fact">
+          <span>Текущий этап</span>
+          <strong>{stage ?? "готово"}</strong>
+        </div>
+        <div class="fact">
+          <span>Eligible candidate</span>
+          <strong class="hash">
+            {shortHash(workflow.eligible_candidate)}
+          </strong>
+        </div>
+      </section>
+
       <section class="workflow" aria-labelledby="workflow-title">
         <div class="section-head">
           <div>

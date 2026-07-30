@@ -14,7 +14,7 @@ from dlstudio.application.api import (
 from dlstudio.application.workflow import _advance
 from dlstudio.foundation.api import BlobRef
 from dlstudio.persistence import ProductionRepository, WorkflowRepository
-from dlstudio.review.api import ReviewVerdict
+from dlstudio.review.api import ReviewRound, ReviewVerdict
 from dlstudio.workflow.api import NamedRef
 
 
@@ -183,8 +183,264 @@ def test_review_must_name_exact_final_outputs_and_resume_running_attempt(
         NamedRef("verdict", verdict.ref),
     )
 
-    with pytest.raises(ValueError, match="waiting for review"):
-        submit_review(workflows, verdict)
+    # A lost response can be retried with the identical exact verdict.
+    assert submit_review(workflows, verdict) == reviewed
+
+
+def test_pass_then_upstream_invalidation_accepts_a_new_review_round(
+    tmp_path: Path,
+) -> None:
+    workflows = _workflows(tmp_path)
+    start_workflow(workflows, run_id="run.main", kind="reel")
+    first_artifact = _put(workflows, b"first final")
+    first_report = _put(workflows, b"first report")
+    first_constraints = _put(workflows, b"first constraints")
+
+    _advance(
+        workflows,
+        inputs=(),
+        contract="prepare.v1",
+        run_stage=lambda *_: (
+            NamedRef("timeline", _put(workflows, b"first timeline")),
+            NamedRef("check_policy", _put(workflows, b"first policy")),
+            NamedRef("check_report", first_report),
+            NamedRef("constraints", first_constraints),
+        ),
+    )
+    _advance(
+        workflows,
+        inputs=(),
+        contract="draft.v1",
+        run_stage=lambda *_: (
+            NamedRef("artifact", _put(workflows, b"first draft")),
+        ),
+    )
+    _advance(
+        workflows,
+        inputs=(),
+        contract="final.v1",
+        run_stage=lambda *_: (
+            NamedRef("artifact", first_artifact),
+            NamedRef("execution", _put(workflows, b"first execution")),
+            NamedRef("render_options", _put(workflows, b"first options")),
+        ),
+    )
+    first_verdict = ReviewVerdict(
+        artifact=first_artifact,
+        outcome="pass",
+        check_report=first_report,
+        constraints=first_constraints,
+        scope=("audio", "visual", "constraints"),
+        reviewer="video.reviewer",
+        reviewed_at="2026-07-27T00:00:00Z",
+    )
+    first_reviewed = submit_review(workflows, first_verdict)
+    first_latest = workflows.read_latest_review_round_ref()
+    assert first_reviewed.current_stage == "package"
+    assert first_latest is not None
+
+    changed_source = _put(workflows, b"changed upstream source")
+    prepare_inputs = (NamedRef("source", changed_source),)
+    invalidated = first_reviewed.start(
+        "prepare",
+        prepare_inputs,
+        contract="prepare.v2",
+    )
+    workflows.save(
+        invalidated,
+        expected_workflow_revision=first_reviewed.revision,
+        expected_head_revision=workflows.head_revision(),
+    )
+
+    second_report = _put(workflows, b"second report")
+    second_constraints = _put(workflows, b"second constraints")
+    _advance(
+        workflows,
+        inputs=prepare_inputs,
+        contract="prepare.v2",
+        run_stage=lambda *_: (
+            NamedRef("timeline", _put(workflows, b"second timeline")),
+            NamedRef("check_policy", _put(workflows, b"second policy")),
+            NamedRef("check_report", second_report),
+            NamedRef("constraints", second_constraints),
+        ),
+    )
+    _advance(
+        workflows,
+        inputs=(),
+        contract="draft.v2",
+        run_stage=lambda *_: (
+            NamedRef("artifact", _put(workflows, b"second draft")),
+        ),
+    )
+    second_artifact = _put(workflows, b"second final")
+    _advance(
+        workflows,
+        inputs=(),
+        contract="final.v2",
+        run_stage=lambda *_: (
+            NamedRef("artifact", second_artifact),
+            NamedRef("execution", _put(workflows, b"second execution")),
+            NamedRef("render_options", _put(workflows, b"second options")),
+        ),
+    )
+    assert get_status(workflows).current_stage == "review"
+    assert workflows.read_latest_review_round_ref() == first_latest
+
+    second_verdict = ReviewVerdict(
+        artifact=second_artifact,
+        outcome="pass",
+        check_report=second_report,
+        constraints=second_constraints,
+        scope=("audio", "visual", "constraints"),
+        reviewer="video.reviewer",
+        reviewed_at="2026-07-30T00:00:00Z",
+    )
+    second_reviewed = submit_review(
+        workflows,
+        second_verdict,
+        expected_latest_round=first_latest,
+    )
+
+    second_latest = workflows.read_latest_review_round_ref()
+    assert second_reviewed.current_stage == "package"
+    assert second_latest is not None
+    assert second_latest != first_latest
+    persisted_round = ReviewRound.from_canonical_bytes(
+        workflows.read_blob(second_latest)
+    )
+    assert persisted_round.previous_round == first_latest
+    assert persisted_round.verdict == second_verdict.ref
+
+
+def test_pass_reuses_exact_latest_round_after_upstream_invalidation(
+    tmp_path: Path,
+) -> None:
+    workflows = _workflows(tmp_path)
+    start_workflow(workflows, run_id="run.main", kind="reel")
+    timeline = _put(workflows, b"stable timeline")
+    policy = _put(workflows, b"stable policy")
+    report = _put(workflows, b"stable report")
+    constraints = _put(workflows, b"stable constraints")
+    draft_artifact = _put(workflows, b"stable draft")
+    final_artifact = _put(workflows, b"stable final")
+    execution = _put(workflows, b"stable execution")
+    render_options = _put(workflows, b"stable options")
+
+    _advance(
+        workflows,
+        inputs=(),
+        contract="prepare.v1",
+        run_stage=lambda *_: (
+            NamedRef("timeline", timeline),
+            NamedRef("check_policy", policy),
+            NamedRef("check_report", report),
+            NamedRef("constraints", constraints),
+        ),
+    )
+    _advance(
+        workflows,
+        inputs=(),
+        contract="draft.v1",
+        run_stage=lambda *_: (
+            NamedRef("artifact", draft_artifact),
+        ),
+    )
+    _advance(
+        workflows,
+        inputs=(),
+        contract="final.v1",
+        run_stage=lambda *_: (
+            NamedRef("artifact", final_artifact),
+            NamedRef("execution", execution),
+            NamedRef("render_options", render_options),
+        ),
+    )
+    verdict = ReviewVerdict(
+        artifact=final_artifact,
+        outcome="pass",
+        check_report=report,
+        constraints=constraints,
+        scope=("audio", "visual", "constraints"),
+        reviewer="video.reviewer",
+        reviewed_at="2026-07-30T00:00:00Z",
+    )
+    first_passed = submit_review(workflows, verdict)
+    latest = workflows.read_latest_review_round_ref()
+    assert first_passed.current_stage == "package"
+    assert latest is not None
+
+    changed_source = _put(workflows, b"changed source, identical result")
+    prepare_inputs = (NamedRef("source", changed_source),)
+    invalidated = first_passed.start(
+        "prepare",
+        prepare_inputs,
+        contract="prepare.v2",
+    )
+    workflows.save(
+        invalidated,
+        expected_workflow_revision=first_passed.revision,
+        expected_head_revision=workflows.head_revision(),
+    )
+    _advance(
+        workflows,
+        inputs=prepare_inputs,
+        contract="prepare.v2",
+        run_stage=lambda *_: (
+            NamedRef("timeline", timeline),
+            NamedRef("check_policy", policy),
+            NamedRef("check_report", report),
+            NamedRef("constraints", constraints),
+        ),
+    )
+    _advance(
+        workflows,
+        inputs=(),
+        contract="draft.v2",
+        run_stage=lambda *_: (
+            NamedRef("artifact", draft_artifact),
+        ),
+    )
+    _advance(
+        workflows,
+        inputs=(),
+        contract="final.v2",
+        run_stage=lambda *_: (
+            NamedRef("artifact", final_artifact),
+            NamedRef("execution", execution),
+            NamedRef("render_options", render_options),
+        ),
+    )
+    review_ready_again = get_status(workflows)
+    assert review_ready_again.current_stage == "review"
+    assert workflows.read_latest_review_round_ref() == latest
+    head_before_reattach = workflows.head_revision()
+
+    reattached = submit_review(
+        workflows,
+        verdict,
+        expected_latest_round=latest,
+    )
+
+    assert reattached.current_stage == "package"
+    assert reattached.revision == review_ready_again.revision + 2
+    assert workflows.head_revision() == head_before_reattach + 1
+    assert workflows.read_latest_review_round_ref() == latest
+    assert reattached.attempts[-1].outputs == (
+        NamedRef("verdict", verdict.ref),
+    )
+
+    committed_head = workflows.head_revision()
+    assert (
+        submit_review(
+            workflows,
+            verdict,
+            expected_latest_round=latest,
+        )
+        == reattached
+    )
+    assert workflows.head_revision() == committed_head
+    assert workflows.read_latest_review_round_ref() == latest
 
 
 def test_generic_advance_cannot_publish_an_arbitrary_candidate(

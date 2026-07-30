@@ -5,12 +5,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from dlstudio.foundation.api import BlobRef
-from dlstudio.review.api import ReviewVerdict
+from dlstudio.foundation.api import BlobRef, CorruptObject
+from dlstudio.review.api import (
+    ReviewRound,
+    ReviewVerdict,
+    validate_review_round_transition,
+)
 from dlstudio.timeline.api import CheckReport, TimelineIR
 from dlstudio.workflow.api import WorkflowStore, WorkflowRun
 
 from .release import BlobStore
+
+MAX_REVIEW_LINEAGE_DEPTH = 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,12 +36,22 @@ class ReviewContext:
     timeline: BlobRef
     check_report: BlobRef
     constraints: BlobRef
+    latest_round: BlobRef | None
+    latest_verdict: ReviewVerdict | None
     width: int
     height: int
     fps_num: int
     fps_den: int
     duration_ns: int
     items: tuple[ReviewTimelineItem, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewHistoryEntry:
+    round_ref: BlobRef
+    review_round: ReviewRound
+    verdict: ReviewVerdict
+    timeline: BlobRef
 
 
 def _outputs(workflow: WorkflowRun, stage: str) -> dict[str, BlobRef]:
@@ -181,11 +197,15 @@ def query_review_context(
     report = CheckReport.from_canonical_bytes(store.read(report_ref))
     if report.timeline != timeline_ref:
         raise ValueError("review timeline differs from its check report")
+    latest_round = workflows.read_latest_review_round_ref()
+    history = _load_review_history(latest_round, store)
     return ReviewContext(
         artifact=finalized["artifact"],
         timeline=timeline_ref,
         check_report=report_ref,
         constraints=constraints_ref,
+        latest_round=latest_round,
+        latest_verdict=None if not history else history[0].verdict,
         width=timeline.width,
         height=timeline.height,
         fps_num=timeline.fps_num,
@@ -195,26 +215,98 @@ def query_review_context(
     )
 
 
+def _load_review_history(
+    selected: BlobRef | None,
+    store: BlobStore,
+) -> tuple[ReviewHistoryEntry, ...]:
+    entries: list[ReviewHistoryEntry] = []
+    seen: set[BlobRef] = set()
+    while selected is not None:
+        if selected in seen:
+            raise CorruptObject("review round lineage contains a cycle")
+        if len(entries) == MAX_REVIEW_LINEAGE_DEPTH:
+            raise CorruptObject("review round lineage exceeds its depth limit")
+        seen.add(selected)
+        try:
+            review_round = ReviewRound.from_canonical_bytes(
+                store.read(selected)
+            )
+            verdict = ReviewVerdict.from_canonical_bytes(
+                store.read(review_round.verdict)
+            )
+            report = CheckReport.from_canonical_bytes(
+                store.read(verdict.check_report)
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise CorruptObject("invalid review round lineage") from exc
+        entries.append(
+            ReviewHistoryEntry(
+                selected,
+                review_round,
+                verdict,
+                report.timeline,
+            )
+        )
+        selected = review_round.previous_round
+
+    for index, entry in enumerate(entries):
+        previous = entries[index + 1] if index + 1 < len(entries) else None
+        try:
+            validate_review_round_transition(
+                entry.review_round,
+                entry.verdict,
+                previous_round=(
+                    None if previous is None else previous.review_round
+                ),
+                previous_verdict=(
+                    None if previous is None else previous.verdict
+                ),
+            )
+        except ValueError as exc:
+            raise CorruptObject("invalid review round transition") from exc
+    return tuple(entries)
+
+
+def query_review_history(
+    workflows: WorkflowStore,
+    store: BlobStore,
+) -> tuple[ReviewHistoryEntry, ...]:
+    """Load and validate the bounded exact review lineage, latest first."""
+
+    return _load_review_history(
+        workflows.read_latest_review_round_ref(),
+        store,
+    )
+
+
 def query_current_review(
     workflows: WorkflowStore,
     store: BlobStore,
 ) -> ReviewVerdict:
     """Return the exact current verdict for UI reloads and agent consumption."""
 
+    history = query_review_history(workflows, store)
+    if not history:
+        raise ValueError("workflow has no submitted review")
+    return history[0].verdict
+
+
+def query_authorized_review_artifacts(
+    workflows: WorkflowStore,
+    store: BlobStore,
+) -> tuple[BlobRef, ...]:
+    """Return exact current and historical artifacts authorized for review."""
+
+    artifacts = {
+        entry.verdict.artifact
+        for entry in query_review_history(workflows, store)
+    }
     workflow = workflows.read_current()
-    if workflow is None:
-        raise ValueError("production has no workflow")
-    reviewed = _outputs(workflow, "review")
-    verdict_ref = reviewed.get("verdict")
-    if verdict_ref is None:
-        raise ValueError("workflow has no completed review")
-    verdict = ReviewVerdict.from_canonical_bytes(store.read(verdict_ref))
-    context = query_review_context(workflows, store)
-    prepared = _outputs(workflow, "prepare")
-    if (
-        verdict.artifact != context.artifact
-        or verdict.check_report != prepared.get("check_report")
-        or verdict.constraints != prepared.get("constraints")
-    ):
-        raise ValueError("review verdict is stale")
-    return verdict
+    if workflow is not None:
+        try:
+            current = _outputs(workflow, "final").get("artifact")
+        except ValueError:
+            current = None
+        if current is not None:
+            artifacts.add(current)
+    return tuple(sorted(artifacts, key=lambda item: (item.sha256, item.size)))

@@ -80,9 +80,9 @@ action = advance
 ```
 
 Release remains protected because packaging rejects a non-pass verdict, but
-the workflow projection is wrong and the UI has to mask it. Phase 2 must keep
-`changes_requested` and `block` at `review` while atomically publishing review
-history.
+the workflow projection was wrong and the UI had to mask it. Phase 2 resolved
+the defect: `changes_requested` and `block` now remain at `review` while the
+round and `review:latest` are published atomically.
 
 ## Verification
 

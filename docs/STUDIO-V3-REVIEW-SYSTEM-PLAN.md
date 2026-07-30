@@ -335,6 +335,8 @@ release trust closure; release по-прежнему использует тол
 
 ### Phase 2 — atomic persistence и lineage authorization
 
+Status: completed on 2026-07-30.
+
 Цель: сделать round history crash-safe и разрешить только её exact media.
 
 Dependency: Phase 1. Именно здесь contract-only workflow table из Phase 1

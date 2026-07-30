@@ -1,5 +1,7 @@
 import type {
   FrameSelection,
+  ResolutionDraft,
+  ResolutionStatus,
   ReviewContext,
   ReviewFindingBody,
   ReviewRegion,
@@ -14,12 +16,20 @@ type ReviewNotesProps = {
   region: ReviewRegion | null;
   activeTargets: string[];
   findings: ReviewFindingBody[];
+  previousFindings: ReviewFindingBody[];
+  resolutionDrafts: Record<string, ResolutionDraft>;
   note: string;
   submitting: boolean;
   onNote: (value: string) => void;
   onAdd: () => void;
   onRemove: (findingId: string) => void;
   onSelect: (finding: ReviewFindingBody) => void;
+  onResolve: (
+    findingId: string,
+    status: ResolutionStatus,
+    currentFindingId?: string | null,
+  ) => void;
+  onResolveAll: () => void;
   onSubmit: (outcome: "pass" | "changes_requested") => void;
 };
 
@@ -62,12 +72,16 @@ export function ReviewNotes({
   region,
   activeTargets,
   findings,
+  previousFindings,
+  resolutionDrafts,
   note,
   submitting,
   onNote,
   onAdd,
   onRemove,
   onSelect,
+  onResolve,
+  onResolveAll,
   onSubmit,
 }: ReviewNotesProps) {
   const noteRef = useRef<HTMLTextAreaElement>(null);
@@ -89,6 +103,75 @@ export function ReviewNotes({
         <p class="label">Комментарий к этому моменту</p>
         <h3 id="notes-title">Что изменить?</h3>
       </div>
+      {previousFindings.length > 0 && (
+        <section
+          class="resolution-review"
+          aria-labelledby="resolution-title"
+        >
+          <div class="resolution-head">
+            <div>
+              <p class="label">Прошлый раунд</p>
+              <h3 id="resolution-title">Что стало с замечаниями?</h3>
+            </div>
+            <button type="button" class="quiet" onClick={onResolveAll}>
+              Все исправлены
+            </button>
+          </div>
+          <ol>
+            {previousFindings.map((finding) => {
+              const draft = resolutionDrafts[finding.finding_id] ?? {
+                status: "unresolved",
+                currentFindingId: null,
+              };
+              return (
+                <li key={finding.finding_id}>
+                  <p>{finding.text}</p>
+                  <select
+                    value={draft.status}
+                    disabled={submitting}
+                    aria-label={`Результат: ${finding.text}`}
+                    onInput={(event) =>
+                      onResolve(
+                        finding.finding_id,
+                        event.currentTarget.value as ResolutionStatus,
+                      )
+                    }
+                  >
+                    <option value="unresolved">Выберите результат</option>
+                    <option value="fixed">Исправлено</option>
+                    <option value="still_wrong">Всё ещё не так</option>
+                    <option value="obsolete">Больше не актуально</option>
+                  </select>
+                  {draft.status === "still_wrong" && (
+                    <select
+                      value={draft.currentFindingId ?? ""}
+                      disabled={submitting}
+                      aria-label={`Новый комментарий: ${finding.text}`}
+                      onInput={(event) =>
+                        onResolve(
+                          finding.finding_id,
+                          "still_wrong",
+                          event.currentTarget.value || null,
+                        )
+                      }
+                    >
+                      <option value="">Выберите новый комментарий</option>
+                      {findings.map((current) => (
+                        <option
+                          key={current.finding_id}
+                          value={current.finding_id}
+                        >
+                          {current.text}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+        </section>
+      )}
       <div class="locator-summary">
         <strong>{formatSelection(selection, context)}</strong>
         <span>{region ? "Есть область в кадре" : "Весь кадр"}</span>

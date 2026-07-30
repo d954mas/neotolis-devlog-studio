@@ -468,8 +468,23 @@ def validate_review_round_transition(
         raise ValueError("review round does not name the exact previous round")
     if previous_round.verdict != previous_verdict.ref:
         raise ValueError("previous review round does not name its exact verdict")
-    if previous_verdict.outcome == "pass":
-        raise ValueError("passing review cannot have a successor round")
+    if (
+        previous_verdict.outcome == "pass"
+        and current_verdict.outcome == "pass"
+        and (
+        current_verdict.artifact,
+        current_verdict.check_report,
+        current_verdict.constraints,
+        )
+        == (
+            previous_verdict.artifact,
+            previous_verdict.check_report,
+            previous_verdict.constraints,
+        )
+    ):
+        raise ValueError(
+            "passing review cannot have a same-context successor round"
+        )
 
     required_previous = {
         finding.finding_id

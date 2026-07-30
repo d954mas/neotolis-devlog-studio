@@ -86,6 +86,88 @@ def test_cli_and_http_advance_call_the_same_application_flow(
     assert response.json() == cli
 
 
+def test_cli_and_http_review_share_round_semantics(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    from dlstudio.adapters.cli import main
+    from dlstudio.adapters.http import create_app
+
+    cli_manifest = _production(tmp_path / "cli", prestart=False)
+    http_manifest = _production(tmp_path / "http", prestart=False)
+    http_client = TestClient(create_app(http_manifest))
+
+    for _ in range(3):
+        assert main(["--manifest", str(cli_manifest), "advance"]) == 0
+        capsys.readouterr()
+        assert http_client.post("/api/v3/advance").status_code == 200
+
+    cli_context = TestClient(create_app(cli_manifest)).get(
+        "/api/v3/review/context"
+    ).json()
+    http_context = http_client.get("/api/v3/review/context").json()
+    finding = {
+        "finding_id": "review.transport.001",
+        "text": "Move the title.",
+        "requires_change": True,
+        "locator": {
+            "start_frame": 0,
+            "end_frame_exclusive": 1,
+            "region": None,
+            "target_ids": ["visual.000"],
+        },
+    }
+    verdict_path = tmp_path / "verdict.json"
+    verdict_path.write_text(
+        json.dumps(
+            {
+                "outcome": "changes_requested",
+                "scope": ["visual"],
+                "reviewer": "video.reviewer",
+                "reviewed_at": "2026-07-30T00:00:00Z",
+                "findings": [finding],
+                "expected_latest_round": None,
+                "resolutions": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert main(
+        [
+            "--manifest",
+            str(cli_manifest),
+            "review",
+            "--verdict",
+            str(verdict_path),
+        ]
+    ) == 0
+    cli_status = json.loads(capsys.readouterr().out)
+    http_response = http_client.post(
+        "/api/v3/review",
+        json={
+            "expected_artifact": http_context["artifact"],
+            "expected_timeline": http_context["timeline"],
+            "expected_check_report": http_context["check_report"],
+            "expected_constraints": http_context["constraints"],
+            "outcome": "changes_requested",
+            "scope": ["visual"],
+            "reviewer": "video.reviewer",
+            "reviewed_at": "2026-07-30T00:00:00Z",
+            "findings": [finding],
+            "expected_latest_round": None,
+            "resolutions": [],
+        },
+    )
+
+    assert http_response.status_code == 200
+    assert cli_context["items"] == http_context["items"]
+    assert cli_status["current_stage"] == "review"
+    assert cli_status["action"] == "review"
+    assert http_response.json()["current_stage"] == "review"
+    assert http_response.json()["action"] == "review"
+
+
 @pytest.mark.performance_smoke
 def test_cli_api_no_heavy_provider_import() -> None:
     command = (

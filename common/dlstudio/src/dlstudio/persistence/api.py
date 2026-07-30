@@ -33,7 +33,9 @@ if TYPE_CHECKING:
     from .assets import AssetRepository
     from .workflow import WorkflowRepository
 
-_RESERVED_RECORD_KEYS = frozenset({"assets:index", "workflow:current"})
+_RESERVED_RECORD_KEYS = frozenset(
+    {"assets:index", "review:latest", "workflow:current"}
+)
 
 
 def _reserved_record(key: str) -> bool:

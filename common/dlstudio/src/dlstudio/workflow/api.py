@@ -407,6 +407,20 @@ class WorkflowStore(Protocol):
         expected_head_revision: int,
     ) -> WorkflowRun: ...
 
+    def read_latest_review_round_ref(self) -> BlobRef | None: ...
+
+    def commit_review_round(
+        self,
+        workflow: WorkflowRun,
+        round_ref: BlobRef,
+        *,
+        expected_workflow_revision: int,
+        expected_head_revision: int,
+        expected_latest_round: BlobRef | None,
+    ) -> WorkflowRun: ...
+
+    def read_blob(self, ref: BlobRef) -> bytes: ...
+
     def put_blob(self, data: bytes) -> BlobRef: ...
 
     def verify_blob(self, ref: BlobRef) -> None: ...

@@ -232,6 +232,55 @@ def test_review_round_transition_supports_three_round_issue_lineage() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "changed_context",
+    [
+        {"artifact": BlobRef("2" * 64, 101)},
+        {"check_report": BlobRef("7" * 64, 91)},
+        {"constraints": BlobRef("6" * 64, 81)},
+    ],
+)
+def test_passing_round_allows_successor_when_exact_context_changed(
+    changed_context: dict[str, BlobRef],
+) -> None:
+    previous_verdict = _verdict()
+    previous_round = ReviewRound(previous_verdict.ref)
+    current_verdict = _verdict(
+        **changed_context,
+        reviewed_at="2026-07-30T00:00:00Z",
+    )
+    current_round = ReviewRound(
+        current_verdict.ref,
+        previous_round.ref,
+    )
+
+    validate_review_round_transition(
+        current_round,
+        current_verdict,
+        previous_round=previous_round,
+        previous_verdict=previous_verdict,
+    )
+
+
+def test_passing_round_rejects_successor_for_the_same_exact_context() -> None:
+    previous_verdict = _verdict()
+    previous_round = ReviewRound(previous_verdict.ref)
+    metadata_only_successor = _verdict(
+        reviewed_at="2026-07-30T00:00:00Z",
+    )
+
+    with pytest.raises(ValueError):
+        validate_review_round_transition(
+            ReviewRound(
+                metadata_only_successor.ref,
+                previous_round.ref,
+            ),
+            metadata_only_successor,
+            previous_round=previous_round,
+            previous_verdict=previous_verdict,
+        )
+
+
 def test_block_round_keeps_required_issue_lineage_open() -> None:
     blocked_finding = ReviewFinding(
         "issue.blocked",

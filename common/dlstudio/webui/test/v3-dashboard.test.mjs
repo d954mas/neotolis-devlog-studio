@@ -55,7 +55,10 @@ test("dashboard uses only the generated Studio v3 client surface", () => {
 test("review and delivery controls are stage-gated", () => {
   assert.match(app, />\s*Start production\s*<\/button>/);
   assert.match(workflowDashboard, /status\.action === "advance"/);
-  assert.match(app, /status\.action === "review"/);
+  assert.match(app, /status\?\.action === "review"/);
+  assert.match(app, /currentReview\.artifact/);
+  assert.match(app, /stage === "review" \|\| stage === "package"/);
+  assert.match(workflowDashboard, /stage === "review"/);
   assert.match(workflowDashboard, /status\.action === "deliver"/);
   assert.doesNotMatch(app, /const STAGES|function currentStage/);
   assert.ok(app.split(/\r?\n/).length <= 200, "app.tsx must stay understandable");
@@ -66,6 +69,24 @@ test("review surface captures exact frame, range, region and TimelineIR targets"
   assert.match(reviewWorkspace, /target_ids: activeTargets/);
   assert.match(reviewWorkspace, /expected_artifact: context\.artifact/);
   assert.match(reviewWorkspace, /expected_timeline: context\.timeline/);
+  assert.match(
+    reviewWorkspace,
+    /expected_latest_round: context\.latest_round/,
+  );
+  assert.match(reviewWorkspace, /context\.latest_verdict/);
+  assert.match(reviewWorkspace, /\bresolutions,/);
+  assert.match(reviewWorkspace, /unresolved/);
+  assert.match(reviewWorkspace, /still_wrong/);
+  assert.match(reviewNotes, /obsolete/);
+  assert.match(
+    reviewWorkspace,
+    /outcome === "pass" && status === "still_wrong"/,
+  );
+  assert.match(
+    reviewWorkspace,
+    /status === undefined \|\| status === "unresolved"/,
+  );
+  assert.doesNotMatch(app, /previousReview={currentReview}/);
   assert.match(reviewWorkspace, /nsToFrameCeil\(item\.start_ns/);
   assert.doesNotMatch(reviewWorkspace, /\bnsToFrame\(/);
   assert.match(reviewWorkspace, /studioV3\.GET\("\/api\/v3\/review\/context"\)/);

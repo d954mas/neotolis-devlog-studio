@@ -16,8 +16,11 @@ from dlstudio.rendering.api import (
 from dlstudio.review.api import (
     ReviewFinding,
     ReviewLocator,
+    ReviewResolution,
     ReviewRegion,
+    ReviewRound,
     ReviewVerdict,
+    validate_review_round_transition,
 )
 from dlstudio.timeline.api import (
     CheckPolicy,
@@ -188,12 +191,13 @@ def _run_stage(
 def submit_review(
     workflows: WorkflowStore,
     verdict: ReviewVerdict,
+    *,
+    expected_latest_round: BlobRef | None = None,
+    resolutions: tuple[ReviewResolution, ...] = (),
 ) -> WorkflowRun:
     """Attach a verdict only to the exact final artifact and its exact gates."""
 
     current = get_status(workflows)
-    if current.current_stage != "review":
-        raise ValueError("workflow is not waiting for review")
     prepare = next(item for item in current.attempts if item.stage == "prepare")
     final = next(item for item in current.attempts if item.stage == "final")
     prepared = {item.name: item.blob for item in prepare.outputs}
@@ -213,25 +217,100 @@ def submit_review(
         raise ValueError("review does not name the exact constraints")
     for ref in verdict.reachable_blobs:
         workflows.verify_blob(ref)
-    verdict_ref = workflows.put_blob(verdict.canonical_bytes())
 
-    running = current.start(
-        "review",
-        (
-            NamedRef("artifact", verdict.artifact),
-            NamedRef("check_report", verdict.check_report),
-            NamedRef("constraints", verdict.constraints),
-        ),
-        contract=f"{ReviewVerdict.DOMAIN}.v{ReviewVerdict.VERSION}",
+    previous_round = (
+        None
+        if expected_latest_round is None
+        else ReviewRound.from_canonical_bytes(
+            workflows.read_blob(expected_latest_round)
+        )
     )
-    if running is not current:
-        _save_next(workflows, current, running)
-    succeeded = running.succeed(
-        running.attempts[-1].operation_id,
-        (NamedRef("verdict", verdict_ref),),
+    previous_verdict = (
+        None
+        if previous_round is None
+        else ReviewVerdict.from_canonical_bytes(
+            workflows.read_blob(previous_round.verdict)
+        )
     )
-    _save_next(workflows, running, succeeded)
-    return succeeded
+    reuse_existing_pass = (
+        expected_latest_round is not None
+        and previous_round is not None
+        and previous_verdict is not None
+        and previous_verdict.outcome == "pass"
+        and verdict.outcome == "pass"
+        and (
+            verdict.artifact,
+            verdict.check_report,
+            verdict.constraints,
+        )
+        == (
+            previous_verdict.artifact,
+            previous_verdict.check_report,
+            previous_verdict.constraints,
+        )
+    )
+    if reuse_existing_pass:
+        if resolutions:
+            raise ValueError("reused passing review cannot resolve findings")
+        selected_verdict = previous_verdict
+        verdict_ref = previous_round.verdict
+        round_ref = expected_latest_round
+    else:
+        selected_verdict = verdict
+        verdict_ref = workflows.put_blob(verdict.canonical_bytes())
+        review_round = ReviewRound(
+            verdict_ref,
+            expected_latest_round,
+            resolutions,
+        )
+        validate_review_round_transition(
+            review_round,
+            verdict,
+            previous_round=previous_round,
+            previous_verdict=previous_verdict,
+        )
+        round_ref = workflows.put_blob(review_round.canonical_bytes())
+
+    if current.current_stage != "review":
+        latest = workflows.read_latest_review_round_ref()
+        reviewed = next(
+            (
+                item
+                for item in current.attempts
+                if item.stage == "review" and item.state == "succeeded"
+            ),
+            None,
+        )
+        if (
+            latest == round_ref
+            and reviewed is not None
+            and reviewed.outputs == (NamedRef("verdict", verdict_ref),)
+        ):
+            return current
+        raise ValueError("workflow is not waiting for review")
+
+    desired = current
+    if selected_verdict.outcome == "pass":
+        running = current.start(
+            "review",
+            (
+                NamedRef("artifact", selected_verdict.artifact),
+                NamedRef("check_report", selected_verdict.check_report),
+                NamedRef("constraints", selected_verdict.constraints),
+            ),
+            contract=f"{ReviewVerdict.DOMAIN}.v{ReviewVerdict.VERSION}",
+        )
+        desired = running.succeed(
+            running.attempts[-1].operation_id,
+            (NamedRef("verdict", verdict_ref),),
+        )
+    return workflows.commit_review_round(
+        desired,
+        round_ref,
+        expected_workflow_revision=current.revision,
+        expected_head_revision=_head_revision(workflows),
+        expected_latest_round=expected_latest_round,
+    )
 
 
 def submit_review_payload(
@@ -247,8 +326,19 @@ def submit_review_payload(
     """Create the exact verdict from a small transport-neutral review payload."""
 
     required = {"outcome", "scope", "reviewer", "reviewed_at", "findings"}
-    if set(payload) != required:
+    optional = {"expected_latest_round", "resolutions"}
+    if not required.issubset(payload) or set(payload) - required - optional:
         raise ValueError("review payload fields mismatch")
+    expected_latest_value = payload.get("expected_latest_round")
+    expected_latest_round = (
+        None
+        if expected_latest_value is None
+        else BlobRef.from_payload(expected_latest_value)
+    )
+    resolutions = tuple(
+        ReviewResolution.from_payload(dict(item))
+        for item in payload.get("resolutions", ())
+    )
     expected = (
         expected_artifact,
         expected_timeline,
@@ -332,7 +422,12 @@ def submit_review_payload(
         reviewed_at=str(payload["reviewed_at"]),
         findings=findings,
     )
-    return submit_review(workflows, verdict)
+    return submit_review(
+        workflows,
+        verdict,
+        expected_latest_round=expected_latest_round,
+        resolutions=resolutions,
+    )
 
 
 def _package_release(

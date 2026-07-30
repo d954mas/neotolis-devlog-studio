@@ -207,6 +207,8 @@ export interface components {
             height: number;
             /** Items */
             items: components["schemas"]["ReviewTimelineItem"][];
+            latest_round: components["schemas"]["BlobRef"] | null;
+            latest_verdict: components["schemas"]["ReviewVerdict"] | null;
             timeline: components["schemas"]["BlobRef"];
             /** Width */
             width: number;
@@ -288,6 +290,18 @@ export interface components {
             /** Y Milli */
             y_milli: number;
         };
+        /** ReviewResolutionBody */
+        ReviewResolutionBody: {
+            /** Current Finding Id */
+            current_finding_id?: string | null;
+            /** Previous Finding Id */
+            previous_finding_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "fixed" | "obsolete" | "still_wrong";
+        };
         /** ReviewTimelineItem */
         ReviewTimelineItem: {
             /** Duration Ns */
@@ -341,6 +355,7 @@ export interface components {
             expected_artifact: components["schemas"]["BlobRef"];
             expected_check_report: components["schemas"]["BlobRef"];
             expected_constraints: components["schemas"]["BlobRef"];
+            expected_latest_round?: components["schemas"]["BlobRef"] | null;
             expected_timeline: components["schemas"]["BlobRef"];
             /** Findings */
             findings: components["schemas"]["ReviewFindingBody"][];
@@ -349,6 +364,8 @@ export interface components {
              * @enum {string}
              */
             outcome: "pass" | "changes_requested" | "block";
+            /** Resolutions */
+            resolutions?: components["schemas"]["ReviewResolutionBody"][];
             /** Reviewed At */
             reviewed_at: string;
             /** Reviewer */

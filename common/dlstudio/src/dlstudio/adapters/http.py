@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from pathlib import Path
+from threading import Lock
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -20,6 +22,7 @@ from dlstudio.application.api import (
     DeliveryReceipt,
     deliver_local,
     project_status,
+    query_authorized_review_artifacts,
     query_current_review,
     query_review_context,
     query_status,
@@ -61,6 +64,12 @@ class ReviewFindingBody(_Body):
     locator: ReviewLocatorBody | None = None
 
 
+class ReviewResolutionBody(_Body):
+    previous_finding_id: str
+    status: Literal["fixed", "obsolete", "still_wrong"]
+    current_finding_id: str | None = None
+
+
 class ReviewVerdictBody(_Body):
     expected_artifact: BlobRef
     expected_timeline: BlobRef
@@ -71,6 +80,8 @@ class ReviewVerdictBody(_Body):
     reviewer: str
     reviewed_at: str
     findings: list[ReviewFindingBody]
+    expected_latest_round: BlobRef | None = None
+    resolutions: list[ReviewResolutionBody] = Field(default_factory=list)
 
 
 class DeliveryBody(_Body):
@@ -98,7 +109,15 @@ def create_app(manifest_path: str | Path) -> FastAPI:
 
     production = load_local_production(manifest_path)
     app = FastAPI(title="DLStudio v3", version="3.0.0")
-    verified_review_artifacts: set[tuple[str, int]] = set()
+    authorized_review_artifacts: OrderedDict[
+        tuple[int, BlobRef | None],
+        frozenset[BlobRef],
+    ] = OrderedDict()
+    verified_review_artifacts: OrderedDict[
+        tuple[str, int],
+        None,
+    ] = OrderedDict()
+    review_cache_lock = Lock()
     app.add_middleware(
         TrustedHostMiddleware,
         allowed_hosts=sorted(_LOCAL_HOSTS),
@@ -196,29 +215,62 @@ def create_app(manifest_path: str | Path) -> FastAPI:
         response_class=Response,
         responses={200: {"content": {"video/mp4": {}}}},
     )
+    @app.head(
+        "/api/v3/review/artifacts/{sha256}",
+        include_in_schema=False,
+    )
     def review_artifact(
         sha256: str = PathParam(pattern=r"^[0-9a-f]{64}$"),
         size: int = Query(gt=0),
     ) -> FileResponse:
-        context = query_review_context(
-            production.workflows,
-            production.repository.objects,
+        requested = BlobRef(sha256, size)
+        authorization_key = (
+            production.workflows.head_revision(),
+            production.workflows.read_latest_review_round_ref(),
         )
-        if (
-            context.artifact.sha256 != sha256
-            or context.artifact.size != size
-        ):
-            raise ValueError("review artifact is stale")
+        with review_cache_lock:
+            authorized = authorized_review_artifacts.get(authorization_key)
+            if authorized is not None:
+                authorized_review_artifacts.move_to_end(authorization_key)
+        if authorized is None:
+            computed = frozenset(
+                query_authorized_review_artifacts(
+                    production.workflows,
+                    production.repository.objects,
+                )
+            )
+            with review_cache_lock:
+                authorized = authorized_review_artifacts.get(
+                    authorization_key
+                )
+                if authorized is None:
+                    authorized = computed
+                    authorized_review_artifacts[authorization_key] = authorized
+                    while len(authorized_review_artifacts) > 8:
+                        authorized_review_artifacts.popitem(last=False)
+                else:
+                    authorized_review_artifacts.move_to_end(authorization_key)
+        if requested not in authorized:
+            raise ValueError("review artifact is not authorized")
+
         artifact_key = (sha256, size)
-        if artifact_key not in verified_review_artifacts:
+        with review_cache_lock:
+            verified = artifact_key in verified_review_artifacts
+            if verified:
+                verified_review_artifacts.move_to_end(artifact_key)
+        if not verified:
             source = resolve_blob(
                 production.repository.objects,
                 sha256,
                 size,
             )
-            verified_review_artifacts.add(artifact_key)
+            with review_cache_lock:
+                verified_review_artifacts[artifact_key] = None
+                verified_review_artifacts.move_to_end(artifact_key)
+                while len(verified_review_artifacts) > 256:
+                    verified_review_artifacts.popitem(last=False)
         else:
-            source = production.repository.objects.path_for(context.artifact)
+            source = production.repository.objects.path_for(requested)
         return FileResponse(source, media_type="video/mp4")
 
     @app.post("/api/v3/deliver", operation_id="deliverProduction")

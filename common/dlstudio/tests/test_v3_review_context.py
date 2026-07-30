@@ -18,6 +18,9 @@ class _Workflows:
     def read_current(self) -> WorkflowRun:
         return self.workflow
 
+    def read_latest_review_round_ref(self) -> BlobRef | None:
+        return None
+
 
 class _Store:
     def __init__(self, timeline: TimelineIR, report: CheckReport) -> None:
