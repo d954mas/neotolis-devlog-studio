@@ -976,3 +976,12 @@ def render(
     cache = cache_root.resolve()
     with _CacheLease(cache / "locks" / f"{cache_key}.lock"):
         return execute(cache)
+
+
+from dlstudio.rendering._presentation import (  # noqa: E402
+    PresentationCacheLimits,
+    PresentationFileResult,
+    PresentationWaveformResult,
+    extract_presentation_frame,
+    extract_presentation_waveform,
+)
