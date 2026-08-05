@@ -12,6 +12,7 @@ from dlstudio.foundation.api import (
     canonical_bytes,
     canonical_hash,
     normalize_logical_path,
+    validate_logical_namespace,
 )
 
 
@@ -28,6 +29,107 @@ class PackageFile:
 
 
 @dataclass(frozen=True, slots=True)
+class PublicationManifestFile:
+    role: str
+    path: str
+    asset_id: str
+    revision: BlobRef
+    blob: BlobRef
+
+    def __post_init__(self) -> None:
+        DomainId(self.role)
+        if self.role not in {"cover", "metadata"}:
+            raise ValueError("unsupported publication role")
+        DomainId(self.asset_id)
+        object.__setattr__(self, "path", normalize_logical_path(self.path))
+
+    def as_payload(self) -> dict[str, object]:
+        return {
+            "role": self.role,
+            "path": self.path,
+            "asset_id": self.asset_id,
+            "revision": self.revision.as_payload(),
+            "blob": self.blob.as_payload(),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class PublicationManifest:
+    production_id: str
+    files: tuple[PublicationManifestFile, ...] = ()
+
+    DOMAIN = "dlstudio.publication_manifest"
+    VERSION = 1
+
+    def __post_init__(self) -> None:
+        DomainId(self.production_id)
+        files = tuple(sorted(self.files, key=lambda item: item.path))
+        paths = [item.path for item in files]
+        roles = [item.role for item in files]
+        if len(paths) != len(set(paths)):
+            raise ValueError("duplicate publication path")
+        if len(roles) != len(set(roles)):
+            raise ValueError("duplicate publication role")
+        validate_logical_namespace(paths)
+        object.__setattr__(self, "files", files)
+
+    def as_payload(self) -> dict[str, Any]:
+        return {
+            "production_id": self.production_id,
+            "files": [item.as_payload() for item in self.files],
+        }
+
+    @property
+    def ref(self) -> BlobRef:
+        raw = self.canonical_bytes()
+        return BlobRef(
+            canonical_hash(
+                self.as_payload(), domain=self.DOMAIN, version=self.VERSION
+            ),
+            len(raw),
+        )
+
+    @property
+    def reachable_blobs(self) -> tuple[BlobRef, ...]:
+        return tuple(
+            ref
+            for item in self.files
+            for ref in (item.blob, item.revision)
+        )
+
+    def canonical_bytes(self) -> bytes:
+        return canonical_bytes(
+            self.as_payload(), domain=self.DOMAIN, version=self.VERSION
+        )
+
+    @classmethod
+    def from_canonical_bytes(cls, raw: bytes) -> "PublicationManifest":
+        wrapped = json.loads(raw)
+        if (
+            wrapped.get("$domain") != cls.DOMAIN
+            or wrapped.get("$version") != cls.VERSION
+        ):
+            raise ValueError("invalid publication manifest schema")
+        value = wrapped["payload"]
+        result = cls(
+            production_id=str(value["production_id"]),
+            files=tuple(
+                PublicationManifestFile(
+                    role=str(item["role"]),
+                    path=str(item["path"]),
+                    asset_id=str(item["asset_id"]),
+                    revision=BlobRef.from_payload(item["revision"]),
+                    blob=BlobRef.from_payload(item["blob"]),
+                )
+                for item in value["files"]
+            ),
+        )
+        if result.canonical_bytes() != raw:
+            raise ValueError("publication manifest is not canonical")
+        return result
+
+
+@dataclass(frozen=True, slots=True)
 class ReleaseCandidate:
     production_id: str
     timeline: BlobRef
@@ -36,6 +138,8 @@ class ReleaseCandidate:
     render_options: BlobRef
     execution_key: str
     final_output: BlobRef
+    artifact_report: BlobRef
+    publication_manifest: BlobRef
     check_report: BlobRef
     review_verdict: BlobRef
     constraints: BlobRef
@@ -44,7 +148,7 @@ class ReleaseCandidate:
     package: tuple[PackageFile, ...]
 
     DOMAIN = "dlstudio.release_candidate"
-    VERSION = 2
+    VERSION = 4
 
     def __post_init__(self) -> None:
         DomainId(self.production_id)
@@ -54,6 +158,7 @@ class ReleaseCandidate:
             raise ValueError("release package cannot be empty")
         if len(paths) != len(set(paths)):
             raise ValueError("duplicate release package path")
+        validate_logical_namespace(paths)
         if self.final_output not in {item.blob for item in package}:
             raise ValueError("release package must contain the exact final output")
         if self.license_bundle not in {item.blob for item in package}:
@@ -81,6 +186,8 @@ class ReleaseCandidate:
             "render_options": self.render_options.as_payload(),
             "execution_key": self.execution_key,
             "final_output": self.final_output.as_payload(),
+            "artifact_report": self.artifact_report.as_payload(),
+            "publication_manifest": self.publication_manifest.as_payload(),
             "check_report": self.check_report.as_payload(),
             "review_verdict": self.review_verdict.as_payload(),
             "constraints": self.constraints.as_payload(),
@@ -110,6 +217,8 @@ class ReleaseCandidate:
             self.execution,
             self.render_options,
             self.final_output,
+            self.artifact_report,
+            self.publication_manifest,
             self.check_report,
             self.review_verdict,
             self.constraints,
@@ -141,6 +250,10 @@ class ReleaseCandidate:
             render_options=BlobRef.from_payload(value["render_options"]),
             execution_key=str(value["execution_key"]),
             final_output=BlobRef.from_payload(value["final_output"]),
+            artifact_report=BlobRef.from_payload(value["artifact_report"]),
+            publication_manifest=BlobRef.from_payload(
+                value["publication_manifest"]
+            ),
             check_report=BlobRef.from_payload(value["check_report"]),
             review_verdict=BlobRef.from_payload(value["review_verdict"]),
             constraints=BlobRef.from_payload(value["constraints"]),

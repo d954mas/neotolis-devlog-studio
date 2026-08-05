@@ -3,27 +3,28 @@ import { studioV3 } from "./api/v3.client";
 import type { components } from "./api/v3.gen";
 import { ReviewWorkspace } from "./review/ReviewWorkspace";
 import { sameBlobRef } from "./review/types";
+import { StudioHeader } from "./StudioHeader";
+import { VoiceRecorder } from "./voice/VoiceRecorder";
 import { WorkflowDashboard } from "./WorkflowDashboard";
-
+import { useDeliveryContext } from "./delivery/useDeliveryContext";
 type Status = components["schemas"]["WorkflowStatus"];
 type CurrentReview = components["schemas"]["ReviewVerdict"];
-
 function readStatus(data: Status | undefined, error: unknown): Status {
   if (error) throw new Error(JSON.stringify(error));
   if (!data) throw new Error("API не вернул состояние производства.");
   return data;
 }
-
 export function App() {
   const contentRef = useRef<HTMLElement>(null);
   const wasReviewing = useRef(false);
   const [status, setStatus] = useState<Status | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [currentReview, setCurrentReview] =
-    useState<CurrentReview | null>(null);
+  const [currentReview, setCurrentReview] = useState<CurrentReview | null>(null);
   const [reviewRequestVersion, setReviewRequestVersion] = useState(0);
-
+  const [mode, setMode] = useState<"production" | "voice">(
+    window.location.hash === "#voice" ? "voice" : "production",
+  );
   async function perform(request: () => Promise<Status>) {
     setBusy(true);
     setError(null);
@@ -35,7 +36,6 @@ export function App() {
       setBusy(false);
     }
   }
-
   function refresh() {
     return perform(async () => {
       const result = await studioV3.GET("/api/v3/status");
@@ -44,11 +44,9 @@ export function App() {
       return next;
     });
   }
-
   useEffect(() => {
     void refresh();
   }, []);
-
   const workflow = status?.workflow;
   const stage = status?.current_stage;
   const prepared = workflow?.attempts.find(
@@ -78,6 +76,7 @@ export function App() {
     status?.action === "review" &&
     workflow !== undefined &&
     !waitingForRevision;
+  const deliveryContext = useDeliveryContext(status?.action === "deliver", workflow?.revision, setError);
 
   useEffect(() => {
     if (wasReviewing.current && !reviewing) {
@@ -113,26 +112,31 @@ export function App() {
     };
   }, [reviewRequestVersion, stage, workflow?.revision]);
 
+  function changeMode(next: "production" | "voice") {
+    setMode(next);
+    window.location.hash = next === "voice" ? "voice" : "";
+  }
   return (
-    <div class={`shell ${reviewing ? "review-shell" : ""}`}>
-      <header class={`topbar ${reviewing ? "review-topbar" : ""}`}>
-        <div>
-          <p class="eyebrow">
-            {reviewing ? "Ревью версии" : "DLSTUDIO / ЛОКАЛЬНОЕ ПРОИЗВОДСТВО"}
-          </p>
-          <h1>{reviewing ? workflow?.production_id : "Studio v3"}</h1>
-        </div>
-        <button class="quiet" onClick={refresh} disabled={busy}>
-          Обновить
-        </button>
-      </header>
+    <div class={`shell ${reviewing && mode === "production" ? "review-shell" : ""}`}>
+      <StudioHeader
+        mode={mode}
+        reviewing={reviewing && mode === "production"}
+        productionId={workflow?.production_id}
+        busy={busy}
+        onMode={changeMode}
+        onRefresh={() => mode === "voice" ? window.location.reload() : void refresh()}
+      />
 
       {error && (
         <div class="alert" role="alert">
           {error}
         </div>
       )}
-      {!status || !workflow ? (
+      {mode === "voice" ? (
+        <main class="voice-main" ref={contentRef} tabIndex={-1}>
+          <VoiceRecorder />
+        </main>
+      ) : !status || !workflow ? (
         <main ref={contentRef} class="loading" aria-busy={busy} tabIndex={-1}>
           <p>
             {busy
@@ -171,16 +175,17 @@ export function App() {
               workflow={workflow}
               busy={busy}
               currentReview={currentReview}
+              deliveryContext={deliveryContext}
               onAdvance={() =>
                 void perform(async () => {
                   const result = await studioV3.POST("/api/v3/advance");
                   return readStatus(result.data, result.error);
                 })
               }
-              onDeliver={(destinationId) =>
+              onDeliver={(destinationId, expectedCandidate) =>
                 void perform(async () => {
                   const result = await studioV3.POST("/api/v3/deliver", {
-                    body: { destination_id: destinationId },
+                    body: { destination_id: destinationId, expected_candidate: expectedCandidate },
                   });
                   return readStatus(result.data?.status, result.error);
                 })

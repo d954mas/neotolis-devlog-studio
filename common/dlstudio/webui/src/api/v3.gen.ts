@@ -55,6 +55,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v3/delivery/context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Delivery Context */
+        get: operations["getDeliveryContext"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v3/review": {
         parameters: {
             query?: never;
@@ -191,10 +208,122 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v3/voice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Voice Recorder */
+        get: operations["getVoiceRecorder"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v3/voice/takes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record Voice Take Route */
+        post: operations["recordVoiceTake"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v3/voice/takes/{asset_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve Voice Take Route */
+        post: operations["approveVoiceTake"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ApproveVoiceTakeBody */
+        ApproveVoiceTakeBody: {
+            /** Approved At */
+            approved_at: string;
+            /** Expected Production Id */
+            expected_production_id: string;
+            /** Expected Revision */
+            expected_revision: number;
+            expected_script_ref: components["schemas"]["BlobRef"];
+        };
+        /** ArtifactFinding */
+        ArtifactFinding: {
+            /** Message */
+            message: string;
+            /** Rule */
+            rule: string;
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "warning" | "error";
+        };
+        /** ArtifactReport */
+        ArtifactReport: {
+            /** Active Audio Ratio Milli */
+            active_audio_ratio_milli: number | null;
+            artifact: components["schemas"]["BlobRef"];
+            /** Audio Channels */
+            audio_channels: number | null;
+            /** Audio Codec */
+            audio_codec: string | null;
+            /** Audio Sample Rate */
+            audio_sample_rate: number | null;
+            /** Duration Ns */
+            duration_ns: number;
+            /** Ffprobe Binary Sha256 */
+            ffprobe_binary_sha256?: string | null;
+            /**
+             * Findings
+             * @default []
+             */
+            findings: components["schemas"]["ArtifactFinding"][];
+            /** Fps Den */
+            fps_den: number;
+            /** Fps Num */
+            fps_num: number;
+            /** Height */
+            height: number;
+            /** Integrated Lufs Milli */
+            integrated_lufs_milli: number | null;
+            /** True Peak Db Milli */
+            true_peak_db_milli: number | null;
+            /** Voice Active Audio Ratio Milli */
+            voice_active_audio_ratio_milli?: number | null;
+            /** Voice Correlation Db Milli */
+            voice_correlation_db_milli?: number | null;
+            /** Voice True Peak Db Milli */
+            voice_true_peak_db_milli?: number | null;
+            /** Width */
+            width: number;
+        };
         /**
          * BlobRef
          * @description Exact identity of immutable bytes in an object store.
@@ -209,6 +338,15 @@ export interface components {
         DeliveryBody: {
             /** Destination Id */
             destination_id: string;
+            expected_candidate: components["schemas"]["BlobRef"];
+        };
+        /** DeliveryContext */
+        DeliveryContext: {
+            candidate: components["schemas"]["BlobRef"];
+            /** Candidate Id */
+            candidate_id: string;
+            /** Files */
+            files: components["schemas"]["PackageFile"][];
         };
         /** DeliveryReceipt */
         DeliveryReceipt: {
@@ -243,9 +381,32 @@ export interface components {
             /** Path */
             path: string;
         };
+        /** PublicationManifest */
+        PublicationManifest: {
+            /**
+             * Files
+             * @default []
+             */
+            files: components["schemas"]["PublicationManifestFile"][];
+            /** Production Id */
+            production_id: string;
+        };
+        /** PublicationManifestFile */
+        PublicationManifestFile: {
+            /** Asset Id */
+            asset_id: string;
+            blob: components["schemas"]["BlobRef"];
+            /** Path */
+            path: string;
+            revision: components["schemas"]["BlobRef"];
+            /** Role */
+            role: string;
+        };
         /** ReviewContext */
         ReviewContext: {
             artifact: components["schemas"]["BlobRef"];
+            artifact_evidence: components["schemas"]["ArtifactReport"];
+            artifact_report: components["schemas"]["BlobRef"];
             check_report: components["schemas"]["BlobRef"];
             constraints: components["schemas"]["BlobRef"];
             /** Duration Ns */
@@ -260,6 +421,8 @@ export interface components {
             items: components["schemas"]["ReviewTimelineItem"][];
             latest_round: components["schemas"]["BlobRef"] | null;
             latest_verdict: components["schemas"]["ReviewVerdict"] | null;
+            publication_evidence: components["schemas"]["PublicationManifest"];
+            publication_manifest: components["schemas"]["BlobRef"];
             timeline: components["schemas"]["BlobRef"];
             /** Width */
             width: number;
@@ -393,6 +556,7 @@ export interface components {
         /** ReviewTaskPack */
         ReviewTaskPack: {
             artifact: components["schemas"]["BlobRef"];
+            artifact_report: components["schemas"]["BlobRef"];
             check_report: components["schemas"]["BlobRef"];
             constraints: components["schemas"]["BlobRef"];
             /** Duration Ns */
@@ -404,6 +568,7 @@ export interface components {
             /** Height */
             height: number;
             latest_round: components["schemas"]["BlobRef"];
+            publication_manifest: components["schemas"]["BlobRef"];
             review_round: components["schemas"]["ReviewRound"];
             source_mapping: components["schemas"]["ReviewSourceMapping"];
             /** Target Snapshots */
@@ -437,6 +602,7 @@ export interface components {
         /** ReviewVerdict */
         ReviewVerdict: {
             artifact: components["schemas"]["BlobRef"];
+            artifact_report: components["schemas"]["BlobRef"];
             check_report: components["schemas"]["BlobRef"];
             constraints: components["schemas"]["BlobRef"];
             /**
@@ -454,6 +620,7 @@ export interface components {
              * @enum {string}
              */
             outcome: "pass" | "changes_requested" | "block";
+            publication_manifest: components["schemas"]["BlobRef"];
             review_pack?: components["schemas"]["BlobRef"] | null;
             /** Reviewed At */
             reviewed_at: string;
@@ -465,9 +632,11 @@ export interface components {
         /** ReviewVerdictBody */
         ReviewVerdictBody: {
             expected_artifact: components["schemas"]["BlobRef"];
+            expected_artifact_report: components["schemas"]["BlobRef"];
             expected_check_report: components["schemas"]["BlobRef"];
             expected_constraints: components["schemas"]["BlobRef"];
             expected_latest_round?: components["schemas"]["BlobRef"] | null;
+            expected_publication_manifest: components["schemas"]["BlobRef"];
             expected_timeline: components["schemas"]["BlobRef"];
             /** Findings */
             findings: components["schemas"]["ReviewFindingBody"][];
@@ -534,6 +703,47 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /** VoiceRecorderContext */
+        VoiceRecorderContext: {
+            /** Production Id */
+            production_id: string;
+            script_ref: components["schemas"]["BlobRef"];
+            /** Script Text */
+            script_text: string;
+            /** State Revision */
+            state_revision: number;
+            /** Takes */
+            takes: components["schemas"]["VoiceTakeSummary"][];
+        };
+        /** VoiceTakeSummary */
+        VoiceTakeSummary: {
+            /** Approval Reason */
+            approval_reason: string | null;
+            /**
+             * Approval Status
+             * @enum {string}
+             */
+            approval_status: "pending" | "validated" | "approved" | "rejected";
+            /** Asset Id */
+            asset_id: string;
+            blob: components["schemas"]["BlobRef"];
+            /** Codec */
+            codec: string | null;
+            /** Current Script */
+            current_script: boolean;
+            /** Duration Ns */
+            duration_ns: number;
+            /** Format Name */
+            format_name: string;
+            /** Mime Type */
+            mime_type: string;
+            /** Recorded At */
+            recorded_at: string;
+            /** Referenced By Timeline */
+            referenced_by_timeline: boolean;
+            /** Take Id */
+            take_id: string;
         };
         /** WorkflowRun */
         WorkflowRun: {
@@ -667,6 +877,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getDeliveryContext: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryContext"];
                 };
             };
         };
@@ -888,6 +1118,105 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkflowStatus"];
+                };
+            };
+        };
+    };
+    getVoiceRecorder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VoiceRecorderContext"];
+                };
+            };
+        };
+    };
+    recordVoiceTake: {
+        parameters: {
+            query: {
+                expected_revision: number;
+            };
+            header: {
+                "X-Recorded-At": string;
+                "X-Duration-Ms": number;
+                "X-Production-Id": string;
+                "X-Script-Sha256": string;
+                "X-Script-Size": number;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Voice take saved as an immutable asset */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VoiceRecorderContext"];
+                };
+            };
+            /** @description Voice take exceeds 64 MiB */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    approveVoiceTake: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApproveVoiceTakeBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VoiceRecorderContext"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

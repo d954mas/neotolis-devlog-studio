@@ -6,6 +6,8 @@ import pytest
 
 from dlstudio.application import review as review_application
 from dlstudio.foundation.api import BlobRef, CorruptObject
+from dlstudio.rendering.api import ArtifactReport
+from dlstudio.release.api import PublicationManifest
 from dlstudio.review.api import (
     ReviewFinding,
     ReviewLocator,
@@ -66,8 +68,26 @@ def _fixture(
         True,
         ReviewLocator(*frames, target_ids=target_ids),
     )
+    artifact = BlobRef("b" * 64, 100)
+    artifact_report = ArtifactReport(
+        artifact,
+        timeline.width,
+        timeline.height,
+        timeline.fps_num,
+        timeline.fps_den,
+        timeline.duration_ns,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    publication = PublicationManifest("fixture.reel")
     verdict = ReviewVerdict(
-        artifact=BlobRef("b" * 64, 100),
+        artifact=artifact,
+        artifact_report=artifact_report.ref,
+        publication_manifest=publication.ref,
         outcome="changes_requested",
         check_report=report.ref,
         constraints=BlobRef("c" * 64, 20),
@@ -80,6 +100,8 @@ def _fixture(
     objects = {
         timeline.ref: timeline.canonical_bytes(),
         report.ref: report.canonical_bytes(),
+        artifact_report.ref: artifact_report.canonical_bytes(),
+        publication.ref: publication.canonical_bytes(),
         verdict.ref: verdict.canonical_bytes(),
         review_round.ref: review_round.canonical_bytes(),
     }

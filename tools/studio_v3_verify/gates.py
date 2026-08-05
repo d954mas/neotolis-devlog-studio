@@ -94,6 +94,26 @@ def _cycle(graph: Mapping[str, set[str]]) -> list[str] | None:
     return None
 
 
+def _check_finding_rule(node: ast.AST) -> str | None:
+    if not isinstance(node, ast.Call) or not node.args:
+        return None
+    function = node.func
+    is_check_finding = (
+        isinstance(function, ast.Name) and function.id == "CheckFinding"
+    ) or (
+        isinstance(function, ast.Attribute)
+        and function.attr == "CheckFinding"
+    )
+    rule = node.args[0]
+    if (
+        not is_check_finding
+        or not isinstance(rule, ast.Constant)
+        or not isinstance(rule.value, str)
+    ):
+        return None
+    return rule.value
+
+
 def check_architecture(source_root: Path, config: Mapping[str, object]) -> GateResult:
     modules = set(str(value) for value in config["v3_modules"])
     allowed_raw = config["allowed_dependencies"]
@@ -120,11 +140,9 @@ def check_architecture(source_root: Path, config: Mapping[str, object]) -> GateR
             continue
         parsed_files += 1
         quality_rules.update(
-            node.value
+            rule
             for node in ast.walk(tree)
-            if isinstance(node, ast.Constant)
-            and isinstance(node.value, str)
-            and re.fullmatch(r"VQ-[A-Z0-9-]+", node.value)
+            if (rule := _check_finding_rule(node)) is not None
         )
         module_name = _module_name(source_root, path)
         imported: list[tuple[str, tuple[str, ...], int]] = []

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+from dataclasses import replace
 
 import pytest
 
-from dlstudio.application.delivery import deliver_local, recover_local_delivery
-from dlstudio.foundation.api import BlobRef, CasConflict
+from dlstudio.application.delivery import (
+    deliver_local,
+    query_delivery_context,
+    recover_local_delivery,
+)
+from dlstudio.foundation.api import BlobRef, CanonicalEncodingError, CasConflict
 from dlstudio.persistence import (
     ProductionRepository,
     WorkflowRepository,
@@ -39,6 +44,8 @@ def _candidate(repository: ProductionRepository) -> tuple[ReleaseCandidate, Blob
         render_options=_put(repository, b"options"),
         execution_key="d" * 64,
         final_output=final,
+        artifact_report=_put(repository, b"artifact report"),
+        publication_manifest=_put(repository, b"publication manifest"),
         check_report=_put(repository, b"checks"),
         review_verdict=_put(repository, b"review"),
         constraints=_put(repository, b"constraints"),
@@ -120,6 +127,7 @@ def test_local_delivery_copies_only_the_frozen_package_and_retries(
         workflows,
         destination,
         destination_id="local.archive",
+        expected_candidate=candidate_ref,
         delivered_at="2026-07-27T00:00:00Z",
     )
 
@@ -135,9 +143,58 @@ def test_local_delivery_copies_only_the_frozen_package_and_retries(
         workflows,
         destination,
         destination_id="local.archive",
+        expected_candidate=candidate_ref,
     )
     assert retried == completed
     assert same_receipt == receipt
+
+
+def test_delivery_context_lists_exact_frozen_package_without_copying(
+    tmp_path: Path,
+) -> None:
+    repository = _repository(tmp_path)
+    workflows = WorkflowRepository(repository)
+    candidate, candidate_ref = _candidate(repository)
+    _ready_workflow(repository, workflows, candidate_ref)
+
+    context = query_delivery_context(workflows)
+
+    assert context.candidate == candidate_ref
+    assert context.candidate_id == candidate.candidate_id
+    assert context.files == candidate.package
+    assert not (tmp_path / "published").exists()
+
+
+def test_release_candidate_rejects_case_collision_with_generated_video(
+    tmp_path: Path,
+) -> None:
+    repository = _repository(tmp_path)
+    candidate, _ = _candidate(repository)
+    with pytest.raises(CanonicalEncodingError, match="case-insensitively"):
+        replace(
+            candidate,
+            package=(*candidate.package, PackageFile("Video.mp4", _put(repository, b"cover"))),
+        )
+
+
+def test_delivery_rejects_candidate_changed_after_confirmation(
+    tmp_path: Path,
+) -> None:
+    repository = _repository(tmp_path)
+    workflows = WorkflowRepository(repository)
+    _, candidate_ref = _candidate(repository)
+    _ready_workflow(repository, workflows, candidate_ref)
+
+    with pytest.raises(CasConflict, match="candidate changed"):
+        deliver_local(
+            workflows,
+            tmp_path / "published",
+            destination_id="local.archive",
+            expected_candidate=BlobRef("0" * 64, candidate_ref.size),
+        )
+
+    assert not (tmp_path / "published").exists()
+    assert repository.read_pending_delivery() is None
 
 
 def test_differing_destination_is_never_overwritten(tmp_path: Path) -> None:
@@ -155,6 +212,7 @@ def test_differing_destination_is_never_overwritten(tmp_path: Path) -> None:
             workflows,
             destination,
             destination_id="local.archive",
+            expected_candidate=candidate_ref,
         )
 
     assert existing.read_bytes() == b"user data"
@@ -181,6 +239,7 @@ def test_crash_after_promote_fails_closed_and_recovers_once(
             workflows,
             destination,
             destination_id="local.archive",
+            expected_candidate=candidate_ref,
             delivered_at="2026-07-27T00:00:00Z",
         )
 
@@ -203,6 +262,7 @@ def test_crash_after_promote_fails_closed_and_recovers_once(
         workflows,
         destination,
         destination_id="local.archive",
+        expected_candidate=candidate_ref,
     )
     assert retried == completed
     assert same_receipt == receipt

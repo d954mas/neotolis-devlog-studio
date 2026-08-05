@@ -79,6 +79,10 @@ test("submits exact refs and explicit links to previous findings", async ({
 
   expect(body.expected_artifact).toEqual(context.artifact);
   expect(body.expected_timeline).toEqual(context.timeline);
+  expect(body.expected_artifact_report).toEqual(context.artifact_report);
+  expect(body.expected_publication_manifest).toEqual(
+    context.publication_manifest,
+  );
   expect(body.expected_check_report).toEqual(context.check_report);
   expect(body.expected_constraints).toEqual(context.constraints);
   expect(body.expected_latest_round).toEqual(context.latest_round);

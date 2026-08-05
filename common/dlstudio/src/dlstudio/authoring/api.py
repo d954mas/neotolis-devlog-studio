@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Literal
 
 from dlstudio.assets.api import AssetRevision
-from dlstudio.foundation.api import DomainId
+from dlstudio.foundation.api import DomainId, normalize_logical_path
 from dlstudio.timeline.api import (
     AnimationInstruction,
     AssetSnapshot,
@@ -124,6 +124,19 @@ class VideoFade:
 
 
 @dataclass(frozen=True, slots=True)
+class PublicationFile:
+    role: Literal["cover", "metadata"]
+    path: str
+    asset_id: str
+
+    def __post_init__(self) -> None:
+        if self.role not in {"cover", "metadata"}:
+            raise ValueError("unsupported publication role")
+        DomainId(self.asset_id)
+        object.__setattr__(self, "path", normalize_logical_path(self.path))
+
+
+@dataclass(frozen=True, slots=True)
 class Edit:
     production_id: str
     width: int
@@ -136,6 +149,8 @@ class Edit:
     audio: tuple[AudioClip, ...] = ()
     video_fades: tuple[VideoFade, ...] = ()
     standalone_story: str = ""
+    voice_script: str | None = None
+    publication: tuple[PublicationFile, ...] = ()
     kind: Literal["reel", "devlog", "capture_vo"] = "reel"
     target_lufs_milli: int = -14_000
     true_peak_db_milli: int = -1_000
@@ -149,8 +164,11 @@ class Edit:
         object.__setattr__(self, "visuals", tuple(self.visuals))
         object.__setattr__(self, "audio", tuple(self.audio))
         object.__setattr__(self, "video_fades", tuple(self.video_fades))
+        object.__setattr__(self, "publication", tuple(self.publication))
         if not self.standalone_story:
             raise ValueError("v3 edit requires standalone_story")
+        if self.voice_script is not None and not self.voice_script.strip():
+            raise ValueError("voice_script must be non-empty when provided")
 
 
 def load_edit(path: Path) -> Edit:

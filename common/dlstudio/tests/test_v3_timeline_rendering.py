@@ -42,7 +42,12 @@ from dlstudio.rendering.api import (
     render,
 )
 from dlstudio.rendering import api as rendering_api
-from dlstudio.timeline.api import TimelineIR, VisualInstruction, check_timeline
+from dlstudio.timeline.api import (
+    CheckPolicy,
+    TimelineIR,
+    VisualInstruction,
+    check_timeline,
+)
 
 
 def find_system_font() -> str | None:
@@ -145,6 +150,57 @@ def test_compile_produces_standalone_canonical_timeline() -> None:
     assert not check_timeline(timeline).blocking
     assert b"resolver" not in raw
     assert b"fixture.vertical" in raw
+
+
+def test_voice_required_policy_blocks_timeline_without_voice_instruction() -> None:
+    timeline = compile_edit(_edit())
+    policy = CheckPolicy(require_voice=True)
+
+    report = check_timeline(timeline, policy)
+
+    assert report.blocking
+    assert [item.rule for item in report.findings if item.severity == "error"] == [
+        "audio.voice.required"
+    ]
+    assert CheckPolicy.from_canonical_bytes(policy.canonical_bytes()) == policy
+
+
+def test_voice_required_policy_does_not_accept_music_instruction(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "music.bin"
+    source.write_bytes(b"fixture audio")
+    revision = _asset(
+        "fixture.music",
+        source,
+        MediaFacts(
+            kind="audio",
+            format_name="raw",
+            duration_ns=1_000_000_000,
+            sample_rate=48_000,
+            channels=1,
+        ),
+    )
+    timeline = compile_edit(
+        replace(
+            _edit(),
+            audio=(
+                AudioClip(
+                    "fixture.music",
+                    0,
+                    1_000_000_000,
+                    role="music",
+                ),
+            ),
+        ),
+        (revision,),
+    )
+
+    report = check_timeline(timeline, CheckPolicy(require_voice=True))
+
+    assert "audio.voice.required" in {
+        item.rule for item in report.findings if item.severity == "error"
+    }
 
 
 def test_parallel_edits_share_no_mutable_timeline_state() -> None:

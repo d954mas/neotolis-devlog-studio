@@ -809,13 +809,14 @@ class CheckFinding:
     message: str
 
     def __post_init__(self) -> None:
-        if (
+        invalid_legacy_quality_rule = (
             not self.rule.startswith("VQ-")
             or any(
                 character not in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-"
                 for character in self.rule
             )
-        ):
+        )
+        if invalid_legacy_quality_rule and self.rule != "audio.voice.required":
             raise ValueError("invalid quality rule id")
         if self.severity not in {"warning", "error"}:
             raise ValueError("unsupported check severity")
@@ -840,9 +841,10 @@ class CheckPolicy:
     constraints: BlobRef | None = None
     require_approved_assets: bool = False
     require_redistributable_assets: bool = False
+    require_voice: bool = False
 
     DOMAIN = "dlstudio.timeline_check_policy"
-    VERSION = 1
+    VERSION = 2
 
     def __post_init__(self) -> None:
         DomainId(self.policy_id)
@@ -863,6 +865,7 @@ class CheckPolicy:
             ),
             "require_approved_assets": self.require_approved_assets,
             "require_redistributable_assets": self.require_redistributable_assets,
+            "require_voice": self.require_voice,
         }
 
     @property
@@ -902,6 +905,7 @@ class CheckPolicy:
             require_redistributable_assets=bool(
                 value["require_redistributable_assets"]
             ),
+            require_voice=bool(value["require_voice"]),
         )
         if result.canonical_bytes() != raw:
             raise ValueError("check policy is not canonical")
@@ -974,6 +978,16 @@ def check_timeline(
     policy: CheckPolicy = CheckPolicy(),
 ) -> CheckReport:
     findings: list[CheckFinding] = []
+    if policy.require_voice and not any(
+        item.role == "voice" for item in timeline.audio
+    ):
+        findings.append(
+            CheckFinding(
+                "audio.voice.required",
+                "error",
+                "timeline requires an explicit voice audio instruction",
+            )
+        )
     if not timeline.visuals:
         findings.append(
             CheckFinding("VQ-MOTION", "warning", "timeline has no visuals")

@@ -1,6 +1,225 @@
 {
   "components": {
     "schemas": {
+      "ApproveVoiceTakeBody": {
+        "additionalProperties": false,
+        "properties": {
+          "approved_at": {
+            "minLength": 1,
+            "title": "Approved At",
+            "type": "string"
+          },
+          "expected_production_id": {
+            "minLength": 1,
+            "title": "Expected Production Id",
+            "type": "string"
+          },
+          "expected_revision": {
+            "minimum": 0.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "expected_script_ref": {
+            "$ref": "#/components/schemas/BlobRef"
+          }
+        },
+        "required": [
+          "expected_revision",
+          "approved_at",
+          "expected_production_id",
+          "expected_script_ref"
+        ],
+        "title": "ApproveVoiceTakeBody",
+        "type": "object"
+      },
+      "ArtifactFinding": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "rule": {
+            "title": "Rule",
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "warning",
+              "error"
+            ],
+            "title": "Severity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rule",
+          "severity",
+          "message"
+        ],
+        "title": "ArtifactFinding",
+        "type": "object"
+      },
+      "ArtifactReport": {
+        "properties": {
+          "active_audio_ratio_milli": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Audio Ratio Milli"
+          },
+          "artifact": {
+            "$ref": "#/components/schemas/BlobRef"
+          },
+          "audio_channels": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audio Channels"
+          },
+          "audio_codec": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audio Codec"
+          },
+          "audio_sample_rate": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audio Sample Rate"
+          },
+          "duration_ns": {
+            "title": "Duration Ns",
+            "type": "integer"
+          },
+          "ffprobe_binary_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ffprobe Binary Sha256"
+          },
+          "findings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ArtifactFinding"
+            },
+            "title": "Findings",
+            "type": "array"
+          },
+          "fps_den": {
+            "title": "Fps Den",
+            "type": "integer"
+          },
+          "fps_num": {
+            "title": "Fps Num",
+            "type": "integer"
+          },
+          "height": {
+            "title": "Height",
+            "type": "integer"
+          },
+          "integrated_lufs_milli": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Integrated Lufs Milli"
+          },
+          "true_peak_db_milli": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "True Peak Db Milli"
+          },
+          "voice_active_audio_ratio_milli": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voice Active Audio Ratio Milli"
+          },
+          "voice_correlation_db_milli": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voice Correlation Db Milli"
+          },
+          "voice_true_peak_db_milli": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voice True Peak Db Milli"
+          },
+          "width": {
+            "title": "Width",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "artifact",
+          "width",
+          "height",
+          "fps_num",
+          "fps_den",
+          "duration_ns",
+          "audio_codec",
+          "audio_sample_rate",
+          "audio_channels",
+          "integrated_lufs_milli",
+          "true_peak_db_milli",
+          "active_audio_ratio_milli"
+        ],
+        "title": "ArtifactReport",
+        "type": "object"
+      },
       "BlobRef": {
         "description": "Exact identity of immutable bytes in an object store.",
         "properties": {
@@ -26,12 +245,41 @@
           "destination_id": {
             "title": "Destination Id",
             "type": "string"
+          },
+          "expected_candidate": {
+            "$ref": "#/components/schemas/BlobRef"
           }
         },
         "required": [
-          "destination_id"
+          "destination_id",
+          "expected_candidate"
         ],
         "title": "DeliveryBody",
+        "type": "object"
+      },
+      "DeliveryContext": {
+        "properties": {
+          "candidate": {
+            "$ref": "#/components/schemas/BlobRef"
+          },
+          "candidate_id": {
+            "title": "Candidate Id",
+            "type": "string"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/PackageFile"
+            },
+            "title": "Files",
+            "type": "array"
+          }
+        },
+        "required": [
+          "candidate",
+          "candidate_id",
+          "files"
+        ],
+        "title": "DeliveryContext",
         "type": "object"
       },
       "DeliveryReceipt": {
@@ -129,9 +377,67 @@
         "title": "PackageFile",
         "type": "object"
       },
+      "PublicationManifest": {
+        "properties": {
+          "files": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PublicationManifestFile"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "production_id": {
+            "title": "Production Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "production_id"
+        ],
+        "title": "PublicationManifest",
+        "type": "object"
+      },
+      "PublicationManifestFile": {
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "blob": {
+            "$ref": "#/components/schemas/BlobRef"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "revision": {
+            "$ref": "#/components/schemas/BlobRef"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "path",
+          "asset_id",
+          "revision",
+          "blob"
+        ],
+        "title": "PublicationManifestFile",
+        "type": "object"
+      },
       "ReviewContext": {
         "properties": {
           "artifact": {
+            "$ref": "#/components/schemas/BlobRef"
+          },
+          "artifact_evidence": {
+            "$ref": "#/components/schemas/ArtifactReport"
+          },
+          "artifact_report": {
             "$ref": "#/components/schemas/BlobRef"
           },
           "check_report": {
@@ -183,6 +489,12 @@
               }
             ]
           },
+          "publication_evidence": {
+            "$ref": "#/components/schemas/PublicationManifest"
+          },
+          "publication_manifest": {
+            "$ref": "#/components/schemas/BlobRef"
+          },
           "timeline": {
             "$ref": "#/components/schemas/BlobRef"
           },
@@ -193,9 +505,13 @@
         },
         "required": [
           "artifact",
+          "artifact_report",
+          "artifact_evidence",
           "timeline",
           "check_report",
           "constraints",
+          "publication_manifest",
+          "publication_evidence",
           "latest_round",
           "latest_verdict",
           "width",
@@ -524,6 +840,9 @@
           "artifact": {
             "$ref": "#/components/schemas/BlobRef"
           },
+          "artifact_report": {
+            "$ref": "#/components/schemas/BlobRef"
+          },
           "check_report": {
             "$ref": "#/components/schemas/BlobRef"
           },
@@ -547,6 +866,9 @@
             "type": "integer"
           },
           "latest_round": {
+            "$ref": "#/components/schemas/BlobRef"
+          },
+          "publication_manifest": {
             "$ref": "#/components/schemas/BlobRef"
           },
           "review_round": {
@@ -582,6 +904,8 @@
           "verdict_ref",
           "verdict",
           "artifact",
+          "artifact_report",
+          "publication_manifest",
           "timeline",
           "check_report",
           "constraints",
@@ -655,6 +979,9 @@
           "artifact": {
             "$ref": "#/components/schemas/BlobRef"
           },
+          "artifact_report": {
+            "$ref": "#/components/schemas/BlobRef"
+          },
           "check_report": {
             "$ref": "#/components/schemas/BlobRef"
           },
@@ -686,6 +1013,9 @@
             "title": "Outcome",
             "type": "string"
           },
+          "publication_manifest": {
+            "$ref": "#/components/schemas/BlobRef"
+          },
           "review_pack": {
             "anyOf": [
               {
@@ -714,6 +1044,8 @@
         },
         "required": [
           "artifact",
+          "artifact_report",
+          "publication_manifest",
           "outcome",
           "check_report",
           "constraints",
@@ -728,6 +1060,9 @@
         "additionalProperties": false,
         "properties": {
           "expected_artifact": {
+            "$ref": "#/components/schemas/BlobRef"
+          },
+          "expected_artifact_report": {
             "$ref": "#/components/schemas/BlobRef"
           },
           "expected_check_report": {
@@ -745,6 +1080,9 @@
                 "type": "null"
               }
             ]
+          },
+          "expected_publication_manifest": {
+            "$ref": "#/components/schemas/BlobRef"
           },
           "expected_timeline": {
             "$ref": "#/components/schemas/BlobRef"
@@ -791,6 +1129,8 @@
         "required": [
           "expected_artifact",
           "expected_timeline",
+          "expected_artifact_report",
+          "expected_publication_manifest",
           "expected_check_report",
           "expected_constraints",
           "outcome",
@@ -938,6 +1278,128 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "VoiceRecorderContext": {
+        "properties": {
+          "production_id": {
+            "title": "Production Id",
+            "type": "string"
+          },
+          "script_ref": {
+            "$ref": "#/components/schemas/BlobRef"
+          },
+          "script_text": {
+            "title": "Script Text",
+            "type": "string"
+          },
+          "state_revision": {
+            "title": "State Revision",
+            "type": "integer"
+          },
+          "takes": {
+            "items": {
+              "$ref": "#/components/schemas/VoiceTakeSummary"
+            },
+            "title": "Takes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "production_id",
+          "script_text",
+          "script_ref",
+          "state_revision",
+          "takes"
+        ],
+        "title": "VoiceRecorderContext",
+        "type": "object"
+      },
+      "VoiceTakeSummary": {
+        "properties": {
+          "approval_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approval Reason"
+          },
+          "approval_status": {
+            "enum": [
+              "pending",
+              "validated",
+              "approved",
+              "rejected"
+            ],
+            "title": "Approval Status",
+            "type": "string"
+          },
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "blob": {
+            "$ref": "#/components/schemas/BlobRef"
+          },
+          "codec": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Codec"
+          },
+          "current_script": {
+            "title": "Current Script",
+            "type": "boolean"
+          },
+          "duration_ns": {
+            "title": "Duration Ns",
+            "type": "integer"
+          },
+          "format_name": {
+            "title": "Format Name",
+            "type": "string"
+          },
+          "mime_type": {
+            "title": "Mime Type",
+            "type": "string"
+          },
+          "recorded_at": {
+            "title": "Recorded At",
+            "type": "string"
+          },
+          "referenced_by_timeline": {
+            "title": "Referenced By Timeline",
+            "type": "boolean"
+          },
+          "take_id": {
+            "title": "Take Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "asset_id",
+          "take_id",
+          "blob",
+          "recorded_at",
+          "duration_ns",
+          "mime_type",
+          "format_name",
+          "codec",
+          "current_script",
+          "approval_status",
+          "approval_reason",
+          "referenced_by_timeline"
+        ],
+        "title": "VoiceTakeSummary",
         "type": "object"
       },
       "WorkflowRun": {
@@ -1192,6 +1654,24 @@
           }
         },
         "summary": "Deliver"
+      }
+    },
+    "/api/v3/delivery/context": {
+      "get": {
+        "operationId": "getDeliveryContext",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryContext"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Delivery Context"
       }
     },
     "/api/v3/review": {
@@ -1561,6 +2041,167 @@
           }
         },
         "summary": "Status"
+      }
+    },
+    "/api/v3/voice": {
+      "get": {
+        "operationId": "getVoiceRecorder",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceRecorderContext"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Voice Recorder"
+      }
+    },
+    "/api/v3/voice/takes": {
+      "post": {
+        "operationId": "recordVoiceTake",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "expected_revision",
+            "required": true,
+            "schema": {
+              "minimum": 0,
+              "title": "Expected Revision",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Recorded-At",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "X-Recorded-At",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Duration-Ms",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "X-Duration-Ms",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Production-Id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "X-Production-Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Script-Sha256",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "X-Script-Sha256",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Script-Size",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "X-Script-Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceRecorderContext"
+                }
+              }
+            },
+            "description": "Voice take saved as an immutable asset"
+          },
+          "413": {
+            "description": "Voice take exceeds 64 MiB"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record Voice Take Route"
+      }
+    },
+    "/api/v3/voice/takes/{asset_id}/approve": {
+      "post": {
+        "operationId": "approveVoiceTake",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Asset Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveVoiceTakeBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceRecorderContext"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve Voice Take Route"
       }
     }
   }

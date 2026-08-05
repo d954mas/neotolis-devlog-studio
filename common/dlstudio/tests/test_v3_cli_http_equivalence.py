@@ -8,7 +8,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from dlstudio.application.api import start_workflow
+from dlstudio.application.api import IngestAssetCommand, ingest_asset, start_workflow
+from dlstudio.assets.api import Approval, License, MediaFacts, Provenance
 from dlstudio.foundation.api import CasConflict
 from dlstudio.persistence.api import open_local_repositories
 
@@ -18,13 +19,20 @@ def _production(root: Path, *, prestart: bool = True) -> Path:
     (root / "edit.py").write_text(
         "\n".join(
             (
-                "from dlstudio.authoring.api import Edit, SolidLayer",
+                (
+                    "from dlstudio.authoring.api import "
+                    "Edit, PublicationFile, SolidLayer"
+                ),
                 "EDIT = Edit(",
                 "    production_id='fixture.reel',",
                 "    width=64, height=96, fps_num=30, fps_den=1,",
                 "    duration_ns=200_000_000, background='black',",
                 "    visuals=(SolidLayer(0, 200_000_000, 0, 0, 0, 64, 96, 'black'),),",
                 "    standalone_story='A complete synthetic release.',",
+                "    publication=(",
+                "        PublicationFile('cover', 'cover.png', 'publish.cover.main'),",
+                "        PublicationFile('metadata', 'metadata.md', 'publish.metadata.main'),",
+                "    ),",
                 ")",
                 "",
             )
@@ -45,8 +53,41 @@ def _production(root: Path, *, prestart: bool = True) -> Path:
         ),
         encoding="utf-8",
     )
+    repository, assets, workflows = open_local_repositories(
+        root, "fixture.reel"
+    )
+    for expected_revision, (asset_id, filename, raw, media) in enumerate((
+        (
+            "publish.cover.main",
+            "cover.png",
+            b"fixture cover",
+            MediaFacts("image", "png", width=64, height=96),
+        ),
+        (
+            "publish.metadata.main",
+            "metadata.md",
+            b"fixture metadata",
+            MediaFacts("data", "markdown"),
+        ),
+    )):
+        source = root / filename
+        source.write_bytes(raw)
+        ingest_asset(
+            assets,
+            IngestAssetCommand(
+                source,
+                asset_id,
+                Provenance("provided", "transport_fixture"),
+                Approval(
+                    "approved",
+                    (repository.objects.put_bytes(f"approved:{asset_id}".encode()),),
+                ),
+                License("owned", False),
+                expected_revision,
+            ),
+            inspect_media=lambda _path, value=media: value,
+        )
     if prestart:
-        _, _, workflows = open_local_repositories(root, "fixture.reel")
         start_workflow(workflows, run_id="run.main", kind="reel")
     return manifest
 
@@ -122,7 +163,7 @@ def test_cli_and_http_review_share_round_semantics(
         json.dumps(
             {
                 "outcome": "changes_requested",
-                "scope": ["visual"],
+                    "scope": ["visual", "publication"],
                 "reviewer": "video.reviewer",
                 "reviewed_at": "2026-07-30T00:00:00Z",
                 "findings": [finding],
@@ -146,12 +187,16 @@ def test_cli_and_http_review_share_round_semantics(
     http_response = http_client.post(
         "/api/v3/review",
         json={
-            "expected_artifact": http_context["artifact"],
-            "expected_timeline": http_context["timeline"],
-            "expected_check_report": http_context["check_report"],
+                "expected_artifact": http_context["artifact"],
+                "expected_timeline": http_context["timeline"],
+                "expected_artifact_report": http_context["artifact_report"],
+                "expected_publication_manifest": http_context[
+                    "publication_manifest"
+                ],
+                "expected_check_report": http_context["check_report"],
             "expected_constraints": http_context["constraints"],
             "outcome": "changes_requested",
-            "scope": ["visual"],
+                "scope": ["visual", "publication"],
             "reviewer": "video.reviewer",
             "reviewed_at": "2026-07-30T00:00:00Z",
             "findings": [finding],
@@ -192,6 +237,9 @@ def test_openapi_has_no_path_file_or_job_queue_surface(tmp_path: Path) -> None:
     assert set(paths) == {
         "/api/v3/status",
         "/api/v3/advance",
+        "/api/v3/voice",
+        "/api/v3/voice/takes",
+        "/api/v3/voice/takes/{asset_id}/approve",
         "/api/v3/review",
         "/api/v3/review/context",
             "/api/v3/review/current",
@@ -200,6 +248,7 @@ def test_openapi_has_no_path_file_or_job_queue_surface(tmp_path: Path) -> None:
             "/api/v3/review/artifacts/{sha256}/evidence",
             "/api/v3/review/artifacts/{sha256}/waveform",
             "/api/v3/deliver",
+            "/api/v3/delivery/context",
             "/api/v3/blobs/{sha256}",
         }
     assert all("job" not in path and "file" not in path for path in paths)

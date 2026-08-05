@@ -73,14 +73,20 @@ def test_architecture_generates_quality_rule_index(tmp_path: Path) -> None:
     source = tmp_path / "dlstudio"
     _write(
         source / "timeline" / "api.py",
-        'RULES = ("VQ-SYNC", "VQ-ASSET", "not-a-rule")\n',
+        'RULES = ("VQ-ASSET", "not-a-rule")\n'
+        'FINDINGS = (\n'
+        '    CheckFinding("VQ-SYNC", "error", "sync failed"),\n'
+        '    CheckFinding("audio.voice.required", "error", "voice missing"),\n'
+        ')\n',
     )
 
     result = check_architecture(source, _architecture_config())
 
     assert result.status is GateStatus.PASS
     assert result.metrics["rules"] == 2
-    assert result.metrics["rule_index"] == "VQ-ASSET,VQ-SYNC"
+    assert result.metrics["rule_index"] == (
+        "VQ-SYNC,audio.voice.required"
+    )
 
 
 def test_architecture_resolves_relative_cross_module_import_from_package_init(

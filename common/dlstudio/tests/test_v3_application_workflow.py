@@ -14,6 +14,8 @@ from dlstudio.application.api import (
 from dlstudio.application.workflow import _advance
 from dlstudio.foundation.api import BlobRef
 from dlstudio.persistence import ProductionRepository, WorkflowRepository
+from dlstudio.rendering.api import ArtifactReport
+from dlstudio.release.api import PublicationManifest, PublicationManifestFile
 from dlstudio.review.api import ReviewRound, ReviewVerdict
 from dlstudio.workflow.api import NamedRef
 
@@ -31,6 +33,116 @@ def _workflows(tmp_path: Path) -> WorkflowRepository:
 
 def _put(workflows: WorkflowRepository, value: bytes) -> BlobRef:
     return workflows.put_blob(value)
+
+
+def _artifact_report(
+    workflows: WorkflowRepository,
+    artifact: BlobRef,
+) -> BlobRef:
+    report = ArtifactReport(
+        artifact=artifact,
+        width=1080,
+        height=1920,
+        fps_num=30,
+        fps_den=1,
+        duration_ns=1_000_000_000,
+        audio_codec=None,
+        audio_sample_rate=None,
+        audio_channels=None,
+        integrated_lufs_milli=None,
+        true_peak_db_milli=None,
+        active_audio_ratio_milli=None,
+    )
+    return _put(workflows, report.canonical_bytes())
+
+
+def _publication(
+    workflows: WorkflowRepository,
+    roles: tuple[str, ...] = ("cover", "metadata"),
+) -> BlobRef:
+    cover_blob = _put(workflows, b"cover")
+    cover_revision = _put(workflows, b"cover revision")
+    metadata_blob = _put(workflows, b"metadata")
+    metadata_revision = _put(workflows, b"metadata revision")
+    return _put(
+        workflows,
+        PublicationManifest(
+            "fixture.reel",
+            tuple(item for item in (
+                PublicationManifestFile(
+                    "cover",
+                    "cover.png",
+                    "publish.cover.main",
+                    cover_revision,
+                    cover_blob,
+                ),
+                PublicationManifestFile(
+                    "metadata",
+                    "metadata.md",
+                    "publish.metadata.main",
+                    metadata_revision,
+                    metadata_blob,
+                ),
+            ) if item.role in roles),
+        ).canonical_bytes(),
+    )
+
+
+def test_reel_review_rejects_missing_cover_before_verdict(
+    tmp_path: Path,
+) -> None:
+    workflows = _workflows(tmp_path)
+    start_workflow(workflows, run_id="run.main", kind="reel")
+    artifact = _put(workflows, b"final")
+    artifact_report = _artifact_report(workflows, artifact)
+    publication = _publication(workflows, ("metadata",))
+    check_report = _put(workflows, b"checks")
+    constraints = _put(workflows, b"constraints")
+    _advance(
+        workflows,
+        inputs=(),
+        contract="prepare.v1",
+        run_stage=lambda *_: (
+            NamedRef("timeline", _put(workflows, b"timeline")),
+            NamedRef("check_policy", _put(workflows, b"policy")),
+            NamedRef("check_report", check_report),
+            NamedRef("constraints", constraints),
+            NamedRef("publication_manifest", publication),
+        ),
+    )
+    _advance(
+        workflows,
+        inputs=(),
+        contract="draft.v1",
+        run_stage=lambda *_: (NamedRef("artifact", _put(workflows, b"draft")),),
+    )
+    _advance(
+        workflows,
+        inputs=(),
+        contract="final.v1",
+        run_stage=lambda *_: (
+            NamedRef("artifact", artifact),
+            NamedRef("artifact_report", artifact_report),
+            NamedRef("execution", _put(workflows, b"execution")),
+            NamedRef("render_options", _put(workflows, b"options")),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="requires cover and metadata"):
+        submit_review(
+            workflows,
+            ReviewVerdict(
+                artifact=artifact,
+                artifact_report=artifact_report,
+                publication_manifest=publication,
+                outcome="pass",
+                check_report=check_report,
+                constraints=constraints,
+                scope=("audio", "constraints", "publication", "visual"),
+                reviewer="video.reviewer",
+                reviewed_at="2026-07-30T00:00:00Z",
+            ),
+        )
 
 
 def test_status_is_a_direct_workflow_projection(tmp_path: Path) -> None:
@@ -123,6 +235,7 @@ def test_review_must_name_exact_final_outputs_and_resume_running_attempt(
     start_workflow(workflows, run_id="run.main", kind="reel")
     artifact = _put(workflows, b"final")
     report = _put(workflows, b"report")
+    artifact_report = _artifact_report(workflows, artifact)
     constraints = _put(workflows, b"constraints")
 
     _advance(
@@ -134,6 +247,7 @@ def test_review_must_name_exact_final_outputs_and_resume_running_attempt(
             NamedRef("check_policy", _put(workflows, b"policy")),
             NamedRef("check_report", report),
             NamedRef("constraints", constraints),
+            NamedRef("publication_manifest", _publication(workflows)),
         ),
     )
     _advance(
@@ -148,24 +262,47 @@ def test_review_must_name_exact_final_outputs_and_resume_running_attempt(
         contract="final.v1",
         run_stage=lambda *_: (
             NamedRef("artifact", artifact),
+            NamedRef("artifact_report", artifact_report),
             NamedRef("execution", _put(workflows, b"execution")),
             NamedRef("render_options", _put(workflows, b"options")),
         ),
     )
     verdict = ReviewVerdict(
         artifact=artifact,
+        artifact_report=artifact_report,
+        publication_manifest=_publication(workflows),
         outcome="pass",
         check_report=report,
         constraints=constraints,
-        scope=("audio", "visual", "constraints"),
+        scope=("audio", "visual", "constraints", "publication"),
         reviewer="video.reviewer",
         reviewed_at="2026-07-27T00:00:00Z",
     )
+    with pytest.raises(ValueError, match="exact artifact report"):
+        submit_review(
+            workflows,
+            ReviewVerdict(
+                artifact=artifact,
+                artifact_report=_artifact_report(
+                    workflows,
+                    _put(workflows, b"stale final"),
+                ),
+                publication_manifest=_publication(workflows),
+                outcome="pass",
+                check_report=report,
+                constraints=constraints,
+                scope=("audio", "visual", "constraints", "publication"),
+                reviewer="video.reviewer",
+                reviewed_at="2026-07-27T00:00:00Z",
+            ),
+        )
     current = get_status(workflows)
     running = current.start(
         "review",
         (
             NamedRef("artifact", verdict.artifact),
+            NamedRef("artifact_report", verdict.artifact_report),
+            NamedRef("publication_manifest", verdict.publication_manifest),
             NamedRef("check_report", verdict.check_report),
             NamedRef("constraints", verdict.constraints),
         ),
@@ -193,6 +330,7 @@ def test_pass_then_upstream_invalidation_accepts_a_new_review_round(
     workflows = _workflows(tmp_path)
     start_workflow(workflows, run_id="run.main", kind="reel")
     first_artifact = _put(workflows, b"first final")
+    first_artifact_report = _artifact_report(workflows, first_artifact)
     first_report = _put(workflows, b"first report")
     first_constraints = _put(workflows, b"first constraints")
 
@@ -205,6 +343,7 @@ def test_pass_then_upstream_invalidation_accepts_a_new_review_round(
             NamedRef("check_policy", _put(workflows, b"first policy")),
             NamedRef("check_report", first_report),
             NamedRef("constraints", first_constraints),
+            NamedRef("publication_manifest", _publication(workflows)),
         ),
     )
     _advance(
@@ -221,16 +360,22 @@ def test_pass_then_upstream_invalidation_accepts_a_new_review_round(
         contract="final.v1",
         run_stage=lambda *_: (
             NamedRef("artifact", first_artifact),
+            NamedRef(
+                "artifact_report",
+                first_artifact_report,
+            ),
             NamedRef("execution", _put(workflows, b"first execution")),
             NamedRef("render_options", _put(workflows, b"first options")),
         ),
     )
     first_verdict = ReviewVerdict(
         artifact=first_artifact,
+        artifact_report=first_artifact_report,
+        publication_manifest=_publication(workflows),
         outcome="pass",
         check_report=first_report,
         constraints=first_constraints,
-        scope=("audio", "visual", "constraints"),
+        scope=("audio", "visual", "constraints", "publication"),
         reviewer="video.reviewer",
         reviewed_at="2026-07-27T00:00:00Z",
     )
@@ -263,6 +408,7 @@ def test_pass_then_upstream_invalidation_accepts_a_new_review_round(
             NamedRef("check_policy", _put(workflows, b"second policy")),
             NamedRef("check_report", second_report),
             NamedRef("constraints", second_constraints),
+            NamedRef("publication_manifest", _publication(workflows)),
         ),
     )
     _advance(
@@ -274,12 +420,17 @@ def test_pass_then_upstream_invalidation_accepts_a_new_review_round(
         ),
     )
     second_artifact = _put(workflows, b"second final")
+    second_artifact_report = _artifact_report(workflows, second_artifact)
     _advance(
         workflows,
         inputs=(),
         contract="final.v2",
         run_stage=lambda *_: (
             NamedRef("artifact", second_artifact),
+            NamedRef(
+                "artifact_report",
+                second_artifact_report,
+            ),
             NamedRef("execution", _put(workflows, b"second execution")),
             NamedRef("render_options", _put(workflows, b"second options")),
         ),
@@ -289,10 +440,12 @@ def test_pass_then_upstream_invalidation_accepts_a_new_review_round(
 
     second_verdict = ReviewVerdict(
         artifact=second_artifact,
+        artifact_report=second_artifact_report,
+        publication_manifest=_publication(workflows),
         outcome="pass",
         check_report=second_report,
         constraints=second_constraints,
-        scope=("audio", "visual", "constraints"),
+        scope=("audio", "visual", "constraints", "publication"),
         reviewer="video.reviewer",
         reviewed_at="2026-07-30T00:00:00Z",
     )
@@ -324,6 +477,7 @@ def test_pass_reuses_exact_latest_round_after_upstream_invalidation(
     constraints = _put(workflows, b"stable constraints")
     draft_artifact = _put(workflows, b"stable draft")
     final_artifact = _put(workflows, b"stable final")
+    artifact_report = _artifact_report(workflows, final_artifact)
     execution = _put(workflows, b"stable execution")
     render_options = _put(workflows, b"stable options")
 
@@ -336,6 +490,7 @@ def test_pass_reuses_exact_latest_round_after_upstream_invalidation(
             NamedRef("check_policy", policy),
             NamedRef("check_report", report),
             NamedRef("constraints", constraints),
+            NamedRef("publication_manifest", _publication(workflows)),
         ),
     )
     _advance(
@@ -352,16 +507,19 @@ def test_pass_reuses_exact_latest_round_after_upstream_invalidation(
         contract="final.v1",
         run_stage=lambda *_: (
             NamedRef("artifact", final_artifact),
+            NamedRef("artifact_report", artifact_report),
             NamedRef("execution", execution),
             NamedRef("render_options", render_options),
         ),
     )
     verdict = ReviewVerdict(
         artifact=final_artifact,
+        artifact_report=artifact_report,
+        publication_manifest=_publication(workflows),
         outcome="pass",
         check_report=report,
         constraints=constraints,
-        scope=("audio", "visual", "constraints"),
+        scope=("audio", "visual", "constraints", "publication"),
         reviewer="video.reviewer",
         reviewed_at="2026-07-30T00:00:00Z",
     )
@@ -391,6 +549,7 @@ def test_pass_reuses_exact_latest_round_after_upstream_invalidation(
             NamedRef("check_policy", policy),
             NamedRef("check_report", report),
             NamedRef("constraints", constraints),
+            NamedRef("publication_manifest", _publication(workflows)),
         ),
     )
     _advance(
@@ -407,6 +566,7 @@ def test_pass_reuses_exact_latest_round_after_upstream_invalidation(
         contract="final.v2",
         run_stage=lambda *_: (
             NamedRef("artifact", final_artifact),
+            NamedRef("artifact_report", artifact_report),
             NamedRef("execution", execution),
             NamedRef("render_options", render_options),
         ),

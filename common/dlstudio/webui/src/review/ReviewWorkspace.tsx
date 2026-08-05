@@ -61,6 +61,93 @@ function errorMessage(error: unknown): string {
   return JSON.stringify(error);
 }
 
+function evidenceBlobUrl(ref: { sha256: string; size: number }): string {
+  return `/api/v3/blobs/${ref.sha256}?size=${ref.size}`;
+}
+
+function ReviewEvidence({ context }: { context: ReviewContext }) {
+  const [metadataText, setMetadataText] = useState<string | null>(null);
+  const [metadataError, setMetadataError] = useState<string | null>(null);
+  const report = context.artifact_evidence;
+  const metadata = context.publication_evidence.files.find(
+    (item) => item.role === "metadata",
+  );
+
+  useEffect(() => {
+    setMetadataText(null);
+    setMetadataError(null);
+    if (!metadata) return;
+    if (metadata.blob.size > 512 * 1024) {
+      setMetadataError("Metadata больше 512 KiB; доступен только exact hash.");
+      return;
+    }
+    const controller = new AbortController();
+    void fetch(evidenceBlobUrl(metadata.blob), { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error(`Studio returned ${response.status}.`);
+        return response.text();
+      })
+      .then(setMetadataText)
+      .catch((cause: unknown) => {
+        if (!controller.signal.aborted) setMetadataError(errorMessage(cause));
+      });
+    return () => controller.abort();
+  }, [metadata?.blob.sha256, metadata?.blob.size]);
+
+  return (
+    <section class="review-evidence" aria-labelledby="review-evidence-title">
+      <h3 id="review-evidence-title">Exact evidence</h3>
+      <div class="review-evidence-groups">
+        <article>
+          <h4>Видео</h4>
+          <p>{report.width} × {report.height} · {(report.duration_ns / 1_000_000_000).toFixed(2)} s · {report.fps_num / report.fps_den} fps</p>
+          <code>{context.artifact.sha256}</code>
+          <small>{context.artifact.size.toLocaleString()} bytes</small>
+        </article>
+        <article>
+          <h4>Аудио report</h4>
+          {report.audio_codec === null ? (
+            <p>Аудиопоток отсутствует</p>
+          ) : (
+            <dl>
+              <div><dt>Поток</dt><dd>{report.audio_codec} · {report.audio_sample_rate} Hz · {report.audio_channels} ch</dd></div>
+              <div><dt>Громкость</dt><dd>{report.integrated_lufs_milli === null ? "—" : `${(report.integrated_lufs_milli / 1000).toFixed(1)} LUFS`}</dd></div>
+              <div><dt>True peak</dt><dd>{report.true_peak_db_milli === null ? "—" : `${(report.true_peak_db_milli / 1000).toFixed(1)} dBTP`}</dd></div>
+              <div><dt>Слышимый сигнал</dt><dd>{report.active_audio_ratio_milli === null ? "—" : `${(report.active_audio_ratio_milli / 10).toFixed(1)}%`}</dd></div>
+              <div><dt>Voice peak</dt><dd>{report.voice_true_peak_db_milli == null ? "—" : `${(report.voice_true_peak_db_milli / 1000).toFixed(1)} dBFS`}</dd></div>
+              <div><dt>Voice active</dt><dd>{report.voice_active_audio_ratio_milli == null ? "—" : `${(report.voice_active_audio_ratio_milli / 10).toFixed(1)}%`}</dd></div>
+              <div><dt>Voice in exact final</dt><dd>{report.voice_correlation_db_milli == null ? "—" : `${(report.voice_correlation_db_milli / 1000).toFixed(1)} dB`}</dd></div>
+            </dl>
+          )}
+          <code>{context.artifact_report.sha256}</code>
+        </article>
+        <article>
+          <h4>Publication files</h4>
+          {context.publication_evidence.files.map((item) => (
+            <div class="publication-evidence" key={item.path}>
+              <strong>{item.role}: {item.path}</strong>
+              {item.role === "cover" && (
+                <img src={evidenceBlobUrl(item.blob)} alt={`Обложка ${item.path}`} />
+              )}
+              {item.role === "metadata" && metadataText !== null && (
+                <pre>{metadataText}</pre>
+              )}
+              {item.role === "metadata" && metadataText === null && !metadataError && (
+                <small role="status">Читаю metadata…</small>
+              )}
+              {item.role === "metadata" && metadataError && (
+                <small role="alert">{metadataError}</small>
+              )}
+              <code>{item.blob.sha256}</code>
+              <small>{item.blob.size.toLocaleString()} bytes · asset {item.asset_id}</small>
+            </div>
+          ))}
+        </article>
+      </div>
+    </section>
+  );
+}
+
 function isDraftFinding(value: unknown): value is ReviewFindingBody {
   if (typeof value !== "object" || value === null) return false;
   const finding = value as Partial<ReviewFindingBody>;
@@ -999,12 +1086,14 @@ export function ReviewWorkspace({
         body: {
           expected_artifact: context.artifact,
           expected_timeline: context.timeline,
+          expected_artifact_report: context.artifact_report,
+          expected_publication_manifest: context.publication_manifest,
           expected_check_report: context.check_report,
           expected_constraints: context.constraints,
           expected_latest_round: context.latest_round,
           resolutions,
           outcome,
-          scope: ["visual", "audio", "constraints"],
+          scope: ["visual", "audio", "constraints", "publication"],
           reviewer: "author",
           reviewed_at: new Date().toISOString(),
           findings: outcome === "pass" ? [] : findings,
@@ -1055,6 +1144,8 @@ export function ReviewWorkspace({
           {draftStorageWarning}
         </p>
       )}
+
+      <ReviewEvidence context={context} />
 
       <div class="review-grid">
         <div class="review-visuals">

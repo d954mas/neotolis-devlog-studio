@@ -8,6 +8,8 @@ from pathlib import Path
 from dlstudio.application.api import start_workflow, submit_review
 from dlstudio.foundation.api import BlobRef
 from dlstudio.persistence.api import open_local_repositories
+from dlstudio.rendering.api import ArtifactReport
+from dlstudio.release.api import PublicationManifest, PublicationManifestFile
 from dlstudio.review.api import (
     ReviewFinding,
     ReviewLocator,
@@ -139,11 +141,37 @@ def _prepare_outputs(
     policy_ref = store.put_bytes(b"e2e.check-policy.v1")  # type: ignore[attr-defined]
     report = CheckReport(timeline_ref, policy_ref, ())
     report_ref = store.put_bytes(report.canonical_bytes())  # type: ignore[attr-defined]
+    cover_blob = store.put_bytes(b"e2e cover")  # type: ignore[attr-defined]
+    cover_revision = store.put_bytes(b"e2e cover revision")  # type: ignore[attr-defined]
+    metadata_blob = store.put_bytes(b"e2e metadata")  # type: ignore[attr-defined]
+    metadata_revision = store.put_bytes(b"e2e metadata revision")  # type: ignore[attr-defined]
+    publication_ref = store.put_bytes(  # type: ignore[attr-defined]
+        PublicationManifest(
+            timeline.production_id,
+            (
+                PublicationManifestFile(
+                    "cover",
+                    "cover.png",
+                    "publish.cover.main",
+                    cover_revision,
+                    cover_blob,
+                ),
+                PublicationManifestFile(
+                    "metadata",
+                    "metadata.md",
+                    "publish.metadata.main",
+                    metadata_revision,
+                    metadata_blob,
+                ),
+            ),
+        ).canonical_bytes()
+    )
     return (
         NamedRef("timeline", timeline_ref),
         NamedRef("check_policy", policy_ref),
         NamedRef("check_report", report_ref),
         NamedRef("constraints", constraints),
+        NamedRef("publication_manifest", publication_ref),
     )
 
 
@@ -248,6 +276,23 @@ def _build_production(
         revision="current",
     )
     old_prepare = _prepare_outputs(store, old_timeline, constraints)
+    old_artifact_report = ArtifactReport(
+        old_artifact,
+        old_timeline.width,
+        old_timeline.height,
+        old_timeline.fps_num,
+        old_timeline.fps_den,
+        old_timeline.duration_ns,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    old_artifact_report_ref = store.put_bytes(
+        old_artifact_report.canonical_bytes()
+    )
 
     start_workflow(workflows, run_id="run.main", kind="reel")
     _save_stage(
@@ -269,15 +314,20 @@ def _build_production(
             NamedRef("artifact", old_artifact),
             NamedRef("execution", store.put_bytes(b"execution.old")),
             NamedRef("render_options", store.put_bytes(b"options.old")),
+            NamedRef("artifact_report", old_artifact_report_ref),
         ),
         contract="fixture.final.old.v1",
     )
     previous = ReviewVerdict(
         artifact=old_artifact,
+        artifact_report=old_artifact_report_ref,
+        publication_manifest=_output_ref(
+            old_prepare, "publication_manifest"
+        ),
         outcome="changes_requested",
         check_report=_output_ref(old_prepare, "check_report"),
         constraints=constraints,
-        scope=("audio", "constraints", "visual"),
+        scope=("audio", "constraints", "visual", "publication"),
         reviewer="fixture.reviewer",
         reviewed_at="2026-07-30T00:00:00Z",
         findings=_previous_findings(same_media=same_media),
@@ -286,6 +336,23 @@ def _build_production(
 
     changed_source = store.put_bytes(f"source.{scenario}.current".encode())
     current_prepare = _prepare_outputs(store, current_timeline, constraints)
+    current_artifact_report = ArtifactReport(
+        current_artifact,
+        current_timeline.width,
+        current_timeline.height,
+        current_timeline.fps_num,
+        current_timeline.fps_den,
+        current_timeline.duration_ns,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    current_artifact_report_ref = store.put_bytes(
+        current_artifact_report.canonical_bytes()
+    )
     _save_stage(
         workflows,
         "prepare",
@@ -306,6 +373,10 @@ def _build_production(
             NamedRef("artifact", current_artifact),
             NamedRef("execution", store.put_bytes(b"execution.current")),
             NamedRef("render_options", store.put_bytes(b"options.current")),
+            NamedRef(
+                "artifact_report",
+                current_artifact_report_ref,
+            ),
         ),
         contract="fixture.final.current.v1",
     )

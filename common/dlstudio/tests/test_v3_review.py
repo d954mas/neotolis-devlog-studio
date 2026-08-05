@@ -22,6 +22,8 @@ from dlstudio.review.api import (
 def _verdict(**changes: object) -> ReviewVerdict:
     values: dict[str, object] = {
         "artifact": BlobRef("1" * 64, 100),
+        "artifact_report": BlobRef("7" * 64, 70),
+        "publication_manifest": BlobRef("6" * 64, 60),
         "outcome": "pass",
         "check_report": BlobRef("9" * 64, 90),
         "constraints": BlobRef("8" * 64, 80),
@@ -41,6 +43,8 @@ def test_verdict_round_trip_binds_policy_snapshot_and_exact_artifact() -> None:
     assert ReviewVerdict.from_canonical_bytes(verdict.canonical_bytes()) == verdict
     assert verdict.reachable_blobs == (
         BlobRef("1" * 64, 100),
+        BlobRef("7" * 64, 70),
+        BlobRef("6" * 64, 60),
         BlobRef("9" * 64, 90),
         BlobRef("8" * 64, 80),
         BlobRef("2" * 64, 20),
@@ -50,15 +54,19 @@ def test_verdict_round_trip_binds_policy_snapshot_and_exact_artifact() -> None:
         verdict.require_artifact(BlobRef("4" * 64, 100))
 
 
-def test_review_verdict_v3_golden_bytes_are_unchanged() -> None:
+def test_review_verdict_v5_golden_bytes_are_unchanged() -> None:
     assert _verdict().canonical_bytes() == (
-        b'{"$domain":"dlstudio.review_verdict","$version":3,"payload":'
+        b'{"$domain":"dlstudio.review_verdict","$version":5,"payload":'
         b'{"artifact":{"sha256":"111111111111111111111111111111111111'
-        b'1111111111111111111111111111","size":100},"check_report":{"sha256":'
+        b'1111111111111111111111111111","size":100},"artifact_report":{"sha256":'
+        b'"777777777777777777777777777777777777777777777777777777777777'
+        b'7777","size":70},"check_report":{"sha256":'
         b'"999999999999999999999999999999999999999999999999999999999999'
         b'9999","size":90},"constraints":{"sha256":"888888888888888888888888'
         b'8888888888888888888888888888888888888888","size":80},"evidence":[],'
-        b'"findings":[],"outcome":"pass","review_pack":null,"reviewed_at":'
+        b'"findings":[],"outcome":"pass","publication_manifest":{"sha256":'
+        b'"666666666666666666666666666666666666666666666666666666666666'
+        b'6666","size":60},"review_pack":null,"reviewed_at":'
         b'"2026-07-27T00:00:00Z","reviewer":"video.reviewer","scope":'
         b'["audio","constraints","visual"]}}'
     )

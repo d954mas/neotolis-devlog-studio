@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dlstudio.application.review import query_review_context
 from dlstudio.foundation.api import BlobRef
+from dlstudio.rendering.api import ArtifactReport
+from dlstudio.release.api import PublicationManifest
 from dlstudio.timeline.api import (
     CheckReport,
     TimelineIR,
@@ -23,13 +25,25 @@ class _Workflows:
 
 
 class _Store:
-    def __init__(self, timeline: TimelineIR, report: CheckReport) -> None:
+    def __init__(
+        self,
+        timeline: TimelineIR,
+        report: CheckReport,
+        artifact_report: ArtifactReport,
+        publication: PublicationManifest,
+    ) -> None:
         self.timeline = timeline
         self.report = report
+        self.artifact_report = artifact_report
+        self.publication = publication
 
     def read(self, ref: BlobRef) -> bytes:
         if ref == self.timeline.ref:
             return self.timeline.canonical_bytes()
+        if ref == self.artifact_report.ref:
+            return self.artifact_report.canonical_bytes()
+        if ref == self.publication.ref:
+            return self.publication.canonical_bytes()
         assert ref == self.report.ref
         return self.report.canonical_bytes()
 
@@ -74,7 +88,22 @@ def test_review_context_projects_exact_artifact_and_timeline_lanes() -> None:
     options = BlobRef("c" * 64, 11)
     policy = BlobRef("d" * 64, 12)
     report = CheckReport(timeline.ref, policy, ())
+    artifact_report = ArtifactReport(
+        artifact,
+        timeline.width,
+        timeline.height,
+        timeline.fps_num,
+        timeline.fps_den,
+        timeline.duration_ns,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
     constraints = BlobRef("f" * 64, 14)
+    publication = PublicationManifest("fixture.reel")
     workflow = WorkflowRun("run.main", "fixture.reel", "reel")
     workflow = _succeed(
         workflow,
@@ -85,6 +114,7 @@ def test_review_context_projects_exact_artifact_and_timeline_lanes() -> None:
             NamedRef("check_policy", policy),
             NamedRef("check_report", report.ref),
             NamedRef("constraints", constraints),
+            NamedRef("publication_manifest", publication.ref),
         ),
     )
     workflow = _succeed(
@@ -99,6 +129,7 @@ def test_review_context_projects_exact_artifact_and_timeline_lanes() -> None:
         (NamedRef("timeline", timeline.ref),),
         (
             NamedRef("artifact", artifact),
+            NamedRef("artifact_report", artifact_report.ref),
             NamedRef("execution", execution),
             NamedRef("render_options", options),
         ),
@@ -106,13 +137,16 @@ def test_review_context_projects_exact_artifact_and_timeline_lanes() -> None:
 
     context = query_review_context(  # type: ignore[arg-type]
         _Workflows(workflow),
-        _Store(timeline, report),
+        _Store(timeline, report, artifact_report, publication),
     )
 
     assert context.artifact == artifact
+    assert context.artifact_report == artifact_report.ref
+    assert context.artifact_evidence == artifact_report
     assert context.timeline == timeline.ref
     assert context.check_report == report.ref
     assert context.constraints == constraints
+    assert context.publication_manifest == publication.ref
     assert context.fps_num == 30
     assert [(item.item_id, item.lane) for item in context.items] == [
         ("visual.000", "layer.0"),

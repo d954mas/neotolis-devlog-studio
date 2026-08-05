@@ -173,6 +173,9 @@ class WorkflowRepository:
         rendered = _completed_outputs(current, "final")
         if (
             verdict.artifact != rendered.get("artifact")
+            or verdict.artifact_report != rendered.get("artifact_report")
+            or verdict.publication_manifest
+            != prepared.get("publication_manifest")
             or verdict.check_report != prepared.get("check_report")
             or verdict.constraints != prepared.get("constraints")
         ):
@@ -210,6 +213,11 @@ class WorkflowRepository:
                 "review",
                 (
                     NamedRef("artifact", verdict.artifact),
+                    NamedRef("artifact_report", verdict.artifact_report),
+                    NamedRef(
+                        "publication_manifest",
+                        verdict.publication_manifest,
+                    ),
                     NamedRef("check_report", verdict.check_report),
                     NamedRef("constraints", verdict.constraints),
                 ),

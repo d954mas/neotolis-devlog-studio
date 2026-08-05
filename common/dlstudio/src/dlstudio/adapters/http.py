@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
+import uuid
 from collections import OrderedDict
 from pathlib import Path
 from threading import Lock
@@ -10,6 +13,7 @@ from urllib.parse import urlsplit
 
 from fastapi import (
     FastAPI,
+    Header,
     HTTPException,
     Path as PathParam,
     Query,
@@ -27,7 +31,9 @@ from dlstudio.application.api import (
     CasConflict,
     CorruptObject,
     DeliveryReceipt,
+    DeliveryContext,
     deliver_local,
+    query_delivery_context,
     project_status,
     query_authorized_review_artifact_contexts,
     query_current_review,
@@ -37,6 +43,8 @@ from dlstudio.application.api import (
     query_review_waveform,
     ReviewArtifactContext,
     query_status,
+    query_voice_recorder,
+    record_voice_take,
     ReviewContext,
     ReviewTaskPack,
     ReviewWaveform,
@@ -45,6 +53,8 @@ from dlstudio.application.api import (
     submit_review_payload,
     StudioError,
     WorkflowStatus,
+    VoiceRecorderContext,
+    approve_voice_take,
 )
 
 from .local import LocalProduction, load_local_production
@@ -130,6 +140,8 @@ class ReviewResolutionBody(_Body):
 class ReviewVerdictBody(_Body):
     expected_artifact: BlobRef
     expected_timeline: BlobRef
+    expected_artifact_report: BlobRef
+    expected_publication_manifest: BlobRef
     expected_check_report: BlobRef
     expected_constraints: BlobRef
     outcome: Literal["pass", "changes_requested", "block"]
@@ -143,11 +155,19 @@ class ReviewVerdictBody(_Body):
 
 class DeliveryBody(_Body):
     destination_id: str
+    expected_candidate: BlobRef
 
 
 class DeliveryResponse(_Body):
     status: WorkflowStatus
     receipt: DeliveryReceipt
+
+
+class ApproveVoiceTakeBody(_Body):
+    expected_revision: int = Field(ge=0)
+    approved_at: str = Field(min_length=1)
+    expected_production_id: str = Field(min_length=1)
+    expected_script_ref: BlobRef
 
 
 def _advance(production: LocalProduction):
@@ -389,6 +409,126 @@ def create_app(manifest_path: str | Path) -> FastAPI:
     def status() -> WorkflowStatus:
         return query_status(production.workflows)
 
+    def current_state_revision() -> int:
+        head = production.repository.read_head()
+        return 0 if head is None else head.revision
+
+    @app.get("/api/v3/voice", operation_id="getVoiceRecorder")
+    def voice_recorder() -> VoiceRecorderContext:
+        return query_voice_recorder(
+            production.assets,
+            production.repository.objects,
+            production_id=production.production_id,
+            authoring_path=production.authoring_path,
+            state_revision=current_state_revision(),
+            workflows=production.workflows,
+        )
+
+    @app.post(
+        "/api/v3/voice/takes",
+        operation_id="recordVoiceTake",
+        responses={
+            200: {"description": "Voice take saved as an immutable asset"},
+            413: {"description": "Voice take exceeds 64 MiB"},
+        },
+    )
+    async def record_voice_take_route(
+        request: Request,
+        expected_revision: int = Query(ge=0),
+        recorded_at: str = Header(alias="X-Recorded-At", min_length=1),
+        duration_ms: int = Header(alias="X-Duration-Ms", gt=0),
+        expected_production_id: str = Header(
+            alias="X-Production-Id", min_length=1
+        ),
+        expected_script_sha256: str = Header(
+            alias="X-Script-Sha256", pattern=r"^[0-9a-f]{64}$"
+        ),
+        expected_script_size: int = Header(alias="X-Script-Size", gt=0),
+    ) -> VoiceRecorderContext:
+        mime_type = request.headers.get("content-type", "").split(";", 1)[0]
+        if not mime_type.startswith("audio/"):
+            raise HTTPException(
+                status_code=415,
+                detail="voice take requires an audio content type",
+            )
+        staging_root = production.repository.staging_root
+        staging_root.mkdir(parents=True, exist_ok=True)
+        fd, raw_path = tempfile.mkstemp(prefix="voice-upload-", dir=staging_root)
+        source = Path(raw_path)
+        size = 0
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                async for chunk in request.stream():
+                    size += len(chunk)
+                    if size > 64 * 1024 * 1024:
+                        raise HTTPException(
+                            status_code=413,
+                            detail="voice take exceeds 64 MiB",
+                        )
+                    handle.write(chunk)
+            if size == 0:
+                raise HTTPException(status_code=422, detail="voice take is empty")
+            from .providers.media import FfprobeMediaInspector
+
+            state_revision = record_voice_take(
+                production.assets,
+                production.repository.objects,
+                production_id=production.production_id,
+                authoring_path=production.authoring_path,
+                source=source,
+                take_id=uuid.uuid4().hex,
+                recorded_at=recorded_at,
+                duration_ms=duration_ms,
+                mime_type=mime_type,
+                expected_production_id=expected_production_id,
+                expected_script_ref=BlobRef(
+                    expected_script_sha256, expected_script_size
+                ),
+                expected_revision=expected_revision,
+                inspect_media=FfprobeMediaInspector(),
+            )
+        finally:
+            source.unlink(missing_ok=True)
+        return query_voice_recorder(
+            production.assets,
+            production.repository.objects,
+            production_id=production.production_id,
+            authoring_path=production.authoring_path,
+            state_revision=state_revision,
+            workflows=production.workflows,
+        )
+
+    @app.post(
+        "/api/v3/voice/takes/{asset_id}/approve",
+        operation_id="approveVoiceTake",
+    )
+    def approve_voice_take_route(
+        body: ApproveVoiceTakeBody,
+        asset_id: str = PathParam(min_length=1),
+    ) -> VoiceRecorderContext:
+        from .providers.media import FfprobeMediaInspector
+
+        state_revision = approve_voice_take(
+            production.assets,
+            production.repository.objects,
+            production_id=production.production_id,
+            authoring_path=production.authoring_path,
+            asset_id=asset_id,
+            approved_at=body.approved_at,
+            expected_production_id=body.expected_production_id,
+            expected_script_ref=body.expected_script_ref,
+            expected_revision=body.expected_revision,
+            inspect_media=FfprobeMediaInspector(),
+        )
+        return query_voice_recorder(
+            production.assets,
+            production.repository.objects,
+            production_id=production.production_id,
+            authoring_path=production.authoring_path,
+            state_revision=state_revision,
+            workflows=production.workflows,
+        )
+
     @app.post("/api/v3/advance", operation_id="advanceProduction")
     def advance_route() -> WorkflowStatus:
         return project_status(_advance(production))
@@ -399,6 +539,8 @@ def create_app(manifest_path: str | Path) -> FastAPI:
             exclude={
                 "expected_artifact",
                 "expected_timeline",
+                "expected_artifact_report",
+                "expected_publication_manifest",
                 "expected_check_report",
                 "expected_constraints",
             }
@@ -410,6 +552,10 @@ def create_app(manifest_path: str | Path) -> FastAPI:
                 production.repository.objects,
                 expected_artifact=body.expected_artifact,
                 expected_timeline=body.expected_timeline,
+                expected_artifact_report=body.expected_artifact_report,
+                expected_publication_manifest=(
+                    body.expected_publication_manifest
+                ),
                 expected_check_report=body.expected_check_report,
                 expected_constraints=body.expected_constraints,
             )
@@ -550,8 +696,16 @@ def create_app(manifest_path: str | Path) -> FastAPI:
             production.workflows,
             production.delivery_root,
             destination_id=body.destination_id,
+            expected_candidate=body.expected_candidate,
         )
         return DeliveryResponse(status=project_status(workflow), receipt=receipt)
+
+    @app.get(
+        "/api/v3/delivery/context",
+        operation_id="getDeliveryContext",
+    )
+    def delivery_context() -> DeliveryContext:
+        return query_delivery_context(production.workflows)
 
     @app.get(
         "/api/v3/blobs/{sha256}",

@@ -7,8 +7,13 @@ from dataclasses import dataclass
 from typing import Any, Literal
 from dlstudio.constraints.api import ConstraintSet
 from dlstudio.foundation.api import BlobRef, CasConflict, canonical_bytes
-from dlstudio.release.api import PackageFile, ReleaseCandidate
+from dlstudio.release.api import (
+    PackageFile,
+    PublicationManifest,
+    ReleaseCandidate,
+)
 from dlstudio.rendering.api import (
+    ArtifactReport,
     ExecutionFingerprint,
     RenderOptions,
     RenderResult,
@@ -207,14 +212,45 @@ def submit_review(
         "check_policy",
         "check_report",
         "constraints",
-    } or set(finalized) != {"artifact", "execution", "render_options"}:
+        "publication_manifest",
+    } or set(finalized) != {
+        "artifact",
+        "artifact_report",
+        "execution",
+        "render_options",
+    }:
         raise ValueError("prepare/final stage output contract is incomplete")
     if verdict.artifact != finalized["artifact"]:
         raise ValueError("review does not name the exact final artifact")
+    if verdict.artifact_report != finalized["artifact_report"]:
+        raise ValueError("review does not name the exact artifact report")
+    artifact_report = ArtifactReport.from_canonical_bytes(
+        workflows.read_blob(finalized["artifact_report"])
+    )
+    if artifact_report.ref != finalized["artifact_report"]:
+        raise ValueError("final artifact report identity mismatch")
+    if artifact_report.artifact != finalized["artifact"]:
+        raise ValueError("final artifact report names another artifact")
+    if artifact_report.blocking:
+        raise ValueError("review cannot accept a blocking artifact report")
     if verdict.check_report != prepared["check_report"]:
         raise ValueError("review does not name the exact check report")
     if verdict.constraints != prepared["constraints"]:
         raise ValueError("review does not name the exact constraints")
+    if verdict.publication_manifest != prepared["publication_manifest"]:
+        raise ValueError("review does not name the exact publication manifest")
+    publication = PublicationManifest.from_canonical_bytes(
+        workflows.read_blob(prepared["publication_manifest"])
+    )
+    if publication.ref != prepared["publication_manifest"]:
+        raise ValueError("publication manifest identity mismatch")
+    roles = {item.role for item in publication.files}
+    if current.kind == "reel" and not {"cover", "metadata"}.issubset(roles):
+        raise ValueError("reel review requires cover and metadata")
+    if publication.files and "publication" not in verdict.scope:
+        raise ValueError("review scope must include publication")
+    for ref in publication.reachable_blobs:
+        workflows.verify_blob(ref)
     for ref in verdict.reachable_blobs:
         workflows.verify_blob(ref)
 
@@ -240,11 +276,15 @@ def submit_review(
         and verdict.outcome == "pass"
         and (
             verdict.artifact,
+            verdict.artifact_report,
+            verdict.publication_manifest,
             verdict.check_report,
             verdict.constraints,
         )
         == (
             previous_verdict.artifact,
+            previous_verdict.artifact_report,
+            previous_verdict.publication_manifest,
             previous_verdict.check_report,
             previous_verdict.constraints,
         )
@@ -295,6 +335,13 @@ def submit_review(
             "review",
             (
                 NamedRef("artifact", selected_verdict.artifact),
+                NamedRef(
+                    "artifact_report", selected_verdict.artifact_report
+                ),
+                NamedRef(
+                    "publication_manifest",
+                    selected_verdict.publication_manifest,
+                ),
                 NamedRef("check_report", selected_verdict.check_report),
                 NamedRef("constraints", selected_verdict.constraints),
             ),
@@ -320,6 +367,8 @@ def submit_review_payload(
     *,
     expected_artifact: BlobRef | None = None,
     expected_timeline: BlobRef | None = None,
+    expected_artifact_report: BlobRef | None = None,
+    expected_publication_manifest: BlobRef | None = None,
     expected_check_report: BlobRef | None = None,
     expected_constraints: BlobRef | None = None,
 ) -> WorkflowRun:
@@ -342,6 +391,8 @@ def submit_review_payload(
     expected = (
         expected_artifact,
         expected_timeline,
+        expected_artifact_report,
+        expected_publication_manifest,
         expected_check_report,
         expected_constraints,
     )
@@ -393,6 +444,8 @@ def submit_review_payload(
     if expected_artifact is not None and expected != (
         context.artifact,
         context.timeline,
+        context.artifact_report,
+        context.publication_manifest,
         context.check_report,
         context.constraints,
     ):
@@ -443,6 +496,8 @@ def submit_review_payload(
             )
     verdict = ReviewVerdict(
         artifact=context.artifact,
+        artifact_report=context.artifact_report,
+        publication_manifest=context.publication_manifest,
         outcome=payload["outcome"],
         check_report=context.check_report,
         constraints=context.constraints,
@@ -464,8 +519,11 @@ def _package_release(
     store: BlobStore,
     *,
     timeline: TimelineIR,
+    kind: Literal["reel", "longform", "capture_vo"],
     policy: CheckPolicy,
     report: CheckReport,
+    artifact_report: ArtifactReport,
+    publication: PublicationManifest,
     fingerprint: ExecutionFingerprint,
     options: RenderOptions,
     render: RenderResult,
@@ -481,6 +539,14 @@ def _package_release(
     review = next(item for item in current.attempts if item.stage == "review")
     if review.outputs != (NamedRef("verdict", verdict.ref),):
         raise ValueError("package does not use the accepted review verdict")
+    final = _stage_outputs(current, "final")
+    if (
+        final.get("artifact") != render.artifact
+        or final.get("artifact_report") != artifact_report.ref
+        or _stage_outputs(current, "prepare").get("publication_manifest")
+        != publication.ref
+    ):
+        raise ValueError("package does not use the exact final artifact report")
     package_manifest = workflows.put_blob(
         canonical_bytes(
             {"files": [item.as_payload() for item in package]},
@@ -491,6 +557,8 @@ def _package_release(
     inputs = (
         NamedRef("check_policy", policy.ref),
         NamedRef("check_report", report.ref),
+        NamedRef("artifact_report", artifact_report.ref),
+        NamedRef("publication_manifest", publication.ref),
         NamedRef("constraints", constraints.ref),
         NamedRef("execution", fingerprint.ref),
         NamedRef("package_manifest", package_manifest),
@@ -514,9 +582,12 @@ def _package_release(
         candidate, candidate_ref = freeze_release(
             store,
             production_id=workflows.production_id,
+            kind=kind,
             timeline=timeline,
             policy=policy,
             report=report,
+            artifact_report=artifact_report,
+            publication=publication,
             fingerprint=fingerprint,
             options=options,
             render=render,

@@ -18,6 +18,8 @@ type BlobRef = { sha256: string; size: number };
 
 export type ReviewContextPayload = {
   artifact: BlobRef;
+  artifact_report: BlobRef;
+  publication_manifest: BlobRef;
   timeline: BlobRef;
   check_report: BlobRef;
   constraints: BlobRef;
@@ -85,6 +87,8 @@ export function postBody(
   return {
     expected_artifact: context.artifact,
     expected_timeline: context.timeline,
+    expected_artifact_report: context.artifact_report,
+    expected_publication_manifest: context.publication_manifest,
     expected_check_report: context.check_report,
     expected_constraints: context.constraints,
     expected_latest_round: context.latest_round,
@@ -94,7 +98,7 @@ export function postBody(
       current_finding_id: null,
     })),
     outcome: "changes_requested",
-    scope: ["visual", "audio", "constraints"],
+    scope: ["visual", "audio", "constraints", "publication"],
     reviewer: "e2e.concurrent",
     reviewed_at: "2026-07-30T12:00:00Z",
     findings: [

@@ -51,6 +51,8 @@ def _review_ready(
             "constraints",
             "draft_artifact",
             "final_artifact",
+            "artifact_report",
+            "publication_manifest",
             "execution",
             "render_options",
         )
@@ -68,10 +70,12 @@ def _review_ready(
             NamedRef("check_policy", refs["check_policy"]),
             NamedRef("check_report", refs["check_report"]),
             NamedRef("constraints", refs["constraints"]),
+            NamedRef("publication_manifest", refs["publication_manifest"]),
         ),
         "draft": (NamedRef("artifact", refs["draft_artifact"]),),
         "final": (
             NamedRef("artifact", refs["final_artifact"]),
+            NamedRef("artifact_report", refs["artifact_report"]),
             NamedRef("execution", refs["execution"]),
             NamedRef("render_options", refs["render_options"]),
         ),
@@ -115,6 +119,8 @@ def _store_round(
     )
     verdict = ReviewVerdict(
         artifact=refs["final_artifact"],
+        artifact_report=refs["artifact_report"],
+        publication_manifest=refs["publication_manifest"],
         outcome=outcome,
         check_report=refs["check_report"],
         constraints=refs["constraints"],
@@ -143,6 +149,8 @@ def _passing_workflow(
         "review",
         (
             NamedRef("artifact", verdict.artifact),
+            NamedRef("artifact_report", verdict.artifact_report),
+            NamedRef("publication_manifest", verdict.publication_manifest),
             NamedRef("check_report", verdict.check_report),
             NamedRef("constraints", verdict.constraints),
         ),
@@ -540,7 +548,10 @@ def test_exact_passing_round_can_be_reattached_after_invalidation(
             NamedRef("timeline", refs["timeline"]),
             NamedRef("check_policy", refs["check_policy"]),
             NamedRef("check_report", refs["check_report"]),
-            NamedRef("constraints", refs["constraints"]),
+                NamedRef("constraints", refs["constraints"]),
+                NamedRef(
+                    "publication_manifest", refs["publication_manifest"]
+                ),
         ),
     )
     _save_transition(workflows, invalidated, prepared_again)
@@ -563,9 +574,10 @@ def test_exact_passing_round_can_be_reattached_after_invalidation(
     _save_transition(workflows, drafted_again, rendering_again)
     review_ready_again = rendering_again.succeed(
         rendering_again.attempts[-1].operation_id,
-        (
-            NamedRef("artifact", refs["final_artifact"]),
-            NamedRef("execution", refs["execution"]),
+            (
+                NamedRef("artifact", refs["final_artifact"]),
+                NamedRef("artifact_report", refs["artifact_report"]),
+                NamedRef("execution", refs["execution"]),
             NamedRef("render_options", refs["render_options"]),
         ),
     )

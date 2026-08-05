@@ -11,6 +11,8 @@ from dlstudio.application.review import (
     query_review_history,
 )
 from dlstudio.foundation.api import BlobRef, CorruptObject
+from dlstudio.rendering.api import ArtifactReport
+from dlstudio.release.api import PublicationManifest
 from dlstudio.review.api import ReviewRound, ReviewVerdict
 from dlstudio.timeline.api import CheckReport, TimelineIR, VisualInstruction
 from dlstudio.workflow.api import NamedRef, WorkflowRun
@@ -52,13 +54,37 @@ def _report(timeline: BlobRef | None = None) -> CheckReport:
     )
 
 
+def _artifact_report(artifact: BlobRef) -> ArtifactReport:
+    return ArtifactReport(
+        artifact,
+        1080,
+        1920,
+        30,
+        1,
+        1_000_000_000,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+
+
+def _publication() -> PublicationManifest:
+    return PublicationManifest("fixture.reel")
+
+
 def _verdict(
     report: CheckReport,
     *,
     artifact: BlobRef | None = None,
 ) -> ReviewVerdict:
+    selected_artifact = artifact or BlobRef("3" * 64, 103)
     return ReviewVerdict(
-        artifact=artifact or BlobRef("3" * 64, 103),
+        artifact=selected_artifact,
+        artifact_report=_artifact_report(selected_artifact).ref,
+        publication_manifest=_publication().ref,
         outcome="block",
         check_report=report.ref,
         constraints=BlobRef("4" * 64, 104),
@@ -76,8 +102,12 @@ def _lineage(
 ) -> tuple[_Workflows, _Store, tuple[BlobRef, ...]]:
     check_report = report or _report()
     verdict = _verdict(check_report, artifact=artifact)
+    artifact_report = _artifact_report(verdict.artifact)
+    publication = _publication()
     objects = {
         check_report.ref: check_report.canonical_bytes(),
+        artifact_report.ref: artifact_report.canonical_bytes(),
+        publication.ref: publication.canonical_bytes(),
         verdict.ref: verdict.canonical_bytes(),
     }
     previous: ReviewRound | None = None
@@ -135,6 +165,10 @@ def _review_ready_workflow(
         "final",
         (
             NamedRef("artifact", artifact),
+            NamedRef(
+                "artifact_report",
+                _artifact_report(artifact).ref,
+            ),
             NamedRef("execution", BlobRef("6" * 64, 106)),
             NamedRef("render_options", BlobRef("7" * 64, 107)),
         ),
@@ -171,6 +205,8 @@ def test_history_rejects_lineage_past_depth_limit() -> None:
 def test_history_rejects_self_cycle_as_corrupt() -> None:
     report = _report()
     verdict = _verdict(report)
+    artifact_report = _artifact_report(verdict.artifact)
+    publication = _publication()
     selected = BlobRef("8" * 64, 108)
     review_round = ReviewRound(verdict.ref, selected)
     store = _Store(
@@ -178,6 +214,8 @@ def test_history_rejects_self_cycle_as_corrupt() -> None:
             selected: review_round.canonical_bytes(),
             verdict.ref: verdict.canonical_bytes(),
             report.ref: report.canonical_bytes(),
+            artifact_report.ref: artifact_report.canonical_bytes(),
+            publication.ref: publication.canonical_bytes(),
         }
     )
 
@@ -191,6 +229,8 @@ def test_history_rejects_self_cycle_as_corrupt() -> None:
 def test_history_rejects_two_node_cycle_as_corrupt() -> None:
     report = _report()
     verdict = _verdict(report)
+    artifact_report = _artifact_report(verdict.artifact)
+    publication = _publication()
     first_ref = BlobRef("8" * 64, 108)
     second_ref = BlobRef("9" * 64, 109)
     first = ReviewRound(verdict.ref, second_ref)
@@ -201,6 +241,8 @@ def test_history_rejects_two_node_cycle_as_corrupt() -> None:
             second_ref: second.canonical_bytes(),
             verdict.ref: verdict.canonical_bytes(),
             report.ref: report.canonical_bytes(),
+            artifact_report.ref: artifact_report.canonical_bytes(),
+            publication.ref: publication.canonical_bytes(),
         }
     )
 
@@ -219,8 +261,12 @@ def test_history_reports_corrupt_linked_objects_as_corrupt(
     invalid_ref = _raw_ref(invalid_raw)
     report = _report()
     report_ref = invalid_ref if component == "check_report" else report.ref
+    artifact = BlobRef("3" * 64, 103)
+    artifact_report = _artifact_report(artifact)
     verdict = ReviewVerdict(
-        artifact=BlobRef("3" * 64, 103),
+        artifact=artifact,
+        artifact_report=artifact_report.ref,
+        publication_manifest=_publication().ref,
         outcome="block",
         check_report=report_ref,
         constraints=BlobRef("4" * 64, 104),
@@ -247,6 +293,8 @@ def test_history_reports_corrupt_linked_objects_as_corrupt(
             if component == "check_report"
             else report.canonical_bytes()
         ),
+        artifact_report.ref: artifact_report.canonical_bytes(),
+        _publication().ref: _publication().canonical_bytes(),
     }
 
     with pytest.raises(CorruptObject, match="invalid review round lineage"):

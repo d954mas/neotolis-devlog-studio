@@ -59,6 +59,15 @@ class AssetRepository:
             raise KeyError(f"unknown asset: {asset_id}")
         return self.read_revision(ref)
 
+    def list_current(self) -> tuple[AssetRevision, ...]:
+        """Return the current immutable revision of every logical asset."""
+
+        index = self.read_index()
+        return tuple(
+            self.read_revision(index.entries[asset_id])
+            for asset_id in sorted(index.entries)
+        )
+
     def _read_index_from_root(self, root: Any) -> AssetIndexRevision:
         ref = root.records.get(ASSET_INDEX_KEY)
         if ref is None:

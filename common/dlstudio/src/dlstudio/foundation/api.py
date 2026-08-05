@@ -109,7 +109,44 @@ def normalize_logical_path(value: str) -> str:
     path = PurePosixPath(text)
     if any(part in {"", ".", ".."} for part in path.parts):
         raise CanonicalEncodingError(f"unsafe logical path: {value!r}")
+    reserved = {
+        "con", "prn", "aux", "nul",
+        *(f"com{index}" for index in range(1, 10)),
+        *(f"lpt{index}" for index in range(1, 10)),
+    }
+    for part in path.parts:
+        stem = part.split(".", 1)[0].casefold()
+        if (
+            part.endswith((".", " "))
+            or any(character in '<>:"|?*' for character in part)
+            or any(ord(character) < 32 for character in part)
+            or stem in reserved
+        ):
+            raise CanonicalEncodingError(
+                f"logical path is not portable: {value!r}"
+            )
     return path.as_posix()
+
+
+def validate_logical_namespace(paths: Sequence[str]) -> None:
+    """Reject case-folded and file/directory collisions portably."""
+
+    normalized = tuple(normalize_logical_path(path) for path in paths)
+    keys = tuple(
+        tuple(part.casefold() for part in PurePosixPath(path).parts)
+        for path in normalized
+    )
+    if len(keys) != len(set(keys)):
+        raise CanonicalEncodingError("logical paths collide case-insensitively")
+    for index, left in enumerate(keys):
+        for right in keys[index + 1 :]:
+            shorter, longer = (
+                (left, right) if len(left) <= len(right) else (right, left)
+            )
+            if longer[: len(shorter)] == shorter:
+                raise CanonicalEncodingError(
+                    "logical file path collides with a directory prefix"
+                )
 
 
 def _freeze_value(value: Any) -> Any:

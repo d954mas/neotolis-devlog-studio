@@ -8,13 +8,17 @@ from dlstudio.assets.api import AssetReadPort
 from dlstudio.authoring.api import load_edit
 from dlstudio.constraints.api import ConstraintSet
 from dlstudio.foundation.api import BlobRef
-from dlstudio.release.api import PackageFile
+from dlstudio.release.api import PackageFile, PublicationManifest
 from dlstudio.rendering.api import (
+    ArtifactReport,
+    analyze_voice_signal,
     ExecutionFingerprint,
     RenderOptions,
     RenderResult,
     execution_key,
+    paired_ffprobe,
     render as render_timeline,
+    verify_rendered_artifact,
 )
 from dlstudio.review.api import ReviewVerdict
 from dlstudio.timeline.api import (
@@ -25,7 +29,7 @@ from dlstudio.timeline.api import (
 )
 from dlstudio.workflow.api import NamedRef, StageId, WorkflowRun, WorkflowStore
 
-from .authoring import compile_production
+from .authoring import compile_production, resolve_publication
 from .release import BlobStore, build_release_gate
 from .workflow import (
     _advance,
@@ -63,6 +67,13 @@ def advance_production(
         raise ValueError("authoring kind does not match the current workflow")
     timeline = compile_production(edit, assets)
     timeline_ref = store.put_bytes(timeline.canonical_bytes())
+    publication, publication_revisions = resolve_publication(edit, assets)
+    for revision in publication_revisions:
+        if store.put_bytes(revision.canonical_bytes()) != revision.ref.object:
+            raise ValueError("publication revision identity mismatch")
+        for reachable in revision.reachable_blobs:
+            store.verify(reachable)
+    publication_ref = store.put_bytes(publication.canonical_bytes())
     expected_platform = {
         "reel": "vertical",
         "longform": "landscape",
@@ -71,6 +82,8 @@ def advance_production(
     constraints, policy = build_release_gate(
         workflows.production_id,
         expected_platform,
+        require_voice=bool(edit.voice_script and edit.voice_script.strip()),
+        kind=current.kind,
     )
     report = check_timeline(timeline, policy)
     for raw in (
@@ -84,12 +97,14 @@ def advance_production(
         NamedRef("authoring", store.put_bytes(authoring_path.read_bytes())),
         NamedRef("check_policy", policy.ref),
         NamedRef("constraints", constraints.ref),
+        NamedRef("publication_manifest", publication_ref),
         NamedRef("timeline", timeline_ref),
     )
     prepare_outputs = (
         NamedRef("check_policy", policy.ref),
         NamedRef("check_report", report.ref),
         NamedRef("constraints", constraints.ref),
+        NamedRef("publication_manifest", publication_ref),
         NamedRef("timeline", timeline_ref),
     )
 
@@ -148,8 +163,40 @@ def advance_production(
                 raise ValueError("render artifact changed before object ingest")
             if stage == "draft":
                 return (NamedRef("artifact", artifact),)
+            artifact_report = verify_rendered_artifact(
+                artifact,
+                store.path_for(artifact),
+                timeline,
+                require_voice=policy.require_voice,
+                voice_signal=(
+                    analyze_voice_signal(
+                        artifact,
+                        store.path_for(artifact),
+                        timeline,
+                        store,
+                        ffmpeg=execution.ffmpeg,
+                    )
+                    if policy.require_voice
+                    else None
+                ),
+                ffmpeg=execution.ffmpeg,
+                ffprobe=paired_ffprobe(execution.ffmpeg),
+            )
+            artifact_report_ref = store.put_bytes(
+                artifact_report.canonical_bytes()
+            )
+            if artifact_report.blocking:
+                finding_ids = ", ".join(
+                    item.rule
+                    for item in artifact_report.findings
+                    if item.severity == "error"
+                )
+                raise ValueError(
+                    f"rendered artifact checks failed: {finding_ids}"
+                )
             return (
                 NamedRef("artifact", artifact),
+                NamedRef("artifact_report", artifact_report_ref),
                 NamedRef("execution", execution.ref),
                 NamedRef("render_options", options.ref),
             )
@@ -161,7 +208,11 @@ def advance_production(
                 NamedRef("render_options", options.ref),
                 NamedRef("timeline", timeline_ref),
             ),
-            contract=f"studio.v3.{stage}.v1",
+            contract=(
+                "studio.v3.draft.v1"
+                if stage == "draft"
+                else "studio.v3.final.v2"
+            ),
             run_stage=run_render,  # type: ignore[arg-type]
         )
     if stage == "review":
@@ -179,8 +230,14 @@ def advance_production(
         loaded_report = CheckReport.from_canonical_bytes(
             store.read(prepared["check_report"])
         )
+        loaded_artifact_report = ArtifactReport.from_canonical_bytes(
+            store.read(finalized["artifact_report"])
+        )
         loaded_constraints = ConstraintSet.from_canonical_bytes(
             store.read(prepared["constraints"])
+        )
+        loaded_publication = PublicationManifest.from_canonical_bytes(
+            store.read(prepared["publication_manifest"])
         )
         loaded_execution = ExecutionFingerprint.from_canonical_bytes(
             store.read(finalized["execution"])
@@ -202,8 +259,11 @@ def advance_production(
             workflows,
             store,
             timeline=loaded_timeline,
+            kind=current.kind,
             policy=loaded_policy,
             report=loaded_report,
+            artifact_report=loaded_artifact_report,
+            publication=loaded_publication,
             fingerprint=loaded_execution,
             options=loaded_options,
             render=rendered,

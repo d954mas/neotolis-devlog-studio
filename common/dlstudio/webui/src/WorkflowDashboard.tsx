@@ -5,14 +5,16 @@ type Status = components["schemas"]["WorkflowStatus"];
 type Workflow = components["schemas"]["WorkflowRun"];
 type CurrentReview = components["schemas"]["ReviewVerdict"];
 type BlobRef = components["schemas"]["BlobRef"];
+type DeliveryContext = components["schemas"]["DeliveryContext"];
 
 type WorkflowDashboardProps = {
   status: Status;
   workflow: Workflow;
   busy: boolean;
   currentReview: CurrentReview | null;
+  deliveryContext: DeliveryContext | null;
   onAdvance: () => void;
-  onDeliver: (destinationId: string) => void;
+  onDeliver: (destinationId: string, expectedCandidate: BlobRef) => void;
 };
 
 function shortHash(ref: BlobRef | null | undefined): string {
@@ -21,17 +23,38 @@ function shortHash(ref: BlobRef | null | undefined): string {
     : "—";
 }
 
+function failureGuidance(error: string): { owner: string; action: string } | null {
+  if (error.includes("audio.voice.required")) {
+    return { owner: "Авторский монтаж", action: "Добавьте AudioClip с выбранным дублем." };
+  }
+  if (error.includes("audio.voice.silent")) {
+    return {
+      owner: "Финальный звук",
+      action: "Финальный звук не содержит слышимого сигнала. Запишите или выберите другой дубль.",
+    };
+  }
+  if (error.includes("package.cover.required") || error.includes("requires cover")) {
+    return { owner: "Publication package", action: "Добавьте обязательную обложку." };
+  }
+  if (error.includes("package.metadata.required") || error.includes("requires metadata")) {
+    return { owner: "Publication package", action: "Добавьте обязательные metadata." };
+  }
+  return null;
+}
+
 export function WorkflowDashboard({
   status,
   workflow,
   busy,
   currentReview,
+  deliveryContext,
   onAdvance,
   onDeliver,
 }: WorkflowDashboardProps) {
   const [destination, setDestination] = useState("local.delivery");
   const stage = status.current_stage;
   const failed = workflow.attempts.find((item) => item.state === "failed");
+  const guidance = failed?.error ? failureGuidance(failed.error) : null;
   const waitingForRevision =
     (stage === "review" || stage === "package") &&
     currentReview !== null &&
@@ -95,7 +118,12 @@ export function WorkflowDashboard({
           })}
         </ol>
         {failed?.error && (
-          <p class="failure">Последняя ошибка: {failed.error}</p>
+          <div class="failure" role="alert">
+            <p>Последняя ошибка: {failed.error}</p>
+            {guidance && (
+              <p><strong>{guidance.owner}:</strong> {guidance.action}</p>
+            )}
+          </div>
         )}
       </section>
 
@@ -140,27 +168,45 @@ export function WorkflowDashboard({
             </button>
           )}
         {status.action === "deliver" && (
-          <form
-            class="delivery"
-            onSubmit={(event) => {
-              event.preventDefault();
-              onDeliver(destination);
-            }}
-          >
-            <label>
-              Destination ID
-              <input
-                value={destination}
-                onInput={(event) =>
-                  setDestination(event.currentTarget.value)
+          <div class="delivery-confirmation">
+            <h3>Frozen package</h3>
+            {deliveryContext === null ? (
+              <p class="muted" role="status">Читаю exact release candidate…</p>
+            ) : (
+              <ul class="delivery-files">
+                {deliveryContext.files.map((item) => (
+                  <li key={item.path}>
+                    <strong>{item.path}</strong>
+                    <span>{item.blob.size.toLocaleString()} bytes</span>
+                    <code>{item.blob.sha256}</code>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <form
+              class="delivery"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (deliveryContext) {
+                  onDeliver(destination, deliveryContext.candidate);
                 }
-                required
-              />
-            </label>
-            <button class="primary" disabled={busy}>
-              Deliver frozen candidate
-            </button>
-          </form>
+              }}
+            >
+              <label>
+                Destination ID
+                <input
+                  value={destination}
+                  onInput={(event) =>
+                    setDestination(event.currentTarget.value)
+                  }
+                  required
+                />
+              </label>
+              <button class="primary" disabled={busy || deliveryContext === null}>
+                Deliver frozen candidate
+              </button>
+            </form>
+          </div>
         )}
         {status.completed && (
           <p class="complete">

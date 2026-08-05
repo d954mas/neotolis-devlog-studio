@@ -7,6 +7,7 @@ import json
 import math
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -14,8 +15,10 @@ import tempfile
 import time
 import uuid
 from dataclasses import dataclass
+from decimal import Decimal
+from fractions import Fraction
 from pathlib import Path
-from typing import BinaryIO, Protocol
+from typing import Any, BinaryIO, Literal, Protocol
 
 from dlstudio.foundation.api import BlobRef, canonical_bytes, canonical_hash
 from dlstudio.rendering._filters import media_geometry_filter
@@ -216,6 +219,608 @@ class RenderResult:
     cache_key: str
     cache_hit: bool
     command: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ArtifactFinding:
+    rule: str
+    severity: Literal["warning", "error"]
+    message: str
+
+    def __post_init__(self) -> None:
+        if not self.rule.strip():
+            raise ValueError("artifact finding rule is required")
+        if self.severity not in {"warning", "error"}:
+            raise ValueError("unsupported artifact finding severity")
+        if not self.message.strip():
+            raise ValueError("artifact finding message is required")
+
+    def as_payload(self) -> dict[str, str]:
+        return {
+            "rule": self.rule,
+            "severity": self.severity,
+            "message": self.message,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ArtifactReport:
+    artifact: BlobRef
+    width: int
+    height: int
+    fps_num: int
+    fps_den: int
+    duration_ns: int
+    audio_codec: str | None
+    audio_sample_rate: int | None
+    audio_channels: int | None
+    integrated_lufs_milli: int | None
+    true_peak_db_milli: int | None
+    active_audio_ratio_milli: int | None
+    findings: tuple[ArtifactFinding, ...] = ()
+    voice_true_peak_db_milli: int | None = None
+    voice_active_audio_ratio_milli: int | None = None
+    ffprobe_binary_sha256: str | None = None
+    voice_correlation_db_milli: int | None = None
+
+    DOMAIN = "dlstudio.artifact_report"
+    VERSION = 2
+
+    def __post_init__(self) -> None:
+        if min(
+            self.width,
+            self.height,
+            self.fps_num,
+            self.fps_den,
+            self.duration_ns,
+        ) <= 0:
+            raise ValueError("artifact video facts must be positive")
+        audio_values = (
+            self.audio_codec,
+            self.audio_sample_rate,
+            self.audio_channels,
+        )
+        if any(value is None for value in audio_values) and any(
+            value is not None for value in audio_values
+        ):
+            raise ValueError("artifact audio stream facts must be complete")
+        if self.audio_sample_rate is not None and self.audio_sample_rate <= 0:
+            raise ValueError("artifact audio sample rate must be positive")
+        if self.audio_channels is not None and self.audio_channels <= 0:
+            raise ValueError("artifact audio channels must be positive")
+        if (
+            self.active_audio_ratio_milli is not None
+            and not 0 <= self.active_audio_ratio_milli <= 1000
+        ):
+            raise ValueError("active audio ratio must be 0..1000")
+        if (
+            self.voice_active_audio_ratio_milli is not None
+            and not 0 <= self.voice_active_audio_ratio_milli <= 1000
+        ):
+            raise ValueError("voice active audio ratio must be 0..1000")
+        if (
+            self.ffprobe_binary_sha256 is not None
+            and re.fullmatch(r"[0-9a-f]{64}", self.ffprobe_binary_sha256) is None
+        ):
+            raise ValueError("ffprobe binary sha256 must be lowercase hexadecimal")
+        object.__setattr__(self, "findings", tuple(self.findings))
+
+    @property
+    def blocking(self) -> bool:
+        return any(item.severity == "error" for item in self.findings)
+
+    def as_payload(self) -> dict[str, Any]:
+        return {
+            "artifact": self.artifact.as_payload(),
+            "width": self.width,
+            "height": self.height,
+            "fps_num": self.fps_num,
+            "fps_den": self.fps_den,
+            "duration_ns": self.duration_ns,
+            "audio_codec": self.audio_codec,
+            "audio_sample_rate": self.audio_sample_rate,
+            "audio_channels": self.audio_channels,
+            "integrated_lufs_milli": self.integrated_lufs_milli,
+            "true_peak_db_milli": self.true_peak_db_milli,
+            "active_audio_ratio_milli": self.active_audio_ratio_milli,
+            "voice_true_peak_db_milli": self.voice_true_peak_db_milli,
+            "voice_active_audio_ratio_milli": (
+                self.voice_active_audio_ratio_milli
+            ),
+            "ffprobe_binary_sha256": self.ffprobe_binary_sha256,
+            "voice_correlation_db_milli": self.voice_correlation_db_milli,
+            "findings": [item.as_payload() for item in self.findings],
+        }
+
+    @property
+    def ref(self) -> BlobRef:
+        raw = self.canonical_bytes()
+        return BlobRef(
+            canonical_hash(
+                self.as_payload(), domain=self.DOMAIN, version=self.VERSION
+            ),
+            len(raw),
+        )
+
+    def canonical_bytes(self) -> bytes:
+        return canonical_bytes(
+            self.as_payload(), domain=self.DOMAIN, version=self.VERSION
+        )
+
+    @classmethod
+    def from_canonical_bytes(cls, raw: bytes) -> "ArtifactReport":
+        wrapped = json.loads(raw)
+        if (
+            wrapped.get("$domain") != cls.DOMAIN
+            or wrapped.get("$version") != cls.VERSION
+        ):
+            raise ValueError("invalid artifact report schema")
+        value = wrapped["payload"]
+        result = cls(
+            artifact=BlobRef.from_payload(value["artifact"]),
+            width=int(value["width"]),
+            height=int(value["height"]),
+            fps_num=int(value["fps_num"]),
+            fps_den=int(value["fps_den"]),
+            duration_ns=int(value["duration_ns"]),
+            audio_codec=value["audio_codec"],
+            audio_sample_rate=(
+                None
+                if value["audio_sample_rate"] is None
+                else int(value["audio_sample_rate"])
+            ),
+            audio_channels=(
+                None
+                if value["audio_channels"] is None
+                else int(value["audio_channels"])
+            ),
+            integrated_lufs_milli=(
+                None
+                if value["integrated_lufs_milli"] is None
+                else int(value["integrated_lufs_milli"])
+            ),
+            true_peak_db_milli=(
+                None
+                if value["true_peak_db_milli"] is None
+                else int(value["true_peak_db_milli"])
+            ),
+            active_audio_ratio_milli=(
+                None
+                if value["active_audio_ratio_milli"] is None
+                else int(value["active_audio_ratio_milli"])
+            ),
+            voice_true_peak_db_milli=(
+                None
+                if value["voice_true_peak_db_milli"] is None
+                else int(value["voice_true_peak_db_milli"])
+            ),
+            voice_active_audio_ratio_milli=(
+                None
+                if value["voice_active_audio_ratio_milli"] is None
+                else int(value["voice_active_audio_ratio_milli"])
+            ),
+            ffprobe_binary_sha256=value["ffprobe_binary_sha256"],
+            voice_correlation_db_milli=(
+                None
+                if value["voice_correlation_db_milli"] is None
+                else int(value["voice_correlation_db_milli"])
+            ),
+            findings=tuple(
+                ArtifactFinding(
+                    rule=str(item["rule"]),
+                    severity=item["severity"],
+                    message=str(item["message"]),
+                )
+                for item in value["findings"]
+            ),
+        )
+        if result.canonical_bytes() != raw:
+            raise ValueError("artifact report is not canonical")
+        return result
+
+
+def _probe_fraction(value: str) -> Fraction:
+    numerator, denominator = value.split("/", 1)
+    result = Fraction(int(numerator), int(denominator))
+    if result <= 0:
+        raise ValueError("artifact fps must be positive")
+    return result
+
+
+def _probe_duration_ns(value: object) -> int:
+    duration = Decimal(str(value))
+    if duration <= 0:
+        raise ValueError("artifact duration must be positive")
+    return int(duration * Decimal(1_000_000_000))
+
+
+def _audio_metric(output: str, pattern: str) -> int | None:
+    matches = re.findall(pattern, output, flags=re.IGNORECASE)
+    if not matches:
+        return None
+    value = matches[-1]
+    if "inf" in value.lower():
+        return None
+    return int(Decimal(value) * Decimal(1000))
+
+
+def _active_audio_ratio(output: str, duration_ns: int) -> int:
+    silence = sum(
+        (Decimal(value) for value in re.findall(
+            r"silence_duration:\s*([0-9]+(?:[.][0-9]+)?)",
+            output,
+        )),
+        Decimal(0),
+    )
+    duration = Decimal(duration_ns) / Decimal(1_000_000_000)
+    active = max(Decimal(0), min(Decimal(1), Decimal(1) - silence / duration))
+    return int(active * Decimal(1000))
+
+
+def paired_ffprobe(ffmpeg: str) -> str:
+    """Resolve ffprobe from the same installed toolchain as exact FFmpeg."""
+
+    executable = Path(ffmpeg).resolve(strict=True)
+    suffix = executable.suffix if os.name == "nt" else ""
+    probe = executable.with_name(f"ffprobe{suffix}")
+    if not probe.is_file():
+        raise FileNotFoundError(
+            f"paired FFprobe executable not found beside FFmpeg: {probe}"
+        )
+    return str(probe)
+
+
+@dataclass(frozen=True, slots=True)
+class VoiceSignalEvidence:
+    artifact: BlobRef
+    true_peak_db_milli: int | None
+    active_audio_ratio_milli: int
+    correlation_db_milli: int | None
+
+
+def analyze_voice_signal(
+    artifact: BlobRef,
+    artifact_path: Path,
+    timeline: TimelineIR,
+    resolver: ObjectResolver,
+    *,
+    ffmpeg: str,
+) -> VoiceSignalEvidence:
+    """Prove expected voice is audible and correlated with the exact final."""
+
+    voices = tuple(item for item in timeline.audio if item.role == "voice")
+    if not voices:
+        return VoiceSignalEvidence(artifact, None, 0, None)
+    final_path = artifact_path.resolve(strict=True)
+    if _hash_file(final_path) != artifact:
+        raise ValueError("voice evidence path does not contain the exact artifact")
+    snapshots = {snapshot.ref: snapshot for snapshot in timeline.assets}
+    def voice_graph(input_offset: int) -> tuple[list[str], list[str], str]:
+        arguments: list[str] = []
+        filters: list[str] = []
+        labels: list[str] = []
+        for index, item in enumerate(voices):
+            snapshot = snapshots.get(item.asset)
+            if snapshot is None:
+                raise ValueError("voice asset revision is absent from TimelineIR")
+            resolver.verify(snapshot.blob)
+            if item.loop:
+                arguments.extend(["-stream_loop", "-1"])
+            arguments.extend(["-i", str(resolver.path_for(snapshot.blob))])
+            label = f"voice{index}"
+            effects = (
+                "aformat=sample_rates=48000:channel_layouts=stereo,"
+                f"atrim=start={_seconds(item.source_start_ns)}:"
+                f"duration={_seconds(item.duration_ns)},"
+                "asetpts=N/SR/TB,"
+                f"volume={item.gain_db_milli / 1000:.3f}dB"
+            )
+            if item.fade_in_ns:
+                effects += f",afade=t=in:st=0:d={_seconds(item.fade_in_ns)}"
+            if item.fade_out_ns:
+                fade_start = item.duration_ns - item.fade_out_ns
+                effects += (
+                    f",afade=t=out:st={_seconds(fade_start)}:"
+                    f"d={_seconds(item.fade_out_ns)}"
+                )
+            delay_ms = round(item.start_ns / 1_000_000)
+            filters.append(
+                f"[{index + input_offset}:a]{effects},"
+                f"adelay=delays={delay_ms}:all=1[{label}]"
+            )
+            labels.append(label)
+        inputs = "".join(f"[{label}]" for label in labels)
+        mix = (
+            f"{inputs}amix=inputs={len(labels)}:normalize=0:duration=longest,"
+            f"apad,atrim=duration={_seconds(timeline.duration_ns)}"
+        )
+        return arguments, filters, mix
+
+    voice_arguments, filters, mix = voice_graph(0)
+    command = [ffmpeg, "-hide_banner", "-nostats", *voice_arguments]
+    filters.append(
+        f"{mix},silencedetect=noise=-50dB:d=0.05,"
+        "ebur128=peak=true[voiceout]"
+    )
+    command.extend(
+        [
+            "-filter_complex",
+            ";".join(filters),
+            "-map",
+            "[voiceout]",
+            "-f",
+            "null",
+            os.devnull,
+        ]
+    )
+    measured = subprocess.run(
+        command,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    voice_peak = _audio_metric(
+            measured.stderr,
+            r"\bPeak:\s*(-?inf|[+-]?[0-9]+(?:[.][0-9]+)?)\s+dBFS",
+    )
+    voice_active = _active_audio_ratio(measured.stderr, timeline.duration_ns)
+
+    correlation_arguments, correlation_filters, correlation_mix = voice_graph(1)
+    correlation_filters.extend(
+        (
+            f"{correlation_mix}[expectedvoice]",
+            "[0:a]aformat=sample_rates=48000:channel_layouts=stereo,"
+            f"apad,atrim=duration={_seconds(timeline.duration_ns)}[finalaudio]",
+            "[finalaudio][expectedvoice]"
+            "axcorrelate=size=8192:algo=fast,"
+            "astats=metadata=1:reset=0[correlation]",
+        )
+    )
+    correlation = subprocess.run(
+        [
+            ffmpeg,
+            "-hide_banner",
+            "-nostats",
+            "-i",
+            str(final_path),
+            *correlation_arguments,
+            "-filter_complex",
+            ";".join(correlation_filters),
+            "-map",
+            "[correlation]",
+            "-f",
+            "null",
+            os.devnull,
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    correlation_db = None if correlation.returncode else _audio_metric(
+        correlation.stderr,
+        r"RMS level dB:\s*(-?inf|[+-]?[0-9]+(?:[.][0-9]+)?)",
+    )
+    return VoiceSignalEvidence(
+        artifact,
+        voice_peak,
+        voice_active,
+        correlation_db,
+    )
+
+
+def verify_rendered_artifact(
+    artifact: BlobRef,
+    path: Path,
+    timeline: TimelineIR,
+    *,
+    require_voice: bool,
+    voice_signal: VoiceSignalEvidence | None = None,
+    ffmpeg: str = "ffmpeg",
+    ffprobe: str = "ffprobe",
+) -> ArtifactReport:
+    """Probe the exact ingested final artifact and return canonical evidence."""
+
+    source = path.resolve(strict=True)
+    if _hash_file(source) != artifact:
+        raise ValueError("artifact path does not contain the exact artifact")
+    if require_voice and voice_signal is None:
+        raise ValueError("voice-required verification needs isolated voice evidence")
+    if voice_signal is not None and voice_signal.artifact != artifact:
+        raise ValueError("voice evidence does not name the exact artifact")
+    probe_executable = shutil.which(ffprobe)
+    if probe_executable is None:
+        raise FileNotFoundError(f"FFprobe executable not found: {ffprobe}")
+    probe = subprocess.run(
+        [
+            probe_executable,
+            "-v",
+            "error",
+            "-show_streams",
+            "-show_format",
+            "-of",
+            "json",
+            str(source),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    payload = json.loads(probe.stdout)
+    streams = payload.get("streams", ())
+    video = next(
+        (item for item in streams if item.get("codec_type") == "video"),
+        None,
+    )
+    if video is None:
+        raise ValueError("artifact has no video stream")
+    audio = next(
+        (item for item in streams if item.get("codec_type") == "audio"),
+        None,
+    )
+    fps = _probe_fraction(
+        str(video.get("avg_frame_rate") or video.get("r_frame_rate"))
+    )
+    duration_value = video.get("duration") or payload.get("format", {}).get(
+        "duration"
+    )
+    duration_ns = _probe_duration_ns(duration_value)
+    findings: list[ArtifactFinding] = []
+    width = int(video["width"])
+    height = int(video["height"])
+    if (width, height) != (timeline.width, timeline.height):
+        findings.append(
+            ArtifactFinding(
+                "artifact.geometry.mismatch",
+                "error",
+                "final artifact geometry differs from TimelineIR",
+            )
+        )
+    if fps != Fraction(timeline.fps_num, timeline.fps_den):
+        findings.append(
+            ArtifactFinding(
+                "artifact.fps.mismatch",
+                "error",
+                "final artifact fps differs from TimelineIR",
+            )
+        )
+    frame_ns = Fraction(
+        1_000_000_000 * timeline.fps_den,
+        timeline.fps_num,
+    )
+    if abs(duration_ns - timeline.duration_ns) > frame_ns:
+        findings.append(
+            ArtifactFinding(
+                "artifact.duration.mismatch",
+                "error",
+                "final artifact duration differs by more than one frame",
+            )
+        )
+
+    integrated_lufs_milli: int | None = None
+    true_peak_db_milli: int | None = None
+    active_audio_ratio_milli: int | None = None
+    if audio is None:
+        if require_voice:
+            findings.append(
+                ArtifactFinding(
+                    "audio.voice.required",
+                    "error",
+                    "voice-required final artifact has no audio stream",
+                )
+            )
+    else:
+        loudness = subprocess.run(
+            [
+                ffmpeg,
+                "-hide_banner",
+                "-nostats",
+                "-i",
+                str(source),
+                "-map",
+                "0:a:0",
+                "-af",
+                "ebur128=peak=true",
+                "-f",
+                "null",
+                os.devnull,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        integrated_lufs_milli = _audio_metric(
+            loudness.stderr,
+            r"\bI:\s*(-?inf|[+-]?[0-9]+(?:[.][0-9]+)?)\s+LUFS",
+        )
+        true_peak_db_milli = _audio_metric(
+            loudness.stderr,
+            r"\bPeak:\s*(-?inf|[+-]?[0-9]+(?:[.][0-9]+)?)\s+dBFS",
+        )
+        silence = subprocess.run(
+            [
+                ffmpeg,
+                "-hide_banner",
+                "-nostats",
+                "-i",
+                str(source),
+                "-map",
+                "0:a:0",
+                "-af",
+                "silencedetect=noise=-50dB:d=0.05",
+                "-f",
+                "null",
+                os.devnull,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        active_audio_ratio_milli = _active_audio_ratio(
+            silence.stderr,
+            duration_ns,
+        )
+        voice_peak = None if voice_signal is None else voice_signal.true_peak_db_milli
+        voice_active = (
+            0 if voice_signal is None else voice_signal.active_audio_ratio_milli
+        )
+        voice_correlation = (
+            None if voice_signal is None else voice_signal.correlation_db_milli
+        )
+        if require_voice and (
+            active_audio_ratio_milli <= 10
+            or true_peak_db_milli is None
+            or true_peak_db_milli <= -60_000
+            or voice_active <= 10
+            or voice_peak is None
+            or voice_peak <= -60_000
+            or voice_correlation is None
+            or voice_correlation <= -30_000
+        ):
+            findings.append(
+                ArtifactFinding(
+                    "audio.voice.silent",
+                    "error",
+                    "voice-required final artifact contains no audible signal",
+                )
+            )
+
+    return ArtifactReport(
+        artifact=artifact,
+        width=width,
+        height=height,
+        fps_num=fps.numerator,
+        fps_den=fps.denominator,
+        duration_ns=duration_ns,
+        audio_codec=(None if audio is None else str(audio["codec_name"])),
+        audio_sample_rate=(
+            None if audio is None else int(audio["sample_rate"])
+        ),
+        audio_channels=None if audio is None else int(audio["channels"]),
+        integrated_lufs_milli=integrated_lufs_milli,
+        true_peak_db_milli=true_peak_db_milli,
+        active_audio_ratio_milli=active_audio_ratio_milli,
+        voice_true_peak_db_milli=(
+            None if voice_signal is None else voice_signal.true_peak_db_milli
+        ),
+        voice_active_audio_ratio_milli=(
+            None if voice_signal is None else voice_signal.active_audio_ratio_milli
+        ),
+        ffprobe_binary_sha256=_hash_file(Path(probe_executable)).sha256,
+        voice_correlation_db_milli=(
+            None if voice_signal is None else voice_signal.correlation_db_milli
+        ),
+        findings=tuple(findings),
+    )
 
 
 class _CacheLease:

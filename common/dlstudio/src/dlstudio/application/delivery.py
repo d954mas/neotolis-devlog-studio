@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import shutil
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
@@ -31,6 +32,13 @@ class LocalDeliveryState(Protocol):
     def clear_pending(self, journal: bytes) -> None: ...
 
 
+@dataclass(frozen=True, slots=True)
+class DeliveryContext:
+    candidate: BlobRef
+    candidate_id: str
+    files: tuple[PackageFile, ...]
+
+
 def _candidate(state: LocalDeliveryState, ref: BlobRef) -> ReleaseCandidate:
     try:
         value = ReleaseCandidate.from_canonical_bytes(state.read_blob(ref))
@@ -41,6 +49,22 @@ def _candidate(state: LocalDeliveryState, ref: BlobRef) -> ReleaseCandidate:
     for reachable in value.reachable_blobs:
         state.verify_blob(reachable)
     return value
+
+
+def query_delivery_context(state: LocalDeliveryState) -> DeliveryContext:
+    """Project the exact eligible package without performing delivery."""
+
+    workflow, _ = state.snapshot()
+    if workflow.eligible_candidate is None:
+        raise ValueError("workflow has no eligible release candidate")
+    if not workflow.completed and workflow.current_stage != "deliver":
+        raise ValueError("workflow is not ready to deliver")
+    candidate = _candidate(state, workflow.eligible_candidate)
+    return DeliveryContext(
+        candidate=workflow.eligible_candidate,
+        candidate_id=candidate.candidate_id,
+        files=candidate.package,
+    )
 
 
 def _file_ref(path: Path) -> BlobRef:
@@ -223,6 +247,7 @@ def deliver_local(
     destination: Path,
     *,
     destination_id: str,
+    expected_candidate: BlobRef,
     delivered_at: str | None = None,
 ) -> tuple[WorkflowRun, DeliveryReceipt]:
     """Deliver only the candidate selected by the current workflow."""
@@ -237,6 +262,7 @@ def deliver_local(
         if (
             Path(str(value["destination"])) != destination
             or value["destination_id"] != destination_id
+            or BlobRef.from_payload(value["candidate"]) != expected_candidate
         ):
             raise CasConflict("another delivery is pending")
         return _finish(state, pending)
@@ -244,6 +270,8 @@ def deliver_local(
     workflow, head = state.snapshot()
     if workflow.eligible_candidate is None:
         raise ValueError("workflow has no eligible release candidate")
+    if workflow.eligible_candidate != expected_candidate:
+        raise CasConflict("eligible release candidate changed before delivery")
     candidate = _candidate(state, workflow.eligible_candidate)
     if workflow.completed:
         return workflow, _finished(

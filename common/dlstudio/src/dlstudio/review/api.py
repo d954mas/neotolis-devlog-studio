@@ -161,6 +161,8 @@ class ReviewFinding:
 @dataclass(frozen=True, slots=True)
 class ReviewVerdict:
     artifact: BlobRef
+    artifact_report: BlobRef
+    publication_manifest: BlobRef
     outcome: Literal["pass", "changes_requested", "block"]
     check_report: BlobRef
     constraints: BlobRef
@@ -172,7 +174,7 @@ class ReviewVerdict:
     evidence: tuple[BlobRef, ...] = ()
 
     DOMAIN = "dlstudio.review_verdict"
-    VERSION = 3
+    VERSION = 5
 
     def __post_init__(self) -> None:
         DomainId(self.reviewer)
@@ -206,6 +208,8 @@ class ReviewVerdict:
     def as_payload(self) -> dict[str, Any]:
         return {
             "artifact": self.artifact.as_payload(),
+            "artifact_report": self.artifact_report.as_payload(),
+            "publication_manifest": self.publication_manifest.as_payload(),
             "outcome": self.outcome,
             "check_report": self.check_report.as_payload(),
             "constraints": self.constraints.as_payload(),
@@ -233,6 +237,8 @@ class ReviewVerdict:
     def reachable_blobs(self) -> tuple[BlobRef, ...]:
         return (
             self.artifact,
+            self.artifact_report,
+            self.publication_manifest,
             self.check_report,
             self.constraints,
             *((self.review_pack,) if self.review_pack is not None else ()),
@@ -259,6 +265,10 @@ class ReviewVerdict:
         payload = wrapped["payload"]
         result = cls(
             artifact=BlobRef.from_payload(payload["artifact"]),
+            artifact_report=BlobRef.from_payload(payload["artifact_report"]),
+            publication_manifest=BlobRef.from_payload(
+                payload["publication_manifest"]
+            ),
             outcome=payload["outcome"],
             check_report=BlobRef.from_payload(payload["check_report"]),
             constraints=BlobRef.from_payload(payload["constraints"]),
@@ -470,10 +480,14 @@ def validate_review_round_transition(
         raise ValueError("previous review round does not name its exact verdict")
     same_exact_context = (
         current_verdict.artifact,
+        current_verdict.artifact_report,
+        current_verdict.publication_manifest,
         current_verdict.check_report,
         current_verdict.constraints,
     ) == (
         previous_verdict.artifact,
+        previous_verdict.artifact_report,
+        previous_verdict.publication_manifest,
         previous_verdict.check_report,
         previous_verdict.constraints,
     )

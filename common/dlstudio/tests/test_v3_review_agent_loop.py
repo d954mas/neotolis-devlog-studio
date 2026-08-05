@@ -9,13 +9,22 @@ from fastapi.testclient import TestClient
 
 from dlstudio.adapters.http import create_app
 from dlstudio.adapters.local import load_local_production
-from dlstudio.application.api import advance_production
+from dlstudio.application.api import (
+    IngestAssetCommand,
+    advance_production,
+    ingest_asset,
+)
+from dlstudio.assets.api import Approval, License, MediaFacts, Provenance
+from dlstudio.persistence.api import open_local_repositories
 
 
 def _authoring_source(color: str) -> str:
     return "\n".join(
         (
-            "from dlstudio.authoring.api import Edit, SolidLayer",
+            (
+                "from dlstudio.authoring.api import "
+                "Edit, PublicationFile, SolidLayer"
+            ),
             "EDIT = Edit(",
             "    production_id='fixture.review_agent_loop',",
             "    width=64, height=96, fps_num=30, fps_den=1,",
@@ -27,6 +36,10 @@ def _authoring_source(color: str) -> str:
             "        ),",
             "    ),",
             "    standalone_story='A synthetic review agent loop.',",
+            "    publication=(",
+            "        PublicationFile('cover', 'cover.png', 'publish.cover.main'),",
+            "        PublicationFile('metadata', 'metadata.md', 'publish.metadata.main'),",
+            "    ),",
             "    kind='reel',",
             ")",
             "",
@@ -52,6 +65,40 @@ def _production(root: Path) -> tuple[Path, Path]:
         ),
         encoding="utf-8",
     )
+    repository, assets, _ = open_local_repositories(
+        root, "fixture.review_agent_loop"
+    )
+    for expected_revision, (asset_id, filename, raw, media) in enumerate((
+        (
+            "publish.cover.main",
+            "cover.png",
+            b"fixture cover",
+            MediaFacts("image", "png", width=64, height=96),
+        ),
+        (
+            "publish.metadata.main",
+            "metadata.md",
+            b"fixture metadata",
+            MediaFacts("data", "markdown"),
+        ),
+    )):
+        source = root / filename
+        source.write_bytes(raw)
+        ingest_asset(
+            assets,
+            IngestAssetCommand(
+                source,
+                asset_id,
+                Provenance("provided", "review_loop_fixture"),
+                Approval(
+                    "approved",
+                    (repository.objects.put_bytes(f"approved:{asset_id}".encode()),),
+                ),
+                License("owned", False),
+                expected_revision,
+            ),
+            inspect_media=lambda _path, value=media: value,
+        )
     return manifest, authoring
 
 
@@ -124,12 +171,16 @@ def test_exact_feedback_drives_a_fresh_process_authoring_revision(
         submitted = client.post(
             "/api/v3/review",
             json={
-                "expected_artifact": context["artifact"],
-                "expected_timeline": context["timeline"],
-                "expected_check_report": context["check_report"],
+                    "expected_artifact": context["artifact"],
+                    "expected_timeline": context["timeline"],
+                    "expected_artifact_report": context["artifact_report"],
+                    "expected_publication_manifest": context[
+                        "publication_manifest"
+                    ],
+                    "expected_check_report": context["check_report"],
                 "expected_constraints": context["constraints"],
                 "outcome": "changes_requested",
-                "scope": ["visual"],
+                    "scope": ["visual", "publication"],
                 "reviewer": "phase0.owner",
                 "reviewed_at": "2026-07-30T00:00:00Z",
                 "findings": [

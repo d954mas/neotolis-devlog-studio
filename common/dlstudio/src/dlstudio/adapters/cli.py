@@ -13,6 +13,7 @@ from dlstudio.application.api import (
     StudioError,
     deliver_local,
     project_status,
+    query_delivery_context,
     query_status,
     resolve_blob,
     submit_review_payload,
@@ -70,10 +71,12 @@ def main(argv: list[str] | None = None) -> int:
                 )
             ).as_payload()
         elif args.command == "deliver":
+            delivery = query_delivery_context(production.workflows)
             workflow, receipt = deliver_local(
                 production.workflows,
                 production.delivery_root,
                 destination_id=args.destination_id,
+                expected_candidate=delivery.candidate,
             )
             result = {
                 "status": project_status(workflow).as_payload(),

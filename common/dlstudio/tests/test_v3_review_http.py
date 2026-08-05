@@ -19,6 +19,8 @@ from dlstudio.application.api import (
 )
 from dlstudio.foundation.api import BlobRef, canonical_bytes
 from dlstudio.persistence.api import open_local_repositories
+from dlstudio.rendering.api import ArtifactReport
+from dlstudio.release.api import PublicationManifest, PublicationManifestFile
 from dlstudio.review.api import ReviewRound, ReviewVerdict
 from dlstudio.timeline.api import CheckReport, TimelineIR, VisualInstruction
 from dlstudio.workflow.api import NamedRef, WorkflowStore
@@ -49,6 +51,34 @@ def _save_stage(
         completed,
         expected_workflow_revision=running.revision,
         expected_head_revision=workflows.head_revision(),
+    )
+
+
+def _publication(store: object) -> BlobRef:
+    cover_blob = store.put_bytes(b"review cover")  # type: ignore[attr-defined]
+    cover_revision = store.put_bytes(b"review cover revision")  # type: ignore[attr-defined]
+    metadata_blob = store.put_bytes(b"review metadata")  # type: ignore[attr-defined]
+    metadata_revision = store.put_bytes(b"review metadata revision")  # type: ignore[attr-defined]
+    return store.put_bytes(  # type: ignore[attr-defined]
+        PublicationManifest(
+            "fixture.reel",
+            (
+                PublicationManifestFile(
+                    "cover",
+                    "cover.png",
+                    "publish.cover.main",
+                    cover_revision,
+                    cover_blob,
+                ),
+                PublicationManifestFile(
+                    "metadata",
+                    "metadata.md",
+                    "publish.metadata.main",
+                    metadata_revision,
+                    metadata_blob,
+                ),
+            ),
+        ).canonical_bytes()
     )
 
 
@@ -109,6 +139,22 @@ def _review_ready_production(
     artifact_ref = store.put_bytes(
         bytes(range(128)) if artifact_bytes is None else artifact_bytes
     )
+    artifact_report = ArtifactReport(
+        artifact_ref,
+        timeline.width,
+        timeline.height,
+        timeline.fps_num,
+        timeline.fps_den,
+        timeline.duration_ns,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    artifact_report_ref = store.put_bytes(artifact_report.canonical_bytes())
+    publication_ref = _publication(store)
 
     start_workflow(workflows, run_id="run.main", kind="reel")
     _save_stage(
@@ -119,6 +165,7 @@ def _review_ready_production(
             NamedRef("check_policy", policy_ref),
             NamedRef("check_report", report_ref),
             NamedRef("constraints", constraints_ref),
+            NamedRef("publication_manifest", publication_ref),
         ),
     )
     _save_stage(
@@ -133,6 +180,7 @@ def _review_ready_production(
             NamedRef("artifact", artifact_ref),
             NamedRef("execution", store.put_bytes(b"execution")),
             NamedRef("render_options", store.put_bytes(b"options")),
+            NamedRef("artifact_report", artifact_report_ref),
         ),
     )
     return manifest, artifact_ref
@@ -290,9 +338,13 @@ def test_review_presentation_endpoints_are_exact_bounded_and_noncanonical(
     )
     assert len(contexts) == 1
     assert contexts[0].artifact == artifact
-    assert contexts[0].timeline.as_payload() == client.get(
-        "/api/v3/review/context"
-    ).json()["timeline"]
+    review_context = client.get("/api/v3/review/context").json()
+    assert contexts[0].timeline.as_payload() == review_context["timeline"]
+    assert {item["role"] for item in review_context["publication_evidence"]["files"]} == {
+        "cover",
+        "metadata",
+    }
+    assert review_context["artifact_evidence"]["artifact"] == artifact.as_payload()
 
 
 def test_review_evidence_openapi_declares_binary_jpeg_and_etag(
@@ -414,6 +466,10 @@ def test_review_artifact_rejects_ambiguous_historical_and_current_clocks(
             NamedRef("check_policy", policy_ref),
             NamedRef("check_report", report_ref),
             NamedRef("constraints", store.put_bytes(b"changed constraints")),
+            NamedRef(
+                "publication_manifest",
+                _publication(store),
+            ),
         ),
         inputs=(NamedRef("authoring", store.put_bytes(b"changed authoring")),),
         contract="fixture.prepare.v2",
@@ -423,6 +479,20 @@ def test_review_artifact_rejects_ambiguous_historical_and_current_clocks(
         "draft",
         (NamedRef("artifact", store.put_bytes(b"changed draft")),),
     )
+    changed_artifact_report = ArtifactReport(
+        artifact,
+        changed_timeline.width,
+        changed_timeline.height,
+        changed_timeline.fps_num,
+        changed_timeline.fps_den,
+        changed_timeline.duration_ns,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
     _save_stage(
         workflows,
         "final",
@@ -430,6 +500,10 @@ def test_review_artifact_rejects_ambiguous_historical_and_current_clocks(
             NamedRef("artifact", artifact),
             NamedRef("execution", store.put_bytes(b"changed execution")),
             NamedRef("render_options", store.put_bytes(b"changed options")),
+            NamedRef(
+                "artifact_report",
+                store.put_bytes(changed_artifact_report.canonical_bytes()),
+            ),
         ),
     )
 
@@ -494,10 +568,12 @@ def _changes_payload(
     return {
         "expected_artifact": context["artifact"],
         "expected_timeline": context["timeline"],
+        "expected_artifact_report": context["artifact_report"],
+        "expected_publication_manifest": context["publication_manifest"],
         "expected_check_report": context["check_report"],
         "expected_constraints": context["constraints"],
         "outcome": outcome,
-        "scope": ["visual", "audio", "constraints"],
+        "scope": ["visual", "audio", "constraints", "publication"],
         "reviewer": "author",
         "reviewed_at": "2026-07-30T00:00:00Z",
         "findings": [
@@ -1184,6 +1260,29 @@ def test_review_round_fields_survive_invalidation_and_authorize_lineage_media(
         "draft",
         (NamedRef("artifact", workflows.put_blob(b"draft revision 2")),),
     )
+    workflow = workflows.read_current()
+    assert workflow is not None
+    prepared = next(item for item in workflow.attempts if item.stage == "prepare")
+    timeline_ref = next(
+        item.blob for item in prepared.outputs if item.name == "timeline"
+    )
+    second_timeline = TimelineIR.from_canonical_bytes(
+        workflows.read_blob(timeline_ref)
+    )
+    second_artifact_report = ArtifactReport(
+        second_artifact,
+        second_timeline.width,
+        second_timeline.height,
+        second_timeline.fps_num,
+        second_timeline.fps_den,
+        second_timeline.duration_ns,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
     _save_stage(
         workflows,
         "final",
@@ -1193,6 +1292,10 @@ def test_review_round_fields_survive_invalidation_and_authorize_lineage_media(
             NamedRef(
                 "render_options",
                 workflows.put_blob(b"options revision 2"),
+            ),
+            NamedRef(
+                "artifact_report",
+                workflows.put_blob(second_artifact_report.canonical_bytes()),
             ),
         ),
     )

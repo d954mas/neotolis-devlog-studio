@@ -50,6 +50,18 @@ const findingRegionEvidence = await readFile(
   new URL("../src/review/FindingRegionEvidence.tsx", import.meta.url),
   "utf8",
 );
+const voiceRecorder = await readFile(
+  new URL("../src/voice/VoiceRecorder.tsx", import.meta.url),
+  "utf8",
+);
+const voiceDraftStore = await readFile(
+  new URL("../src/voice/draftStore.ts", import.meta.url),
+  "utf8",
+);
+const deliveryContextHook = await readFile(
+  new URL("../src/delivery/useDeliveryContext.ts", import.meta.url),
+  "utf8",
+);
 const ui = [
   app,
   workflowDashboard,
@@ -63,6 +75,9 @@ const ui = [
   useReviewWaveform,
   waveformShape,
   findingRegionEvidence,
+  voiceRecorder,
+  voiceDraftStore,
+  deliveryContextHook,
 ].join("\n");
 const http = await readFile(
   new URL("../../src/dlstudio/adapters/http.py", import.meta.url),
@@ -252,4 +267,37 @@ test("FastAPI serves the dashboard outside the OpenAPI route set", () => {
   assert.match(http, /app\.get\("\/", include_in_schema=False\)/);
   assert.match(http, /app\.mount\(\s*"\/assets"/);
   assert.doesNotMatch(http, /@app\.get\("\/api\/file/);
+});
+
+test("voice recording survives refresh and becomes immutable only after save", () => {
+  assert.match(voiceRecorder, /studioV3\.GET\("\/api\/v3\/voice"\)/);
+  assert.match(voiceRecorder, /saveVoiceDraft/);
+  assert.match(voiceRecorder, /loadVoiceDraft/);
+  assert.match(voiceRecorder, /deleteVoiceDraft/);
+  assert.match(voiceRecorder, /\/api\/v3\/voice\/takes\?expected_revision=/);
+  assert.match(voiceRecorder, /ВОССТАНОВЛЕННЫЙ ЧЕРНОВИК/);
+  assert.match(voiceDraftStore, /indexedDB\.open/);
+  assert.match(voiceDraftStore, /productionId/);
+  assert.match(voiceDraftStore, /scriptRef/);
+  assert.match(voiceRecorder, /X-Production-Id/);
+  assert.match(voiceRecorder, /X-Script-Sha256/);
+  assert.doesNotMatch(voiceDraftStore, /localStorage/);
+});
+
+test("operator UI exposes exact voice, review, blocker, and delivery evidence", () => {
+  assert.match(voiceRecorder, /approval_status/);
+  assert.match(voiceRecorder, /referenced_by_timeline/);
+  assert.match(voiceRecorder, /Использовать этот дубль/);
+  assert.match(voiceRecorder, /asset_id/);
+  assert.match(reviewWorkspace, /artifact_evidence/);
+  assert.match(reviewWorkspace, /publication_evidence/);
+  assert.match(reviewWorkspace, /active_audio_ratio_milli/);
+  assert.match(workflowDashboard, /deliveryContext\.files/);
+  assert.match(workflowDashboard, /item\.blob\.sha256/);
+  assert.match(workflowDashboard, /deliveryContext\.candidate/);
+  assert.match(app, /expected_candidate: expectedCandidate/);
+  assert.match(workflowDashboard, /audio\.voice\.required/);
+  assert.match(workflowDashboard, /audio\.voice\.silent/);
+  assert.match(workflowDashboard, /package\.cover\.required/);
+  assert.match(deliveryContextHook, /studioV3\.GET\("\/api\/v3\/delivery\/context"\)/);
 });

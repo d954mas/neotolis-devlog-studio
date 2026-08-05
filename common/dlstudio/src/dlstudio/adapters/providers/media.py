@@ -22,6 +22,44 @@ class FfprobeMediaInspector:
     def __init__(self, executable: str = "ffprobe") -> None:
         self.executable = executable
 
+    def _packet_duration_ns(self, path: Path) -> int | None:
+        """Measure live WebM/Opus recordings that omit container duration."""
+
+        completed = subprocess.run(
+            [
+                self.executable,
+                "-v",
+                "error",
+                "-select_streams",
+                "a:0",
+                "-show_entries",
+                "packet=pts_time,duration_time",
+                "-of",
+                "json",
+                str(path.resolve()),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        packets = json.loads(completed.stdout).get("packets", [])
+        ranges = tuple(
+            (
+                Fraction(str(packet["pts_time"])),
+                Fraction(str(packet.get("duration_time") or 0)),
+            )
+            for packet in packets
+            if packet.get("pts_time") not in (None, "N/A")
+        )
+        if not ranges:
+            return None
+        start = min(pts for pts, _duration in ranges)
+        end = max(pts + duration for pts, duration in ranges)
+        duration = end - start
+        return int(duration * 1_000_000_000) if duration > 0 else None
+
     def __call__(self, path: Path) -> MediaFacts:
         completed = subprocess.run(
             [
@@ -61,6 +99,8 @@ class FfprobeMediaInspector:
             if duration_text in (None, "N/A")
             else int(Fraction(str(duration_text)) * 1_000_000_000)
         )
+        if duration_ns is None and audio is not None and video is None:
+            duration_ns = self._packet_duration_ns(path)
         fps_num = fps_den = None
         if video is not None:
             rate = Fraction(video.get("avg_frame_rate") or "0/1")

@@ -10,6 +10,7 @@ from typing import Literal
 
 from dlstudio.foundation.api import BlobRef, CorruptObject
 from dlstudio.rendering.api import (
+    ArtifactReport,
     PresentationFingerprint,
     extract_presentation_frame,
     extract_presentation_waveform,
@@ -20,6 +21,7 @@ from dlstudio.review.api import (
     ReviewVerdict,
     validate_review_round_transition,
 )
+from dlstudio.release.api import PublicationManifest
 from dlstudio.timeline.api import CheckReport, TimelineIR
 from dlstudio.workflow.api import WorkflowStore, WorkflowRun
 
@@ -44,9 +46,13 @@ class ReviewTimelineItem:
 @dataclass(frozen=True, slots=True)
 class ReviewContext:
     artifact: BlobRef
+    artifact_report: BlobRef
+    artifact_evidence: ArtifactReport
     timeline: BlobRef
     check_report: BlobRef
     constraints: BlobRef
+    publication_manifest: BlobRef
+    publication_evidence: PublicationManifest
     latest_round: BlobRef | None
     latest_verdict: ReviewVerdict | None
     width: int
@@ -77,6 +83,8 @@ class ReviewTaskPack:
     verdict_ref: BlobRef
     verdict: ReviewVerdict
     artifact: BlobRef
+    artifact_report: BlobRef
+    publication_manifest: BlobRef
     timeline: BlobRef
     check_report: BlobRef
     constraints: BlobRef
@@ -276,16 +284,42 @@ def query_review_context(
     constraints_ref = prepared.get("constraints")
     if constraints_ref is None:
         raise ValueError("review constraints are missing")
+    publication_ref = prepared.get("publication_manifest")
+    if publication_ref is None:
+        raise ValueError("review publication manifest is missing")
+    publication = PublicationManifest.from_canonical_bytes(
+        store.read(publication_ref)
+    )
+    if publication.ref != publication_ref:
+        raise ValueError("review publication manifest identity changed")
+    if publication.production_id != workflow.production_id:
+        raise ValueError("review publication belongs to another production")
     report = CheckReport.from_canonical_bytes(store.read(report_ref))
     if report.timeline != timeline_ref:
         raise ValueError("review timeline differs from its check report")
+    artifact_report_ref = finalized.get("artifact_report")
+    if artifact_report_ref is None:
+        raise ValueError("review artifact report is missing")
+    artifact_report = ArtifactReport.from_canonical_bytes(
+        store.read(artifact_report_ref)
+    )
+    if artifact_report.ref != artifact_report_ref:
+        raise ValueError("review artifact report identity changed")
+    if artifact_report.artifact != finalized["artifact"]:
+        raise ValueError("review artifact report names another artifact")
+    if artifact_report.blocking:
+        raise ValueError("review artifact report is blocking")
     latest_round = workflows.read_latest_review_round_ref()
     history = _load_review_history(latest_round, store)
     return ReviewContext(
         artifact=finalized["artifact"],
+        artifact_report=artifact_report_ref,
+        artifact_evidence=artifact_report,
         timeline=timeline_ref,
         check_report=report_ref,
         constraints=constraints_ref,
+        publication_manifest=publication_ref,
+        publication_evidence=publication,
         latest_round=latest_round,
         latest_verdict=None if not history else history[0].verdict,
         width=timeline.width,
@@ -319,6 +353,20 @@ def _load_review_history(
             report = CheckReport.from_canonical_bytes(
                 store.read(verdict.check_report)
             )
+            artifact_report = ArtifactReport.from_canonical_bytes(
+                store.read(verdict.artifact_report)
+            )
+            publication = PublicationManifest.from_canonical_bytes(
+                store.read(verdict.publication_manifest)
+            )
+            if artifact_report.ref != verdict.artifact_report:
+                raise ValueError("review artifact report identity changed")
+            if artifact_report.artifact != verdict.artifact:
+                raise ValueError("review artifact report names another artifact")
+            if artifact_report.blocking:
+                raise ValueError("review artifact report is blocking")
+            if publication.ref != verdict.publication_manifest:
+                raise ValueError("review publication manifest identity changed")
         except (KeyError, TypeError, ValueError) as exc:
             raise CorruptObject("invalid review round lineage") from exc
         entries.append(
@@ -437,6 +485,8 @@ def query_review_task_pack(
         verdict_ref=latest.review_round.verdict,
         verdict=latest.verdict,
         artifact=latest.verdict.artifact,
+        artifact_report=latest.verdict.artifact_report,
+        publication_manifest=latest.verdict.publication_manifest,
         timeline=latest.timeline,
         check_report=latest.verdict.check_report,
         constraints=latest.verdict.constraints,
